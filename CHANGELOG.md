@@ -4,6 +4,16 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.106 — 2026-11-20
+
+- **Quieter Space activity**: Set a personal default for danmaku in General Settings and override it per Space. Live and catch-up danmaku show only human-started Turns. Agent and automation successes no longer trigger completion alerts; failure alerts are unchanged. The Space Turns CLI now shows who initiated each Turn.
+- **Board hosting and playback**: Board stages respect reduced motion and Save-Data by default. Model stills are generated on demand, and saved covers remain available in Save-Data mode. Hosts can reuse the framework-independent `createBoardTransport`, override item activation rules, and opt in to publishing model covers.
+- **Cold prompt cache estimates**: The SDK exports `estimateColdResend`, the same estimator used by the web notice. It estimates the cost of resending context from existing Turns and model pricing, with a configurable notice threshold that defaults to $1.
+
+### Bug Fixes
+
+- System-created sessions are now attributed to automation rather than treated as human activity.
+
 ## v2.105 — 2026-11-19
 
 - **Portable Boards**: Link the same Board from any Space and show tasks or chats from other Spaces on it. Use `client.boards.byId(boardId)` instead of the deprecated `space.board(id)`; `BoardClient.spaceId` has been removed. Read the home Space from Board data or `replica.state`.

@@ -1,5 +1,18 @@
 [
 	{
+		"version": "2.106",
+		"date": "2026-11-20",
+		"tags": ["v2.106.0"],
+		"highlights": [
+			"**Quieter Space activity**: Set a personal default for danmaku in General Settings and override it per Space. Live and catch-up danmaku show only human-started Turns. Agent and automation successes no longer trigger completion alerts; failure alerts are unchanged. The Space Turns CLI now shows who initiated each Turn.",
+			"**Board hosting and playback**: Board stages respect reduced motion and Save-Data by default. Model stills are generated on demand, and saved covers remain available in Save-Data mode. Hosts can reuse the framework-independent `createBoardTransport`, override item activation rules, and opt in to publishing model covers.",
+			"**Cold prompt cache estimates**: The SDK exports `estimateColdResend`, the same estimator used by the web notice. It estimates the cost of resending context from existing Turns and model pricing, with a configurable notice threshold that defaults to $1."
+		],
+		"fixes": [
+			"System-created sessions are now attributed to automation rather than treated as human activity."
+		]
+	},
+	{
 		"version": "2.105",
 		"date": "2026-11-19",
 		"tags": ["v2.105.0"],
