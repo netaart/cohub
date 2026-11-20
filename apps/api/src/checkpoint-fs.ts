@@ -11,8 +11,10 @@ import { checkpoints, spaces } from "@cohub/db";
 import { createLogger } from "@cohub/infra/logging";
 import { getTracer } from "@cohub/infra/tracing/propagator";
 import { isTextMime, mimeTypeForPath, type SpaceFsEntry, type SpaceFsFileResponse, type SpaceFsTreeResponse } from "@cohub/protocol/fs";
+import { createSpaceGitignoreFilter, type SpaceFsVisibility, type SpaceGitignoreFilter } from "@cohub/core/space-fs";
 import { config } from "./config.js";
 import { db } from "./db/index.js";
+import { getSpaceRoot } from "./space-fs.js";
 import { createPresignedGetObjectUrl } from "./object-presign.js";
 import { CheckpointObjectsUnavailableError } from "@cohub/core/checkpoint/storage";
 import { ensureCheckpointObjects } from "./checkpoint-storage.js";
@@ -703,6 +705,11 @@ async function getCachedTree(key: string) {
   }
 }
 
+// Uses the workspace .gitignore read per request, so a rule added later also hides older checkpoints.
+export async function createCheckpointVisibilityFilter(spaceId: string, visibility: SpaceFsVisibility): Promise<SpaceGitignoreFilter | null> {
+  return visibility === "filtered" ? await createSpaceGitignoreFilter(getSpaceRoot(spaceId)) : null;
+}
+
 export async function listCheckpointDirectory(input: { spaceId: string; checkpointId: string; path?: string; pagination?: SpaceFsListOptions }) {
   return await observeCheckpointFs("tree", input, async (observation) => {
     const path = await observeStage(
@@ -877,4 +884,20 @@ export function checkpointFsJsonError(error: unknown) {
   }
   const message = error instanceof Error ? error.message : "Checkpoint file operation failed.";
   return { status: 500, body: { code: "checkpoint_fs_error", message } };
+}
+
+// Drops hidden paths and server storage details from a row's meta unless the viewer has the full file view.
+// `diffs` is dropped, not filtered: its stats and per-file maps are unfiltered; the filtered /fs/diff routes serve that data.
+export async function redactCheckpointForView<T extends { spaceId: string; meta: unknown }>(checkpoint: T, visibility: SpaceFsVisibility | null): Promise<T> {
+  if (visibility === "full" || !checkpoint.meta || typeof checkpoint.meta !== "object") return checkpoint;
+  const filter = visibility === "filtered" ? await createCheckpointVisibilityFilter(checkpoint.spaceId, visibility) : null;
+  const visible = (path: string) => filter !== null && !filter.isIgnored(path);
+  const meta: Record<string, unknown> = { ...(checkpoint.meta as Record<string, unknown>) };
+  delete meta.diffs;
+  delete meta.paths;
+  delete meta.storage;
+  if (Array.isArray(meta.warnings)) {
+    meta.warnings = meta.warnings.filter((warning) => typeof warning?.path !== "string" || visible(warning.path));
+  }
+  return { ...checkpoint, meta };
 }

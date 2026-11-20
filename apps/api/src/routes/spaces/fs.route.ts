@@ -13,7 +13,7 @@ import { FS_CDN_DOWNLOAD_WAIT_TIMEOUT_MS } from "../../space-fs-cdn-constants.js
 import { cdnDownloadUrl } from "../../space-fs-cdn-policy.js";
 import { getOptionalAuth, useAuth, requireValidId, authzDenied } from "../../lib/middleware.js";
 import { jsonWithEtag } from "../../lib/json-etag.js";
-import { hasPermission } from "../../permissions.js";
+import { hasPermission, resolveFileViewVisibility } from "../../permissions.js";
 import { getSpacePendingDiffFile, getSpacePendingDiffSummary } from "../../checkpoint-pending-diff.js";
 import { checkpointFsJsonError } from "../../checkpoint-fs.js";
 import {
@@ -150,12 +150,6 @@ const buildUploadDestinationRoot = (destination: SpaceUploadDestination, uploadI
   if (destination.kind === "sandbox_tmp") return `/tmp/uploads/${uploadId}`;
   return destination.targetDir ? `/workspace/${destination.targetDir}` : "/workspace";
 };
-
-async function resolveFileViewVisibility(user: ReturnType<typeof getOptionalAuth>, spaceId: string): Promise<SpaceFsVisibility | null> {
-  if (await hasPermission(user, "file.view", { spaceId })) return "full";
-  if (await hasPermission(user, "file.view.filtered", { spaceId })) return "filtered";
-  return null;
-}
 
 const MAX_COPY_SOURCES = 1000;
 

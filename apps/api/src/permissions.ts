@@ -5,6 +5,7 @@ import { apps, appViewerGrants, spaceMembers, spaces, type SpaceRole } from "@co
 import type { Permission, AccessPolicy, PermissionAccess } from "@cohub/core/permissions";
 import type { PreviewSessionPrincipal } from "./preview-sessions.js";
 import { hasPreviewSessionPermission } from "./preview-sessions.js";
+import type { SpaceFsVisibility } from "@cohub/core/space-fs";
 import type { AppSessionPrincipal } from "./app-sessions.js";
 import { and, eq } from "drizzle-orm";
 
@@ -326,6 +327,13 @@ export async function hasPermission(
     permission,
     context,
   });
+}
+
+/** Which file view the caller gets: full, filtered by the workspace .gitignore, or none. */
+export async function resolveFileViewVisibility(user: AuthUserProfile | null, spaceId: string): Promise<SpaceFsVisibility | null> {
+  if (await hasPermission(user, "file.view", { spaceId })) return "full";
+  if (await hasPermission(user, "file.view.filtered", { spaceId })) return "filtered";
+  return null;
 }
 
 export async function getRoleForSpaceUser(spaceId: string, userId: string): Promise<SpaceRole | null> {
