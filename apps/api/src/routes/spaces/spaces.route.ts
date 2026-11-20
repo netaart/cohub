@@ -1639,10 +1639,11 @@ router.get("/:id/checkpoints/:checkpointId/fs/tree", async (c) => {
   const spaceId = c.req.param("id");
   const checkpointId = c.req.param("checkpointId");
   if (!requireValidId(spaceId) || (checkpointId !== "latest" && !requireValidId(checkpointId))) return c.json({ code: "checkpoint_not_found", message: "Checkpoint not found." }, 404);
-  if (!(await hasPermission(user, "checkpoint.view", { spaceId }))) return authzDenied(c);
+  const visibility = await resolveCheckpointFsVisibility(user, spaceId);
+  if (!visibility) return authzDenied(c);
 
   try {
-    return c.json(await listCheckpointDirectory({ spaceId, checkpointId, path: c.req.query("path") ?? "", pagination: parseFsPagination(c.req.query()) }));
+    return c.json(await listCheckpointDirectory({ spaceId, checkpointId, path: c.req.query("path") ?? "", pagination: parseFsPagination(c.req.query()), visibility }));
   } catch (error) {
     const { status, body } = checkpointFsJsonError(error);
     return c.json(body, status as never);
@@ -1654,10 +1655,11 @@ router.get("/:id/checkpoints/:checkpointId/fs/file", async (c) => {
   const spaceId = c.req.param("id");
   const checkpointId = c.req.param("checkpointId");
   if (!requireValidId(spaceId) || (checkpointId !== "latest" && !requireValidId(checkpointId))) return c.json({ code: "checkpoint_not_found", message: "Checkpoint not found." }, 404);
-  if (!(await hasPermission(user, "checkpoint.view", { spaceId }))) return authzDenied(c);
+  const visibility = await resolveCheckpointFsVisibility(user, spaceId);
+  if (!visibility) return authzDenied(c);
 
   try {
-    return c.json(await readCheckpointFile({ spaceId, checkpointId, path: c.req.query("path") ?? "" }));
+    return c.json(await readCheckpointFile({ spaceId, checkpointId, path: c.req.query("path") ?? "", visibility }));
   } catch (error) {
     const { status, body } = checkpointFsJsonError(error);
     return c.json(body, status as never);
@@ -1671,7 +1673,8 @@ router.get("/:id/checkpoints/:checkpointId/fs/diff", async (c) => {
   if (!requireValidId(spaceId) || (checkpointId !== "latest" && !requireValidId(checkpointId))) {
     return c.json({ code: "checkpoint_not_found", message: "Checkpoint not found." }, 404);
   }
-  if (!(await hasPermission(user, "checkpoint.view", { spaceId }))) return authzDenied(c);
+  const visibility = await resolveCheckpointFsVisibility(user, spaceId);
+  if (!visibility) return authzDenied(c);
 
   const base = c.req.query("base") ?? null;
   if (base && !requireValidId(base)) {
@@ -1679,7 +1682,7 @@ router.get("/:id/checkpoints/:checkpointId/fs/diff", async (c) => {
   }
 
   try {
-    const summary = await getCheckpointDiffSummary({ spaceId, checkpointId, baseCheckpointId: base });
+    const summary = await getCheckpointDiffSummary({ spaceId, checkpointId, baseCheckpointId: base, visibility });
     // Immutable parent diffs: long private browser cache. Auth still gates origin.
     // Large precomputed payloads use delivery=url (OSS object with public immutable Cache-Control).
     if (summary.precomputed && !base) {
@@ -1702,7 +1705,8 @@ router.get("/:id/checkpoints/:checkpointId/fs/diff/file", async (c) => {
   if (!requireValidId(spaceId) || (checkpointId !== "latest" && !requireValidId(checkpointId))) {
     return c.json({ code: "checkpoint_not_found", message: "Checkpoint not found." }, 404);
   }
-  if (!(await hasPermission(user, "checkpoint.view", { spaceId }))) return authzDenied(c);
+  const visibility = await resolveCheckpointFsVisibility(user, spaceId);
+  if (!visibility) return authzDenied(c);
 
   const path = c.req.query("path") ?? "";
   if (!path) return c.json({ code: "path_invalid", message: "path is required" }, 400);
@@ -1712,7 +1716,7 @@ router.get("/:id/checkpoints/:checkpointId/fs/diff/file", async (c) => {
   }
 
   try {
-    const file = await getCheckpointDiffFile({ spaceId, checkpointId, path, baseCheckpointId: base });
+    const file = await getCheckpointDiffFile({ spaceId, checkpointId, path, baseCheckpointId: base, visibility });
     // Align with summary: long immutable cache only for precomputed parent diffs.
     if (!base && file.precomputed) {
       c.header("Cache-Control", CHECKPOINT_DIFF_CACHE_CONTROL);

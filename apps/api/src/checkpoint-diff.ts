@@ -10,8 +10,10 @@ import type {
   CheckpointDiffStatus,
   CheckpointDiffSummary,
 } from "@cohub/protocol/fs";
+import type { SpaceFsVisibility, SpaceGitignoreFilter } from "@cohub/core/space-fs";
 import {
   CheckpointFsError,
+  createCheckpointVisibilityFilter,
   getCheckpointForSpace,
   resolveCheckpointRepo,
   runGit,
@@ -157,6 +159,13 @@ function emptyStats(): CheckpointDiffStats {
 
 function isSystemPath(path: string) {
   return path === ".cohub/system" || path.startsWith(SYSTEM_PATH_PREFIX);
+}
+
+// A rename is hidden if either side is hidden, so a guest never learns the hidden name from oldPath.
+function isHiddenDiffEntry(entry: { path: string; oldPath?: string | null }, filter: SpaceGitignoreFilter | null) {
+  if (isSystemPath(entry.path) || (entry.oldPath && isSystemPath(entry.oldPath))) return true;
+  if (!filter) return false;
+  return filter.isIgnored(entry.path) || (entry.oldPath ? filter.isIgnored(entry.oldPath) : false);
 }
 
 function accumulateStats(stats: CheckpointDiffStats, file: CheckpointDiffFile) {
@@ -313,7 +322,10 @@ export async function getCheckpointDiffSummary(input: {
   spaceId: string;
   checkpointId: string;
   baseCheckpointId?: string | null;
+  visibility: SpaceFsVisibility;
 }): Promise<CheckpointDiffSummary> {
+  // Filtered views skip the precomputed and cached diffs: both hold unfiltered paths.
+  const filter = await createCheckpointVisibilityFilter(input.spaceId, input.visibility);
   const head = await getCheckpointForSpace(input.spaceId, input.checkpointId);
   const base = await resolveBaseCommit({
     spaceId: input.spaceId,
@@ -327,7 +339,7 @@ export async function getCheckpointDiffSummary(input: {
 
   // Hot path: save-time precomputed parent diff (inline meta or OSS object).
   // Avoids NFS git entirely for the common case.
-  const stored = readParentDiffMeta(head);
+  const stored = filter ? null : readParentDiffMeta(head);
   if (
     stored &&
     isDefaultParentBase({
@@ -341,7 +353,7 @@ export async function getCheckpointDiffSummary(input: {
 
   // Legacy / custom base: compute on demand. Short Redis cache only — not the primary store.
   const key = cacheKey("summary", head.commitHash, base.baseCommitHash);
-  const cached = await readCachedJson<CheckpointDiffSummary>(key);
+  const cached = filter ? null : await readCachedJson<CheckpointDiffSummary>(key);
   if (cached) return { ...cached, delivery: cached.delivery ?? "inline", precomputed: false };
 
   const repoDir = await resolveCheckpointRepo(head.spaceId, diffCommits(head.commitHash, base.baseCommitHash));
@@ -368,7 +380,7 @@ export async function getCheckpointDiffSummary(input: {
   let truncated = false;
 
   for (const entry of nameEntries) {
-    if (isSystemPath(entry.path) || (entry.oldPath && isSystemPath(entry.oldPath))) continue;
+    if (isHiddenDiffEntry(entry, filter)) continue;
     if (files.length >= DIFF_SUMMARY_MAX_FILES) {
       truncated = true;
       const stub: CheckpointDiffFile = {
@@ -401,7 +413,7 @@ export async function getCheckpointDiffSummary(input: {
   if (truncated) {
     const full = emptyStats();
     for (const entry of nameEntries) {
-      if (isSystemPath(entry.path) || (entry.oldPath && isSystemPath(entry.oldPath))) continue;
+      if (isHiddenDiffEntry(entry, filter)) continue;
       const counts = numstatMap.get(entry.path);
       const asset = assets.has(entry.path) || (entry.oldPath ? assets.has(entry.oldPath) : false);
       accumulateStats(full, {
@@ -428,7 +440,7 @@ export async function getCheckpointDiffSummary(input: {
     delivery: "inline",
     precomputed: false,
   };
-  await writeCachedJson(key, response);
+  if (!filter) await writeCachedJson(key, response);
   return response;
 }
 
@@ -455,6 +467,7 @@ export async function getCheckpointDiffFile(input: {
   checkpointId: string;
   path: string;
   baseCheckpointId?: string | null;
+  visibility: SpaceFsVisibility;
 }): Promise<CheckpointDiffFileResponse> {
   const normalizedPath = String(input.path ?? "").replace(/\\/g, "/").replace(/^\/+/, "");
   if (!normalizedPath || normalizedPath.includes("\0") || normalizedPath.split("/").some((part) => !part || part === "." || part === "..")) {
@@ -463,6 +476,10 @@ export async function getCheckpointDiffFile(input: {
   if (isSystemPath(normalizedPath)) {
     throw new CheckpointFsError(400, "path_invalid", "System paths are not included in diffs.");
   }
+
+  const filter = await createCheckpointVisibilityFilter(input.spaceId, input.visibility);
+  const hidden = () => new CheckpointFsError(404, "path_not_found", "File not found in either checkpoint.");
+  if (filter?.isIgnored(normalizedPath)) throw hidden();
 
   const head = await getCheckpointForSpace(input.spaceId, input.checkpointId);
   const base = await resolveBaseCommit({
@@ -476,7 +493,7 @@ export async function getCheckpointDiffFile(input: {
   });
 
   // Hot path: save-time precomputed file patch for parent comparison.
-  const storedParent = readParentDiffMeta(head);
+  const storedParent = filter ? null : readParentDiffMeta(head);
   if (
     storedParent?.files &&
     isDefaultParentBase({
@@ -497,7 +514,12 @@ export async function getCheckpointDiffFile(input: {
   }
 
   const key = cacheKey("file", head.commitHash, base.baseCommitHash, normalizedPath);
-  const cached = await readCachedJson<CheckpointDiffFileResponse>(key);
+  const cached = filter ? null : await readCachedJson<CheckpointDiffFileResponse>(key);
+  // Per-commit cache holds unfiltered content, so filtered responses are not cached.
+  const remember = async (response: CheckpointDiffFileResponse) => {
+    if (!filter) await writeCachedJson(key, response);
+    return response;
+  };
   if (cached) return { ...cached, delivery: cached.delivery ?? "inline" };
 
   const repoDir = await resolveCheckpointRepo(head.spaceId, diffCommits(head.commitHash, base.baseCommitHash));
@@ -524,6 +546,8 @@ export async function getCheckpointDiffFile(input: {
     // Fall through — file may still have content on one side.
   }
 
+  if (filter?.isIgnored(headPath) || (oldPath && filter?.isIgnored(oldPath))) throw hidden();
+
   const basePath = oldPath && (status === "R" || status === "C") ? oldPath : normalizedPath;
 
   const [baseResult, headResult] = await Promise.all([
@@ -546,8 +570,7 @@ export async function getCheckpointDiffFile(input: {
       truncated: true,
       lines: [],
     };
-    await writeCachedJson(key, response);
-    return response;
+    return await remember(response);
   }
 
   const baseBlob = baseResult.kind === "ok" ? baseResult.buffer : null;
@@ -588,8 +611,7 @@ export async function getCheckpointDiffFile(input: {
       truncated: false,
       lines: [],
     };
-    await writeCachedJson(key, response);
-    return response;
+    return await remember(response);
   }
 
   // Binary detection: null byte in either side.
@@ -609,8 +631,7 @@ export async function getCheckpointDiffFile(input: {
       truncated: false,
       lines: [],
     };
-    await writeCachedJson(key, response);
-    return response;
+    return await remember(response);
   }
 
   // Size guard before requesting the full patch.
@@ -629,8 +650,7 @@ export async function getCheckpointDiffFile(input: {
       truncated: true,
       lines: [],
     };
-    await writeCachedJson(key, response);
-    return response;
+    return await remember(response);
   }
 
   let lines: CheckpointDiffPatchLine[] = [];
@@ -693,8 +713,7 @@ export async function getCheckpointDiffFile(input: {
           truncated: true,
           lines: [],
         };
-        await writeCachedJson(key, response);
-        return response;
+        return await remember(response);
       }
       throw error;
     }
@@ -715,8 +734,7 @@ export async function getCheckpointDiffFile(input: {
     truncated,
     lines,
   };
-  await writeCachedJson(key, response);
-  return response;
+  return await remember(response);
 }
 
 // Re-export helpers used by pending-diff.
