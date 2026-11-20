@@ -71,7 +71,7 @@ export type SessionInitiator = (typeof SESSION_INITIATORS)[number];
 export const isSessionInitiator = (value: unknown): value is SessionInitiator =>
   (SESSION_INITIATORS as readonly unknown[]).includes(value);
 
-const AUTOMATION_SOURCES = new Set(["scheduled_task", "space_hook", "public_api", "websocket", "app"]);
+const AUTOMATION_SOURCES = new Set(["scheduled_task", "space_hook", "public_api", "websocket", "app", "system"]);
 const AUTOMATION_CONTEXTS = new Set(["scheduled_task", "space_hook", "background_bash_task"]);
 const AUTOMATION_ORIGINS = new Set(["scheduled_prompt", "background_task", "hook"]);
 
