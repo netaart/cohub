@@ -72,7 +72,9 @@ import kotlin.coroutines.resume
 class MainActivity : ComponentActivity(), HostActions {
 
     private lateinit var auth: AuthSession
-    private lateinit var runtime: DeviceRuntime
+    private val runtime: DeviceRuntime? by lazy {
+        if (BuildConfig.PLAY_BUILD) null else app.runtime
+    }
     private lateinit var bridge: HostBridge
     private lateinit var lastPage: LastPage
     private lateinit var container: SurfaceContainer
@@ -165,16 +167,15 @@ class MainActivity : ComponentActivity(), HostActions {
         applyAppearance()
 
         auth = app.auth
-        runtime = app.runtime
         lastPage = app.lastPage
         bridge = HostBridge(
             scope = lifecycleScope,
             auth = auth,
             actions = this,
-            runtime = runtime.takeIf { it.available },
+            runtime = runtime?.takeIf { it.available },
             files = app.files,
             display = app.display,
-            workspaces = app.workspaces.takeIf { runtime.available },
+            workspaces = runtime?.takeIf { it.available }?.let { app.workspaces },
         )
         fileChooser = FileChooser(this)
         mediaCapture = MediaCapture(this)
@@ -189,11 +190,11 @@ class MainActivity : ComponentActivity(), HostActions {
         screenCapture = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             pendingCapture?.complete(result.data?.takeIf { result.resultCode == RESULT_OK }?.let { ScreenCaptureGrant(result.resultCode, it) })
         }
-        hostPermissions = HostPermissions(this, runtime.takeIf { it.available }?.let { it::hasStorageAccess }, ::prepareRuntime)
+        hostPermissions = HostPermissions(this, runtime?.takeIf { it.available }?.let { it::hasStorageAccess }, ::prepareRuntime)
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                runtime.instances.collect { bridge.emit(HostProtocol.Events.RUNTIME_CHANGED, it.toJson()) }
+                runtime?.instances?.collect { bridge.emit(HostProtocol.Events.RUNTIME_CHANGED, it.toJson()) }
             }
         }
         lifecycleScope.launch {
@@ -233,7 +234,7 @@ class MainActivity : ComponentActivity(), HostActions {
 
     private fun mountSurface(path: String) {
         WebWarmup.prefetch(path)
-        val next = WebSurface(this, surfaceListener, app.workspaces.takeIf { runtime.available })
+        val next = WebSurface(this, surfaceListener, runtime?.takeIf { it.available }?.let { app.workspaces })
         next.setBackgroundColor(appearance.backgroundColor)
         // Without the bridge the surface still runs on its browser path; this
         // only explains missing features.
@@ -270,7 +271,7 @@ class MainActivity : ComponentActivity(), HostActions {
         super.onStart()
         lifecycleScope.launch {
             auth.load()
-            withStarted { runtime.resume() }
+            withStarted { runtime?.resume() }
         }
         if (surfaceLost) {
             surfaceLost = false
@@ -380,7 +381,7 @@ class MainActivity : ComponentActivity(), HostActions {
 
     override fun showAbout(web: String?) {
         val version = listOf(BuildConfig.VERSION_NAME, BuildConfig.COMMIT).filter { it.isNotEmpty() }.joinToString(" · ")
-        val cli = if (runtime.cli.bundled) BuildConfig.CLI_VERSION else getString(R.string.about_cli_unavailable)
+        val cli = if (runtime?.cli?.bundled == true) BuildConfig.CLI_VERSION else getString(R.string.about_cli_unavailable)
         AlertDialog.Builder(this)
             .setTitle(R.string.about_title)
             .setMessage(getString(R.string.about_message, version, web.orEmpty(), cli))
@@ -435,7 +436,8 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     override suspend fun prepareRuntime(): Boolean = preparing.withLock {
-        if (!confirmRuntimeConsent()) return@withLock false
+        val runtime = runtime ?: return@withLock false
+        if (!confirmRuntimeConsent(runtime)) return@withLock false
         if (runtime.hasStorageAccess()) return@withLock true
         try {
             awaitResult(
@@ -448,7 +450,7 @@ class MainActivity : ComponentActivity(), HostActions {
         runtime.hasStorageAccess()
     }
 
-    private suspend fun confirmRuntimeConsent(): Boolean {
+    private suspend fun confirmRuntimeConsent(runtime: DeviceRuntime): Boolean {
         if (hostPrefs.getBoolean(KEY_RUNTIME_CONSENT, false)) return true
         val allowed = runtime.instances.value.isNotEmpty() || suspendCancellableCoroutine { result ->
             val dialog = AlertDialog.Builder(this)

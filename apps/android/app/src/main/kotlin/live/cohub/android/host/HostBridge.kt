@@ -132,7 +132,7 @@ class HostBridge(
             put(
                 "capabilities",
                 buildJsonArray {
-                    HostCapabilities.advertised(runtime = runtime != null && display != null, files = files != null)
+                    HostCapabilities.advertised(runtime = runtime != null, files = files != null, display = display != null)
                         .forEach { add(JsonPrimitive(it)) }
                 },
             )

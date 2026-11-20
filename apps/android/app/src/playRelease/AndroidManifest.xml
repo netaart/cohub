@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:node="remove" tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" tools:node="remove" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:node="remove" tools:ignore="ProtectedPermissions" />
+    <application>
+        <service android:name=".display.ControlService" tools:node="remove" tools:targetApi="34" />
+        <service android:name=".runtime.RuntimeService" tools:node="remove" />
+        <provider android:name=".helper.HelperHandoff" tools:node="remove" tools:targetApi="34" />
+        <receiver android:name=".helper.PhoneControl$PairingReceiver" tools:node="remove" tools:targetApi="34" />
+        <receiver android:name=".helper.PhoneControl$HandoverReceiver" tools:node="remove" tools:targetApi="34" />
+    </application>
+</manifest>
