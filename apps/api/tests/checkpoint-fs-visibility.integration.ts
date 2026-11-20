@@ -11,11 +11,12 @@ const spaceId = "space";
 const workspace = join(root, spaceId, "workspace");
 const repo = join(root, spaceId, "repo");
 const checkpoint = { id: "checkpoint", spaceId, commitHash: "", createdAt: new Date(0), parentCheckpointId: null };
+let active = checkpoint;
 const cache = new Map<string, string>();
 const mocks = [
   mock.module("../src/config.js", { exports: { config: { spaceStorageRoot: root, spaceSystemRoot: root } } }),
   mock.module("../src/db/index.js", { exports: { db: {
-    select: () => ({ from: () => ({ where: () => ({ limit: async () => [checkpoint] }) }) }),
+    select: () => ({ from: () => ({ where: () => ({ limit: async () => [active] }) }) }),
   } } }),
   mock.module("../src/redis.js", { exports: { redisCommandClient: {
     get: async (key: string) => cache.get(key) ?? null,
@@ -92,4 +93,39 @@ test("guest diff of a visible file still works after owner reads populated the c
   const diff = await getCheckpointDiffFile({ spaceId, checkpointId: checkpoint.id, path: VISIBLE, visibility: guest });
   assert.equal(diff.status, "A");
   assert.equal(diff.newSize, 3);
+});
+
+test("reads of a checkpoint committed before a .gitignore rule are filtered by the current rule", async () => {
+  const late = ".cohub/late.txt";
+  const c3 = { ...checkpoint, id: "c3" };
+  const c4 = { ...checkpoint, id: "c4" };
+  await writeFile(join(workspace, ".gitignore"), "");
+  await writeFile(join(repo, late), "LATE");
+  git(repo, "add", late);
+  git(repo, "commit", "-q", "-m", "c3");
+  c3.commitHash = git(repo, "rev-parse", "HEAD");
+  await writeFile(join(workspace, ".gitignore"), `${late}\n`);
+  git(repo, "rm", "-q", late);
+  git(repo, "commit", "-q", "-m", "c4");
+  c4.commitHash = git(repo, "rev-parse", "HEAD");
+
+  active = c3;
+  assert.equal((await readCheckpointFile({ spaceId, checkpointId: "c3", path: late, visibility: owner })).content, "LATE");
+  assert.ok((await listCheckpointDirectory({ spaceId, checkpointId: "c3", path: ".cohub", visibility: owner })).entries.some((entry) => entry.name === "late.txt"));
+  assert.equal((await getCheckpointDiffFile({ spaceId, checkpointId: "c3", path: late, visibility: owner })).status, "A");
+  assert.ok([...cache.keys()].some((key) => key.startsWith("checkpoint-fs:blob:v1:c3:")), "owner read populated the C3 blob cache");
+
+  await assert.rejects(readCheckpointFile({ spaceId, checkpointId: "c3", path: late, visibility: guest }), notFound);
+  const guestTree = await listCheckpointDirectory({ spaceId, checkpointId: "c3", path: ".cohub", visibility: guest });
+  assert.deepEqual(guestTree.entries.map((entry) => entry.name).sort(), ["normal.txt", "secret.txt"]);
+  await assert.rejects(getCheckpointDiffFile({ spaceId, checkpointId: "c3", path: late, visibility: guest }), notFound);
+  const guestSummary = await getCheckpointDiffSummary({ spaceId, checkpointId: "c3", visibility: guest });
+  assert.ok(!guestSummary.files.some((file) => file.path === late));
+
+  active = c4;
+  await assert.rejects(readCheckpointFile({ spaceId, checkpointId: "c4", path: late, visibility: guest }), notFound);
+  await assert.rejects(readCheckpointFile({ spaceId, checkpointId: "c4", path: late, visibility: owner }), notFound);
+
+  active = c3;
+  assert.equal((await readCheckpointFile({ spaceId, checkpointId: "c3", path: late, visibility: owner })).content, "LATE");
 });
