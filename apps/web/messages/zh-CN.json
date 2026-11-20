@@ -2874,7 +2874,7 @@
 	"chats_kind_group_channels": "Channel",
 	"chats_kind_group_automations": "触发方式",
 	"session_initiator_root": "发起方",
-	"session_initiator_human": "人工",
+	"session_initiator_human": "人类",
 	"session_initiator_agent": "Agent",
 	"session_initiator_automation": "自动化",
 	"session_source_root": "来源",
