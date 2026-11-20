@@ -101,11 +101,10 @@
           resolved = 'dark';
         }
         document.documentElement.setAttribute('data-theme', resolved);
-        // Start Figtree's Latin file with the theme (same URL as its @font-face).
         if (resolved === 'neta-pixel' || resolved === 'neta-pixel-dark') {
           document.head.appendChild(Object.assign(document.createElement('link'), {
             rel: 'preload', as: 'font', type: 'font/woff2', crossOrigin: '',
-            href: '/fonts/figtree-latin-wght-normal.woff2'
+            href: '%figtree-latin-url%'
           }));
         }
         document.querySelector('meta[name="theme-color"]')?.setAttribute(

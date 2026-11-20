@@ -1,4 +1,5 @@
 import type { Handle } from "@sveltejs/kit/hooks";
+import figtreeLatinUrl from "@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2?url";
 import { resolvePublicLocale } from "#lib/i18n/public-locale.ts";
 import {
 	isPublicSharePath,
@@ -30,10 +31,12 @@ function resolveHtmlLang(pathname: string, html: string): string {
 export const handle: Handle = async ({ event, resolve }) => {
 	const response = await resolve(event, {
 		transformPageChunk: ({ html }) =>
-			html.replace(
-				/<html lang="[^"]*">/,
-				`<html lang="${resolveHtmlLang(event.url.pathname, html)}">`,
-			),
+			html
+				.replace(
+					/<html lang="[^"]*">/,
+					`<html lang="${resolveHtmlLang(event.url.pathname, html)}">`,
+				)
+				.replace("%figtree-latin-url%", figtreeLatinUrl),
 	});
 
 	// error() paths drop load setHeaders(); apply a short public 404 cache here.
