@@ -14,6 +14,7 @@ import { ensureSandboxConnection } from "./sandbox-pool.js";
 import { createSandboxCodingTools } from "./sandbox/tools.js";
 import { CohubModelRegistry, type CohubModel } from "./runtime/model-registry.js";
 import { resolveBatchContextWindow } from "./runtime/batch-limit.js";
+import { resolveSpaceBotPromptModel } from "./runtime/space-bot-model.js";
 import { loadRuntimeModelsConfigs } from "./runtime/models-loader.js";
 import { loadImageToTextConfig } from "./runtime/model-tasks-config.js";
 import { loadSpaceEnvSnapshot } from "./runtime/env-cache.js";
@@ -612,6 +613,11 @@ async function prepareHandle(input: {
       return null;
     }),
   ]);
+  const request = await resolveSpaceBotPromptModel(input.spaceId, {
+    requestedModel: input.requestedModel,
+    requestedThinkingLevel: input.requestedThinkingLevel,
+    requestedContextWindow: input.requestedContextWindow,
+  }, modelRegistry);
   const handle = await loadOrCreateSessionHandle({
     spaceId: input.spaceId,
     sessionId: input.sessionId,
@@ -619,7 +625,7 @@ async function prepareHandle(input: {
     modelRegistry,
     imageToTextConfig,
     tools,
-    model: input.requestedModel,
+    model: request.requestedModel,
     beforeTurnSequence: input.beforeTurnSequence,
     sessionHandles,
   });
@@ -629,9 +635,9 @@ async function prepareHandle(input: {
     spaceOwnerUserId: handle.spaceOwnerUserId,
     modelRegistry,
     imageToTextConfig,
-    requestedModel: input.requestedModel,
-    requestedThinkingLevel: input.requestedThinkingLevel,
-    requestedContextWindow: input.requestedContextWindow,
+    requestedModel: request.requestedModel,
+    requestedThinkingLevel: request.requestedThinkingLevel,
+    requestedContextWindow: request.requestedContextWindow,
   });
 
   return handle;
