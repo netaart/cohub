@@ -111,7 +111,7 @@ test("checkpoint pagination reads uncapped trees and reuses the versioned full-t
   git("add", ".");
   checkpoint.commitHash = git("write-tree");
   const { listCheckpointDirectory } = await import("../src/checkpoint-fs.js");
-  const input = { spaceId: "space", checkpointId: checkpoint.id };
+  const input = { spaceId: "space", checkpointId: checkpoint.id, visibility: "full" as const };
   const tree = await listCheckpointDirectory(input);
   assert.equal(tree.entries.length, 1001);
   assert.ok([...cache.keys()].some((key) => key.startsWith("checkpoint-fs:tree:v2:")));

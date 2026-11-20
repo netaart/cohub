@@ -710,7 +710,7 @@ export async function createCheckpointVisibilityFilter(spaceId: string, visibili
   return visibility === "filtered" ? await createSpaceGitignoreFilter(getSpaceRoot(spaceId)) : null;
 }
 
-export async function listCheckpointDirectory(input: { spaceId: string; checkpointId: string; path?: string; pagination?: SpaceFsListOptions }) {
+export async function listCheckpointDirectory(input: { spaceId: string; checkpointId: string; path?: string; pagination?: SpaceFsListOptions; visibility: SpaceFsVisibility }) {
   return await observeCheckpointFs("tree", input, async (observation) => {
     const path = await observeStage(
       observation,
@@ -720,6 +720,8 @@ export async function listCheckpointDirectory(input: { spaceId: string; checkpoi
       (normalized) => pathTelemetry(normalized),
     );
     observation.normalizedPath = path;
+    const filter = await createCheckpointVisibilityFilter(input.spaceId, input.visibility);
+    if (filter?.isIgnored(path, { isDirectory: true })) throw new CheckpointFsError(404, "path_not_found", "File or directory not found.");
 
     const checkpoint = await getCheckpointForSpace(input.spaceId, input.checkpointId, observation);
     const repoDir = await observeStage(
@@ -729,9 +731,12 @@ export async function listCheckpointDirectory(input: { spaceId: string; checkpoi
       () => resolveCheckpointRepo(checkpoint.spaceId, [checkpoint.commitHash]),
       () => ({ repoConfigured: Boolean(config.spaceSystemRoot) }),
     );
-    const finish = (tree: SpaceFsTreeResponse) => input.pagination
-      ? pageDirectory(tree, JSON.stringify([input.spaceId, path]), input.pagination, { version: checkpoint.id })
-      : tree;
+    const finish = (tree: SpaceFsTreeResponse) => {
+      const shown = filter ? { ...tree, entries: tree.entries.filter((entry) => !filter.isIgnored(entry.path, { isDirectory: entry.type === "dir" })) } : tree;
+      return input.pagination
+        ? pageDirectory(shown, JSON.stringify([input.spaceId, path]), input.pagination, { version: checkpoint.id })
+        : shown;
+    };
     const key = cacheKey("tree", checkpoint.id, path);
     const cached = await observeStage(
       observation,
@@ -793,7 +798,7 @@ export async function listCheckpointDirectory(input: { spaceId: string; checkpoi
   });
 }
 
-export async function readCheckpointFile(input: { spaceId: string; checkpointId: string; path?: string }): Promise<SpaceFsFileResponse> {
+export async function readCheckpointFile(input: { spaceId: string; checkpointId: string; path?: string; visibility: SpaceFsVisibility }): Promise<SpaceFsFileResponse> {
   return await observeCheckpointFs("file", input, async (observation) => {
     const path = await observeStage(
       observation,
@@ -803,6 +808,8 @@ export async function readCheckpointFile(input: { spaceId: string; checkpointId:
       (normalized) => pathTelemetry(normalized),
     );
     observation.normalizedPath = path;
+    const filter = await createCheckpointVisibilityFilter(input.spaceId, input.visibility);
+    if (filter?.isIgnored(path)) throw new CheckpointFsError(404, "path_not_found", "File or directory not found.");
 
     const checkpoint = await getCheckpointForSpace(input.spaceId, input.checkpointId, observation);
     const repoDir = await observeStage(

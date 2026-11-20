@@ -56,7 +56,7 @@ async function loadModCheckpointPreferences(modSpaceId: string, checkpoint: Awai
   const source = `mod:${modSpaceId}`;
   const revision = checkpoint.commitHash;
   try {
-    const file = await readCheckpointFile({ spaceId: modSpaceId, checkpointId: checkpoint.id, path: SANDBOX_CONFIG_PATH });
+    const file = await readCheckpointFile({ spaceId: modSpaceId, checkpointId: checkpoint.id, path: SANDBOX_CONFIG_PATH, visibility: "full" });
     if (file.delivery === "url" || file.kind !== "text" || file.size > 16_384) throw new Error("Sandbox config must be text of at most 16 KiB");
     return { source, revision, preferences: parseSandboxPreferences(JSON.parse(file.content), true) };
   } catch (error) {

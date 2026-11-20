@@ -97,7 +97,7 @@ test("checkpoint row keeps diff patch text only for the full file view", async (
 
 test("diff summary payload has paths, status and sizes, never patch lines", async () => {
   rows = [checkpoint];
-  const summary = await getCheckpointDiffSummary({ spaceId, checkpointId: checkpoint.id });
+  const summary = await getCheckpointDiffSummary({ spaceId, checkpointId: checkpoint.id, visibility: "full" });
   const payload = JSON.stringify(summary);
   assert.equal(payload.includes(PATCH_TEXT), false);
   assert.equal(payload.includes('"lines"'), false);
