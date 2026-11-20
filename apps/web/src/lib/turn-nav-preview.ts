@@ -1,3 +1,4 @@
+import { resolveHarness } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type {
 	SessionTurnAuthorProfile,
@@ -212,8 +213,10 @@ export function turnRecordToIndexItem(
 		sourceSessionId: turn.sourceSessionId,
 		sourceTurnId: turn.sourceTurnId,
 		sequence: turn.sequence,
+		executionKind: turn.executionKind,
 		status: turn.status,
 		intent: turn.intent,
+		harness: resolveHarness(turn.meta),
 		userUuid: turn.userUuid,
 		authorProfile: turn.authorProfile ?? null,
 		startedAt: turn.startedAt,
@@ -228,6 +231,7 @@ export function turnRecordToIndexItem(
 		provider: turn.provider,
 		model: turn.model,
 		finalUsage: turn.finalUsage,
+		finalUsageIsTotal: turn.finalUsageIsTotal,
 		totalUsage: turn.totalUsage,
 		errorMessage: turn.errorMessage,
 	};

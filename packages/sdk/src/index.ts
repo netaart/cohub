@@ -98,6 +98,8 @@ export type { LikeResourceType } from "@cohub/protocol";
 export { readTurnSpeech, SPEECH_CONFIG_PATH } from "@cohub/protocol";
 export type { SpeakTurnResponse, SpeechConfig, SpeechVoice, TurnSpeech, TurnSpeechSegment } from "@cohub/protocol";
 export { parseSpaceRef } from "./space-ref.js";
+export { estimateColdResend } from "./prompt-cache.js";
+export type { ColdResendEstimate, ColdResendTurn } from "./prompt-cache.js";
 export { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 export { SESSION_ARCHIVED_LABEL_SYSTEM_KEY } from "@cohub/protocol/model";
 export {

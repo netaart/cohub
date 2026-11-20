@@ -1,9 +1,9 @@
 <script lang="ts">
+import type { ColdResendEstimate } from "@neta-art/cohub";
 import { Shrink, TimerOff, X } from "lucide-svelte";
 import { formatTokenCount, formatUsageCost } from "#lib/format-usage.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
-import type { ColdResend } from "./prompt-cache.ts";
 
 let {
 	coldResend,
@@ -11,7 +11,7 @@ let {
 	oncompactfirst,
 	ondismiss,
 }: {
-	coldResend: ColdResend | null;
+	coldResend: ColdResendEstimate | null;
 	compactFirst: boolean;
 	oncompactfirst: (value: boolean) => void;
 	ondismiss: () => void;
@@ -40,7 +40,7 @@ const actionClass =
 					{m.session_cache_cold(
 						{
 							tokens: formatTokenCount(coldResend.contextTokens),
-							cost: formatUsageCost(coldResend.cost, locale),
+							cost: formatUsageCost(coldResend.costUsd, locale),
 						},
 						{ locale },
 					)}

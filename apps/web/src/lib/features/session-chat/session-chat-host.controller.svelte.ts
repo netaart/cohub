@@ -20,6 +20,7 @@ import {
 } from "@cohub/protocol/model";
 import type { ChannelEnvelope } from "@cohub/protocol/realtime";
 import {
+	estimateColdResend,
 	extractBillingPayload,
 	type HarnessKind,
 	HttpError,
@@ -145,7 +146,6 @@ import {
 	shouldClearActiveSessionForNewDraft,
 	shouldClearResolvedNewSessionOnRoute,
 } from "./new-chat-draft-isolation.ts";
-import { estimateColdResend } from "./prompt-cache.ts";
 import {
 	createSessionComposerController,
 	revokeComposerAttachmentPreview,
@@ -805,16 +805,18 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			composerHarness === "cohub" &&
 			!activeSessionIsRunning,
 	);
-	const coldResendEstimate = $derived.by(() =>
-		coldResendEligible
-			? estimateColdResend(
-					// Loaded turns first: they win sequence ties against the index.
-					[...(activeSessionState?.turns ?? EMPTY_TURNS), ...activeTurnIndex],
-					activeSessionModel,
-					modelsCatalog,
-				)
-			: null,
-	);
+	const coldResendEstimate = $derived.by(() => {
+		if (!coldResendEligible || !activeSessionModel) return null;
+		const { provider, id } = activeSessionModel;
+		const selected = modelsCatalog?.find(
+			(item) => item.provider === provider && item.id === id,
+		);
+		if (!selected) return null;
+		return estimateColdResend(
+			[...(activeSessionState?.turns ?? EMPTY_TURNS), ...activeTurnIndex],
+			selected,
+		);
+	});
 	const coldResend = $derived(
 		coldResendEstimate &&
 			activeSessionId &&

@@ -147,6 +147,7 @@ export async function listSpaceTurns(input: {
       executionKind: sessionTurns.executionKind,
       status: sessionTurns.status,
       intent: sessionTurns.intent,
+      harness: sql<string | null>`${sessionTurns.meta}->>'harness'`,
       userUuid: sessionTurns.userUuid,
       initiator: sql<string | null>`${sessionTurns.meta}->>'initiator'`,
       startedAt: sessionTurns.startedAt,

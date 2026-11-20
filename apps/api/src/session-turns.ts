@@ -12,7 +12,7 @@ import type {
   StoredToolCall,
   TurnIntermediateMessagesFile,
 } from "@cohub/protocol/model";
-import { isModelThinkingLevel, type ModelThinkingLevel } from "@cohub/protocol";
+import { isModelThinkingLevel, type ModelThinkingLevel, resolveHarness } from "@cohub/protocol";
 import { db } from "./db/index.js";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
 import { addSessionParticipantMeta, interruptedSummaryPatch, interruptedTurnUsage, summarizeSessionTurnCompactions } from "@cohub/core/sessions";
@@ -191,6 +191,7 @@ const toTurnRecord = (row: typeof sessionTurns.$inferSelect): SessionTurnRecord 
   stopReason: row.stopReason ?? null,
   errorMessage: row.errorMessage ?? null,
   finalUsage: row.finalUsage ?? row.totalUsage ?? null,
+  finalUsageIsTotal: row.finalUsage == null && row.totalUsage != null,
   totalUsage: row.totalUsage ?? row.finalUsage ?? null,
   summary: row.summary ?? null,
   intermediateIndex: row.intermediateIndex ?? null,
@@ -224,6 +225,7 @@ export type SessionTurnIndexRow = {
   executionKind?: SessionTurnExecutionKind;
   status: SessionTurnStatus;
   intent: SessionTurnIntent;
+  harness: string | null;
   userUuid: string | null;
   startedAt: Date | string | null;
   completedAt: Date | string | null;
@@ -246,6 +248,7 @@ export const toTurnIndexItem = (row: SessionTurnIndexRow): SessionTurnIndexItem 
   executionKind: row.executionKind,
   status: row.status,
   intent: row.intent,
+  harness: resolveHarness({ harness: row.harness }),
   userUuid: row.userUuid ?? null,
   startedAt: row.startedAt ? toIso(row.startedAt) : null,
   completedAt: row.completedAt ? toIso(row.completedAt) : null,
@@ -257,6 +260,7 @@ export const toTurnIndexItem = (row: SessionTurnIndexRow): SessionTurnIndexItem 
   provider: row.provider ?? null,
   model: row.model ?? null,
   finalUsage: row.finalUsage ?? row.totalUsage ?? null,
+  finalUsageIsTotal: row.finalUsage == null && row.totalUsage != null,
   totalUsage: row.totalUsage ?? row.finalUsage ?? null,
   errorMessage: previewText(row.errorMessage, 220),
 });
@@ -389,6 +393,7 @@ export const listSessionTurnIndex = async (sessionId: string, options?: { cursor
       executionKind: sessionTurns.executionKind,
       status: sessionTurns.status,
       intent: sessionTurns.intent,
+      harness: sql<string | null>`${sessionTurns.meta}->>'harness'`,
       userUuid: sessionTurns.userUuid,
       startedAt: sessionTurns.startedAt,
       completedAt: sessionTurns.completedAt,

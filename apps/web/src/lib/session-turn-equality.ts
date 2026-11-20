@@ -29,6 +29,7 @@ export function areSessionTurnRecordsEqual(
 		current.model === next.model &&
 		current.stopReason === next.stopReason &&
 		current.errorMessage === next.errorMessage &&
+		current.finalUsageIsTotal === next.finalUsageIsTotal &&
 		current.startedAt === next.startedAt &&
 		current.completedAt === next.completedAt &&
 		current.durationMs === next.durationMs &&

@@ -19,7 +19,7 @@ export function toTurnRecord(row: typeof sessionTurns.$inferSelect): SessionTurn
     userContent: row.userContent, userText: row.userText ?? null,
     assistantContent: row.assistantContent ?? null, assistantText: row.assistantText ?? null,
     provider: row.provider ?? null, model: row.model ?? null, stopReason: row.stopReason ?? null,
-    errorMessage: row.errorMessage ?? null, finalUsage: row.finalUsage ?? null, totalUsage: row.totalUsage ?? null,
+    errorMessage: row.errorMessage ?? null, finalUsage: row.finalUsage ?? null, finalUsageIsTotal: false, totalUsage: row.totalUsage ?? null,
     summary: row.summary ?? null, intermediateIndex: row.intermediateIndex ?? null,
     intermediateSummary: row.intermediateSummary ?? null,
     meta: row.meta && typeof row.meta === "object" && !Array.isArray(row.meta) ? row.meta as Record<string, unknown> : null,

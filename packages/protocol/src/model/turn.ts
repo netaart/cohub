@@ -4,6 +4,7 @@ import type { ModelThinkingLevel } from "./thinking.js";
 import type { BillingPayload } from "../billing.js";
 import type { SessionInitiator } from "../session-attribution.js";
 import type { HarnessArchiveIndex } from "../runtime/index.js";
+import type { HarnessKind } from "../runtime/harnesses.js";
 export type { HarnessArchiveIndex } from "../runtime/index.js";
 
 export type SessionTurnStatus =
@@ -172,8 +173,9 @@ export type SessionTurnIndexItem = {
   sequence: number;
   status: SessionTurnStatus;
   executionKind?: SessionTurnExecutionKind;
-  /** Present on current turn index payloads; older caches may omit it. */
+  /** Present on current turn index payloads; older caches may omit them. */
   intent?: SessionTurnIntent;
+  harness?: HarnessKind;
   userUuid?: string | null;
   authorProfile?: SessionTurnAuthorProfile | null;
   startedAt: string | null;
@@ -186,6 +188,8 @@ export type SessionTurnIndexItem = {
   provider: string | null;
   model: string | null;
   finalUsage: Usage | null;
+  /** Whether finalUsage fell back to cumulative turn usage. */
+  finalUsageIsTotal?: boolean;
   totalUsage: Usage | null;
   errorMessage: string | null;
 };
@@ -230,6 +234,8 @@ export type SessionTurnRecord = {
   stopReason: string | null;
   errorMessage: string | null;
   finalUsage: Usage | null;
+  /** Whether finalUsage fell back to cumulative turn usage. */
+  finalUsageIsTotal?: boolean;
   totalUsage: Usage | null;
   summary: SessionTurnSummary | null;
   intermediateIndex: SessionTurnIntermediateIndex | null;

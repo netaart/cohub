@@ -140,6 +140,7 @@ export const toRealtimeTurnRecord = (turn: SessionTurnRecord): RealtimeTurnRecor
   stopReason: turn.stopReason,
   errorMessage: turn.errorMessage,
   finalUsage: turn.finalUsage,
+  finalUsageIsTotal: turn.finalUsageIsTotal,
   totalUsage: turn.totalUsage,
   summary: turn.summary,
   intermediateIndex: turn.intermediateIndex,

@@ -696,6 +696,7 @@ export const persistMessageNode = async (input: PersistMessageInput & { message:
           stopReason: turnRow.stopReason ?? null,
           errorMessage: turnRow.errorMessage ?? null,
           finalUsage: turnRow.finalUsage ?? null,
+          finalUsageIsTotal: false,
           totalUsage: turnRow.totalUsage ?? null,
           summary: turnRow.summary ?? null,
           intermediateIndex: turnRow.intermediateIndex ?? null,

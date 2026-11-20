@@ -599,6 +599,7 @@ export type RealtimeTurnRecord = Partial<Pick<
   | "stopReason"
   | "errorMessage"
   | "finalUsage"
+  | "finalUsageIsTotal"
   | "totalUsage"
   | "summary"
   | "intermediateIndex"

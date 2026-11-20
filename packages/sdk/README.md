@@ -95,6 +95,28 @@ await session.messages.send({
 });
 ```
 
+### Cold prompt cache estimates
+
+Use the Turns and selected model catalog entry you already have. The SDK makes
+no requests and does not trigger compaction.
+
+```ts
+import { estimateColdResend } from "@neta-art/cohub";
+
+const estimate = estimateColdResend(turns, selectedModelEntry, { minCostUsd: 0.5 });
+const shouldShowNotice = estimate !== null && Date.now() >= estimate.expiresAt;
+```
+
+`minCostUsd` is an inclusive display threshold (default: `1`). It must be a
+finite, non-negative number; other values throw `RangeError`. If you combine
+full Turns and index items, pass the full Turns first.
+
+The estimate returns `costUsd`, `contextTokens`, `expiresAt` (Unix milliseconds), and `turnId`
+for dismissing the notice. A model switch is treated as a cold cache. If there
+isn't enough usage, pricing, or cache lifetime data, the helper returns `null`.
+If the user chooses to compact, pass `compactFirst: true` with the next
+immediate agent message to the existing Cohub chat.
+
 ## Space files
 
 `space.files.read(path)` and `space.files.resolve(path)` share requests: reads

@@ -161,6 +161,7 @@ const toTurnRecord = (row: typeof sessionTurns.$inferSelect): SessionTurnRecord 
   stopReason: row.stopReason ?? null,
   errorMessage: row.errorMessage ?? null,
   finalUsage: row.finalUsage ?? null,
+  finalUsageIsTotal: false,
   totalUsage: row.totalUsage ?? null,
   summary: row.summary ?? null,
   intermediateIndex: row.intermediateIndex ?? null,
