@@ -15,10 +15,17 @@ import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset, uploadLikeStickerAsset } from "../avatar.js";
 import { createClient, createRealtimeClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
-import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
+import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText, spinner } from "../output.js";
 import { SESSION_INITIATOR_COLUMN, SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
 import { resolveSpace } from "../space.js";
 import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
+import {
+  parseWaitTimeout,
+  TurnWaitAbortedError,
+  TurnWaitTimeoutError,
+  waitForTurn,
+  type TurnWaitResult,
+} from "../turn-wait.js";
 import { registerDecisionCommand } from "./decision.js";
 import { registerSpaceCommerce } from "./space-commerce.js";
 import { formatBytes, registerSpaceFileTransfer } from "./space-files.js";
@@ -75,6 +82,17 @@ type PromptOptions = {
   image?: string[];
   note?: boolean;
   reply?: boolean;
+  wait?: boolean;
+  stream?: boolean;
+  timeout?: string;
+  abortOnTimeout?: boolean;
+  json?: boolean;
+};
+
+type TurnWaitCliOptions = {
+  stream?: boolean;
+  timeout?: string;
+  abortOnTimeout?: boolean;
   json?: boolean;
 };
 
@@ -272,11 +290,147 @@ async function confirmRestart(opts: { yes?: boolean }): Promise<void> {
   if (answer !== "y" && answer !== "yes") return error("Cancelled");
 }
 
+function parseOptionalWaitTimeout(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return parseWaitTimeout(value);
+  } catch (cause: unknown) {
+    return error("Invalid timeout", cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
+function formatWaitResumeCommand(spaceId: string, sessionId: string, turnId: string): string {
+  return `cohub -s ${spaceId} spaces sessions turns wait ${sessionId} ${turnId}`;
+}
+
+async function runTurnWait(input: {
+  spaceId: string;
+  sessionId: string;
+  turnId: string;
+  stream: boolean;
+  timeoutMs?: number;
+  abortOnTimeout?: boolean;
+  json: boolean;
+}): Promise<TurnWaitResult> {
+  const realtimeClient = createRealtimeClient();
+  const controller = new AbortController();
+  const onSignal = () => controller.abort();
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+
+  const showSpinner = !input.json && !input.stream;
+  const spin = showSpinner ? spinner() : null;
+  if (spin) spin.start(`Waiting for turn ${input.turnId}`);
+
+  try {
+    const waited = await waitForTurn({
+      client: realtimeClient,
+      spaceId: input.spaceId,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      timeoutMs: input.timeoutMs,
+      abortOnTimeout: input.abortOnTimeout,
+      signal: controller.signal,
+      onTextDelta: input.stream && !input.json
+        ? (delta) => { process.stdout.write(delta); }
+        : undefined,
+      onStatus: spin
+        ? (status, id) => { spin.update(`Turn ${id} (${status})`); }
+        : undefined,
+      onTurnMerged: (fromId, toId) => {
+        if (spin) spin.update(`Turn ${fromId} merged into ${toId}`);
+        else if (!input.json) process.stderr.write(`\n  ↳ Turn ${fromId} merged into ${toId}; continuing to wait\n`);
+      },
+    });
+    if (spin) spin.stop(`Turn ${waited.resolvedTurnId} ${waited.turn.status}`);
+    return waited;
+  } catch (cause: unknown) {
+    if (cause instanceof TurnWaitTimeoutError) {
+      if (spin) spin.stop(`Timed out waiting for turn ${cause.turnId}`);
+      const resumeCmd = formatWaitResumeCommand(cause.spaceId, cause.sessionId, cause.turnId);
+      if (input.json) {
+        process.stderr.write(`${JSON.stringify({
+          code: "TURN_WAIT_TIMEOUT",
+          message: cause.message,
+          spaceId: cause.spaceId,
+          sessionId: cause.sessionId,
+          turnId: cause.turnId,
+          timeoutMs: cause.timeoutMs,
+          abortedCloudTurn: cause.abortedCloudTurn,
+        }, null, 2)}\n`);
+        process.exit(1);
+      }
+      const detail = cause.abortedCloudTurn
+        ? `Requested abort for turn ${cause.turnId}. Check status: ${resumeCmd}`
+        : `Turn is still running in the cloud. Resume waiting with: ${resumeCmd}`;
+      return error("Timed out waiting for turn", detail);
+    }
+    if (cause instanceof TurnWaitAbortedError) {
+      if (spin) spin.stop(`Stopped waiting for turn ${cause.turnId}`);
+      const resumeCmd = formatWaitResumeCommand(cause.spaceId, cause.sessionId, cause.turnId);
+      if (!input.json) {
+        process.stderr.write(`\n  Stopped waiting (cloud turn untouched). Resume with:\n    ${resumeCmd}\n\n`);
+      }
+      process.exit(130);
+    }
+    if (spin) spin.stop("Wait failed");
+    throw cause;
+  } finally {
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
+    await realtimeClient.disconnect().catch(() => undefined);
+  }
+}
+
+function renderWaitedTurn(waited: TurnWaitResult, options: { stream: boolean; json: boolean; basePayload?: Record<string, unknown> }): void {
+  const { turn } = waited;
+  const succeeded = turn.status === "completed";
+  if (options.json) {
+    outJson({
+      ...(options.basePayload ?? {
+        spaceId: waited.spaceId,
+        sessionId: waited.sessionId,
+        turnId: waited.turnId,
+      }),
+      resolvedTurnId: waited.resolvedTurnId,
+      ...(waited.mergedChain.length ? { mergedChain: waited.mergedChain } : {}),
+      turn,
+    });
+    if (!succeeded) process.exitCode = 1;
+    return;
+  }
+
+  if (options.stream && waited.streamedText) {
+    process.stdout.write("\n");
+  } else if (turn.assistantText) {
+    process.stdout.write(turn.assistantText.endsWith("\n") ? turn.assistantText : `${turn.assistantText}\n`);
+  }
+
+  if (!succeeded) {
+    const billingNote = turn.summary?.reason === "billing"
+      ? "Stopped: insufficient balance. Manage billing at your Cohub account settings."
+      : undefined;
+    const detail = turn.errorMessage || billingNote || turn.summary?.reason || undefined;
+    error(`Turn ${turn.status} (${turn.id})`, detail);
+  }
+}
+
 async function sendPrompt(command: Command, words: string[], opts: PromptOptions): Promise<void> {
   const content = await readPromptContent(words, { allowEmpty: Boolean(opts.image?.length) });
   const scheduleFlags = [opts.delayMs, opts.at, opts.cron].filter((value) => value !== undefined);
   if (scheduleFlags.length > 1) return error("Conflicting schedule", "Use only one of --delay-ms, --at, or --cron");
   if (opts.cron && !opts.timezone) return error("Missing timezone", "--timezone is required with --cron");
+  const shouldWait = Boolean(opts.wait || opts.stream);
+  if (opts.timeout !== undefined && !shouldWait) {
+    return error("Conflicting options", "--timeout requires --wait or --stream");
+  }
+  if (opts.abortOnTimeout && opts.timeout === undefined) {
+    return error("Conflicting options", "--abort-on-timeout requires --timeout");
+  }
+  if (shouldWait && (opts.note || opts.reply || scheduleFlags.length)) {
+    return error("Conflicting options", "--wait and --stream cannot be combined with --note, --reply, or scheduling");
+  }
+  const timeoutMs = parseOptionalWaitTimeout(opts.timeout);
   if (opts.note) {
     const agentOnly = Object.entries({
       "--delay-ms": opts.delayMs, "--at": opts.at, "--cron": opts.cron, "--model": opts.model, "--provider": opts.provider,
@@ -360,6 +514,24 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
       labelRefs: opts.label?.length ? opts.label : undefined,
       ...(opts.reply ? { reply: "prompt" as const } : {}),
     });
+    if (shouldWait && result.mode === "immediate") {
+      const json = jsonRequested(opts);
+      const waited = await runTurnWait({
+        spaceId,
+        sessionId: result.session.id,
+        turnId: result.turn.id,
+        stream: Boolean(opts.stream),
+        timeoutMs,
+        abortOnTimeout: Boolean(opts.abortOnTimeout),
+        json,
+      });
+      renderWaitedTurn(waited, {
+        stream: Boolean(opts.stream),
+        json,
+        basePayload: { ...result },
+      });
+      return;
+    }
     if (jsonRequested(opts)) return outJson(result);
     if (result.mode === "immediate") {
       const label = opts.note ? "Note recorded" : opts.reply ? "Prompt sent; the reply will come back to this Chat" : "Prompt sent";
@@ -475,6 +647,10 @@ export function registerPrompt(program: Command): void {
     .option("--image <path>", "Attach an image", collectOption, [])
     .option("--note", "Record the message without an AI reply")
     .option("--reply", "Send the final reply back to the calling Chat and run its Agent")
+    .option("--wait", "Wait for the turn to finish and print the final reply")
+    .option("--stream", "Stream assistant text while waiting (implies --wait)")
+    .option("--timeout <duration>", "Maximum time to wait, e.g. 90s, 10m, 1h (requires --wait or --stream)")
+    .option("--abort-on-timeout", "Abort the cloud turn if --timeout is reached")
     .option("--json", "Output as JSON")
     .action((words: string[], opts: PromptOptions) => sendPrompt(program, words, opts));
 
@@ -844,6 +1020,10 @@ export function registerSpaces(program: Command): void {
     .option("--image <path>", "Attach an image", collectOption, [])
     .option("--note", "Record the message without an AI reply")
     .option("--reply", "Send the final reply back to the calling Chat and run its Agent")
+    .option("--wait", "Wait for the turn to finish and print the final reply")
+    .option("--stream", "Stream assistant text while waiting (implies --wait)")
+    .option("--timeout <duration>", "Maximum time to wait, e.g. 90s, 10m, 1h (requires --wait or --stream)")
+    .option("--abort-on-timeout", "Abort the cloud turn if --timeout is reached")
     .option("--json", "Output as JSON")
     .action((words: string[], opts: PromptOptions) => sendPrompt(spacesCmd, words, opts));
 
@@ -1822,6 +2002,36 @@ function registerTurns(sessionsCmd: Command): void {
         }
         if (result.turn.userText) console.log(`\nUser:\n${result.turn.userText}`);
         if (result.turn.assistantText) console.log(`\nAssistant:\n${result.turn.assistantText}`);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  turnsCmd
+    .command("wait <sessionId> <turnId>")
+    .description("Wait for a turn to finish and print its final reply")
+    .option("--stream", "Stream assistant text while waiting")
+    .option("--timeout <duration>", "Maximum time to wait, e.g. 90s, 10m, 1h")
+    .option("--abort-on-timeout", "Abort the cloud turn if --timeout is reached")
+    .option("--json", "Output as JSON")
+    .action(async (sessionId: string, turnId: string, opts: TurnWaitCliOptions) => {
+      if (opts.abortOnTimeout && opts.timeout === undefined) {
+        return error("Conflicting options", "--abort-on-timeout requires --timeout");
+      }
+      const timeoutMs = parseOptionalWaitTimeout(opts.timeout);
+      const spaceId = await resolveSpace(sessionsCmd);
+      const json = jsonRequested(opts);
+      try {
+        const waited = await runTurnWait({
+          spaceId,
+          sessionId,
+          turnId,
+          stream: Boolean(opts.stream),
+          timeoutMs,
+          abortOnTimeout: Boolean(opts.abortOnTimeout),
+          json,
+        });
+        renderWaitedTurn(waited, { stream: Boolean(opts.stream), json });
       } catch (e: unknown) {
         handleHttp(e);
       }

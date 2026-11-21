@@ -107,9 +107,14 @@ cohub spaces config <spaceId> --guest-app welcome
 
 ```bash
 cohub -s <spaceId> spaces prompt "Fix the failing tests" --json
+cohub -s <spaceId> prompt "Fix the failing tests" --wait --json
+cohub -s <spaceId> prompt "Fix the failing tests" --stream --timeout 10m
 cohub -s <spaceId> spaces prompt --title "Planning" "Draft a launch plan" --json
 cohub -s <spaceId> spaces prompt --session <sessionId> "Continue from the diff" --json
+cohub -s <spaceId> spaces sessions turns wait <sessionId> <turnId> --json
 ```
+
+`--wait`（以及隐含 `--wait` 的 `--stream`）会通过现有实时连接等待该 Turn 结束并输出最终回复，若触发连发合并（`merged`）会自动追踪到合并后的目标 Turn；遇到 `--timeout` 或 Ctrl-C 时默认只停止本地等待而不中止云端 Turn（如需联动中止可显式传 `--abort-on-timeout`），随时可用 `spaces sessions turns wait` 重新接上等待。
 
 调度：
 
