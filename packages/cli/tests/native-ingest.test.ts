@@ -16,7 +16,7 @@ import { fakeNativeServer as fakeServer } from "./fixtures/native-server.js";
 
 const at = "2026-01-01T00:00:00.000Z";
 const SPACE = "00000000-0000-4000-8000-000000000001";
-type Synced = "pi" | "codex" | "claude" | "workbuddy" | "cursor";
+type Synced = "pi" | "codex" | "claude" | "workbuddy" | "cursor" | "antigravity";
 const turnIdOf = (harness: Synced, nativeSessionId: string, key: string) => nativeTurnId(SPACE, harness, nativeSessionId, key);
 const line = (value: unknown) => `${JSON.stringify(value)}\n`;
 const piHeader = (id: string, cwd: string) => line({ type: "session", version: 3, id, cwd, timestamp: at });

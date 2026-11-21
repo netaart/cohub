@@ -1,7 +1,7 @@
 import * as z from "zod";
 
 /** Single source of truth for local Harness identities. Adding a Harness starts here. */
-export const LOCAL_HARNESSES = ["pi", "codex", "claude", "workbuddy", "cursor"] as const;
+export const LOCAL_HARNESSES = ["pi", "codex", "claude", "workbuddy", "cursor", "antigravity"] as const;
 export type LocalHarness = typeof LOCAL_HARNESSES[number];
 
 export type LocalHarnessSpec = {
@@ -18,6 +18,7 @@ export const LOCAL_HARNESS_SPECS: Readonly<Record<LocalHarness, LocalHarnessSpec
   claude: { label: "Claude Code", nativeFormat: "claude.jsonl", readOnly: true },
   workbuddy: { label: "WorkBuddy", nativeFormat: "codebuddy.jsonl", readOnly: true },
   cursor: { label: "Cursor", nativeFormat: "cursor.jsonl", readOnly: false },
+  antigravity: { label: "Antigravity", nativeFormat: "antigravity.jsonl", readOnly: true },
 };
 
 export const localHarnessSchema = z.enum(LOCAL_HARNESSES);
