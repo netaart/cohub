@@ -52,7 +52,7 @@ Cancelling a turn on Windows stops Pi/Codex/Cursor tools by process tree; a deta
 already exited can keep running. Cursor's `cursor-agent.cmd` would pass the prompt through cmd.exe and
 PowerShell, so Cohub runs the newest `versions\<version>\node.exe index.js` it would start directly.
 Harnesses (`pi`, `codex`, `claude` for Claude Code, `workbuddy` for the WorkBuddy CLI `codebuddy`, `cursor`
-for the Cursor CLI `cursor-agent`) must
+for the Cursor CLI `cursor-agent`, `antigravity` for the Antigravity CLI `agy`) must
 already be installed and authenticated locally. Without `--harness`, startup discovers every installed
 harness on PATH (or explicit executable overrides); one that fails its startup check is skipped with a
 warning. With none left the Runtime still serves the folder, like a device Runtime: it declares no
@@ -124,6 +124,19 @@ prompt no other user line follows) starts a Turn, keyed by the file's checksum t
 `turn_ended` settles it; tool results, model names and exact times are not recorded there. The ledger
 records the Turn Cohub is running, as for CodeBuddy.
 
+Antigravity runs one `agy acp --stdio` process per Turn over the Agent Client Protocol (JSON-RPC 2.0).
+Discovery initializes an ephemeral ACP session to read the signed-in account's `models` / `configOptions`
+(mapping each model's supported thinking levels) and available `modes`. A new chat or cross-harness handoff
+opens `session/new` (passing projected Cohub history through `_meta.antigravity.systemPrompt.append`); later
+Turns continue with `session/resume`, falling back to history handoff if the native session is no longer
+present. Approval modes map `inherit` to `default`, `auto` to `auto`, `full_access` to `--dangerously-skip-permissions`,
+and `read_only` to `plan` with every `session/request_permission` unconditionally denied. In `inherit` and `auto`
+modes, command and file-edit permission prompts become Cohub approval cards (with per-chat session grants kept
+in Runtime memory); stopping a Turn sends `session/cancel`. Native state spans SQLite and protobuf, so Turns
+stage no archive. Terminal and desktop/IDE chats sync read-only from `~/.gemini/<app-data-dir>/brain/<id>/.system_generated/logs/transcript.jsonl`
+(resolving workspace `cwd` and skipping sub-agents via `conversation_summaries.db`, and reading `transcript_full.jsonl`
+when `truncated_fields` is present).
+
 Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`（提供审批模式的 Claude Code 未选择模式时沿用本机设置，见下）；只读映射为 `plan`，
 且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则；WorkBuddy 的权限请求一律拒绝，
 Claude Code 的权限请求转为审批卡（见下）。云端历史投影到原生会话文件并通过 `--resume` 续接。
@@ -145,10 +158,12 @@ Windows 上 Cohub 不经 `cursor-agent.cmd`（会经 cmd.exe 与 PowerShell 转�
 否则按项目名还原为实际目录。`<user_query>`（或后面没有其他用户行的纯文本 prompt）开始一个 Turn，以文件到该行的校验和为键，
 `turn_ended` 结算；该文件不记录工具结果、模型和精确时间。Cohub 正在执行的 Turn 由账本记录。
 
+Antigravity 每个 Turn 启动一个 `agy acp --stdio` 进程（Agent Client Protocol JSON-RPC 2.0）。启动探测通过临时 ACP 会话读取当前账号可用的 `models` / `configOptions`（含每个模型支持的思考等级）与 `modes`。新会话或跨 Harness 接续通过 `session/new`（经 `_meta.antigravity.systemPrompt.append` 带入云端历史摘要）启动，后续 Turn 通过 `session/resume` 续接；本地会话不存在时自动回退历史交接。审批模式把 `inherit` 映射为 `default`、`auto` 映射为 `auto`、`full_access` 映射为 `--dangerously-skip-permissions`、`read_only` 映射为 `plan` 且无条件拒绝全部 `session/request_permission`。在 `inherit` / `auto` 模式下，命令执行与文件修改的权限请求会转为 Cohub 审批卡（本对话内允许仅保存在 Runtime 内存）；停止 Turn 时发送 `session/cancel`。原生状态由 SQLite 与 protobuf 组成，因此不生成归档。终端与桌面/IDE 对话从 `~/.gemini/<app-data-dir>/brain/<id>/.system_generated/logs/transcript.jsonl` 只读同步（经 `conversation_summaries.db` 解析项目目录并跳过子 Agent，遇 `truncated_fields` 时回读 `transcript_full.jsonl`）。
+
 ## Native clients / 原生客户端
 
 ```bash
-cohub runtime up -d --harness pi --harness codex --harness claude --harness workbuddy --harness cursor
+cohub runtime up -d --harness pi --harness codex --harness claude --harness workbuddy --harness cursor --harness antigravity
 # One consent for this folder (default yes); Codex asks once more before sharing its app-server.
 # 首次授权一次（默认 yes）；Codex 共享 app-server 另确认一次。
 pi                                   # run /reload in Pi sessions that were already open
@@ -156,6 +171,7 @@ codex
 claude                               # Claude Code and CodeBuddy sync read-only
 codebuddy
 cursor-agent                         # Cursor syncs read-only
+agy                                  # Antigravity syncs read-only
 cohub runtime status
 cohub runtime import                 # earlier conversations, newest first; Ctrl-C pauses
 cohub runtime attach --harness pi    # install the Pi extension by hand

@@ -1,0 +1,314 @@
+import { existsSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, join, relative, sep } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
+import type { ContentBlock, NativeTurnMessage } from "@neta-art/cohub";
+import { record, type JsonRecord } from "../json-rpc.js";
+import { iso, type NativeTranscript, type NativeTranscriptTurn } from "../native/transcript.js";
+import { extendTurn, readChainedLines } from "./chained-transcript.js";
+import { array, text } from "./process.js";
+import type { SessionHeader } from "./types.js";
+
+const SYSTEM_GENERATED = ".system_generated";
+const LOGS_DIR = "logs";
+const TRANSCRIPT_FILE = "transcript.jsonl";
+const FULL_TRANSCRIPT_FILE = "transcript_full.jsonl";
+const SUMMARIES_DB = "conversation_summaries.db";
+const DEFAULT_APP_DATA_DIRS = ["antigravity-cli", "antigravity"] as const;
+const USER_REQUEST = /<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/;
+const METADATA_BLOCKS = /<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>[\s\S]*?<\/(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>/g;
+
+export const antigravityGeminiDir = () => process.env.ANTIGRAVITY_GEMINI_DIR?.trim() || join(homedir(), ".gemini");
+
+/**
+ * Primary app data dir name under `.gemini/` used for new ACP sessions (`antigravity-cli` by default).
+ * When `ANTIGRAVITY_DATA_DIR` lists comma-separated names, the first is primary.
+ */
+export function antigravityPrimaryAppDataDir(): string {
+  const configured = process.env.ANTIGRAVITY_DATA_DIR?.split(",").map((entry) => entry.trim()).filter(Boolean);
+  return configured?.[0] || DEFAULT_APP_DATA_DIRS[0];
+}
+
+/** App data directories under `.gemini/` scanned for native Antigravity conversations. */
+export function antigravityAppDataDirs(): string[] {
+  const configured = process.env.ANTIGRAVITY_DATA_DIR?.split(",").map((entry) => entry.trim()).filter(Boolean);
+  const dirs = configured?.length ? configured : [...DEFAULT_APP_DATA_DIRS];
+  return [...new Set(dirs)];
+}
+
+export const antigravityRoots = (): string[] => antigravityAppDataDirs().map((dir) => join(antigravityGeminiDir(), dir, "brain"));
+
+export const antigravityTranscriptPath = (nativeSessionId: string, appDataDir = antigravityPrimaryAppDataDir()): string =>
+  join(antigravityGeminiDir(), appDataDir, "brain", nativeSessionId, SYSTEM_GENERATED, LOGS_DIR, TRANSCRIPT_FILE);
+
+/** Path relative to a brain root, split by OS separator; returns null when outside `root`. */
+function brainParts(path: string, root: string): string[] | null {
+  const rel = relative(root, path);
+  if (!rel || rel.startsWith("..")) return null;
+  return rel.split(sep);
+}
+
+/**
+ * Layout: `<geminiDir>/<appDataDir>/brain/<conversationId>/.system_generated/logs/transcript.jsonl`.
+ * Only traverse into `<conversationId>`, `.system_generated`, and `logs`.
+ */
+export function acceptsAntigravityDirectory(path: string, root: string, _cwd: string): boolean {
+  const parts = brainParts(path, root);
+  if (!parts || parts.length > 3) return false;
+  if (parts.length === 1) return Boolean(parts[0]) && !parts[0]?.startsWith(".");
+  if (parts.length === 2) return parts[1] === SYSTEM_GENERATED;
+  return parts[1] === SYSTEM_GENERATED && parts[2] === LOGS_DIR;
+}
+
+export function acceptsAntigravityTranscript(path: string, _cwd: string): boolean {
+  if (basename(path) !== TRANSCRIPT_FILE) return false;
+  for (const root of antigravityRoots()) {
+    const parts = brainParts(path, root);
+    if (parts?.length === 4 && parts[1] === SYSTEM_GENERATED && parts[2] === LOGS_DIR && parts[3] === TRANSCRIPT_FILE) return true;
+  }
+  return false;
+}
+
+/** Extract conversation id and app data root from `<appDataRoot>/brain/<id>/.system_generated/logs/transcript.jsonl`. */
+export function parseAntigravityTranscriptPath(path: string): { nativeSessionId: string; appDataRoot: string } | null {
+  if (basename(path) !== TRANSCRIPT_FILE) return null;
+  const logsDir = dirname(path);
+  if (basename(logsDir) !== LOGS_DIR) return null;
+  const sysDir = dirname(logsDir);
+  if (basename(sysDir) !== SYSTEM_GENERATED) return null;
+  const sessionDir = dirname(sysDir);
+  const nativeSessionId = basename(sessionDir);
+  const brainDir = dirname(sessionDir);
+  if (!nativeSessionId || basename(brainDir) !== "brain") return null;
+  return { nativeSessionId, appDataRoot: dirname(brainDir) };
+}
+
+function uriToPath(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("file://")) {
+    try { return fileURLToPath(trimmed); } catch { return null; }
+  }
+  return trimmed;
+}
+
+function parseWorkspaceCwd(rawUris: unknown): string | null {
+  if (typeof rawUris !== "string" || !rawUris.trim()) return null;
+  try {
+    const parsed: unknown = JSON.parse(rawUris);
+    if (Array.isArray(parsed)) {
+      for (const entry of parsed) {
+        if (typeof entry !== "string") continue;
+        const resolved = uriToPath(entry);
+        if (resolved) return resolved;
+      }
+    }
+  } catch {
+    return uriToPath(rawUris);
+  }
+  return null;
+}
+
+type SummaryRow = {
+  workspace_uris?: unknown;
+  parent_conversation_id?: unknown;
+  nesting_depth?: unknown;
+};
+
+/**
+ * Look up a conversation's workspace cwd and parent nesting from `conversation_summaries.db`.
+ * Uses Node 24's built-in `node:sqlite` in read-only mode so Antigravity's DB is never mutated.
+ */
+export async function antigravitySessionHeader(path: string): Promise<SessionHeader | null> {
+  const parsed = parseAntigravityTranscriptPath(path);
+  if (!parsed) return null;
+  const dbPath = join(parsed.appDataRoot, SUMMARIES_DB);
+  if (!existsSync(dbPath)) return null;
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const row = db.prepare(
+      "SELECT workspace_uris, parent_conversation_id, nesting_depth FROM conversation_summaries WHERE conversation_id = ?",
+    ).get(parsed.nativeSessionId) as SummaryRow | undefined;
+    if (!row) return null;
+    const cwd = parseWorkspaceCwd(row.workspace_uris);
+    if (!cwd) return null;
+    const parentId = text(row.parent_conversation_id).trim();
+    const nestingDepth = typeof row.nesting_depth === "number" ? row.nesting_depth : 0;
+    return {
+      harness: "antigravity",
+      nativeSessionId: parsed.nativeSessionId,
+      cwd,
+      thread: parentId || nestingDepth > 0 ? "spawned" : "user",
+    };
+  } catch {
+    return null;
+  } finally {
+    try { db?.close(); } catch { /* ignore close errors */ }
+  }
+}
+
+/** Extract clean user text from `<USER_REQUEST>...</USER_REQUEST>` or strip injected metadata blocks. */
+export function extractAntigravityUserText(raw: string): string {
+  const matched = USER_REQUEST.exec(raw);
+  if (matched?.[1] !== undefined) return matched[1].trim();
+  return raw.replace(METADATA_BLOCKS, "").trim();
+}
+
+/** Antigravity sometimes stores tool argument values as JSON-encoded strings (e.g. `"\"echo hi\""`). */
+function normalizeToolArgs(value: unknown): Record<string, unknown> {
+  const raw = record(value);
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(raw)) {
+    if (typeof entry === "string") {
+      try { out[key] = JSON.parse(entry); } catch { out[key] = entry; }
+    } else {
+      out[key] = entry;
+    }
+  }
+  return out;
+}
+
+function transcriptUsage(value: JsonRecord): NativeTurnMessage["usage"] {
+  const count = (key: string) => typeof value[key] === "number" ? value[key] as number : 0;
+  const input = count("input_tokens");
+  const output = count("output_tokens");
+  const cacheRead = count("cache_read_tokens");
+  if (!input && !output && !cacheRead) return undefined;
+  return { input, output, cacheRead, cacheWrite: 0, totalTokens: input + output + cacheRead };
+}
+
+/** Load matching lines from `transcript_full.jsonl` lazily only when `truncated_fields` is encountered. */
+async function loadFullRecords(transcriptPath: string): Promise<Map<number, JsonRecord>> {
+  const fullPath = join(dirname(transcriptPath), FULL_TRANSCRIPT_FILE);
+  const byStep = new Map<number, JsonRecord>();
+  const raw = await readFile(fullPath, "utf8").catch(() => "");
+  if (!raw) return byStep;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const obj = record(JSON.parse(line));
+      if (typeof obj.step_index === "number") byStep.set(obj.step_index, obj);
+    } catch { /* skip incomplete trailing line */ }
+  }
+  return byStep;
+}
+
+export function antigravityReplyEnded(turn: NativeTranscriptTurn): boolean {
+  const last = turn.messages.at(-1);
+  return Boolean(last && last.stopReason !== "tool_use");
+}
+
+/**
+ * Parse Antigravity's `transcript.jsonl` into Cohub Turns.
+ * Each `USER_INPUT` (from `USER_EXPLICIT` or non-system source) starts a Turn, keyed by the file's
+ * running checksum through that line. `PLANNER_RESPONSE` lines form assistant messages (with optional
+ * `thinking`, `content`, and `tool_calls`), and subsequent `GENERIC` lines attach `tool_result` blocks.
+ */
+export async function readAntigravityTranscript(path: string, nativeSessionId: string, signal?: AbortSignal): Promise<NativeTranscript> {
+  const read = await readChainedLines(path, signal);
+  const modified = (await stat(path)).mtime.toISOString();
+  const header = await antigravitySessionHeader(path);
+  let fullRecords: Map<number, JsonRecord> | null = null;
+  const turns: NativeTranscriptTurn[] = [];
+  let current: NativeTranscriptTurn | null = null;
+  let pendingToolIds: string[] = [];
+
+  for (const line of read.lines) {
+    let value = line.value;
+    if (Array.isArray(value.truncated_fields) && value.truncated_fields.length && typeof value.step_index === "number") {
+      fullRecords ??= await loadFullRecords(path);
+      const full = fullRecords.get(value.step_index);
+      if (full) value = full;
+    }
+
+    const type = text(value.type);
+    const source = text(value.source);
+    const timestamp: string = text(value.created_at) ? iso(value.created_at) : current?.startedAt ?? modified;
+
+    if (type === "USER_INPUT" && source !== "SYSTEM") {
+      const prompt = extractAntigravityUserText(text(value.content));
+      if (!prompt) continue;
+      pendingToolIds = [];
+      current = {
+        key: line.sha256,
+        parentKey: turns.at(-1)?.key ?? null,
+        userContent: [{ type: "text", text: prompt }],
+        messages: [],
+        startedAt: timestamp,
+        startBytes: line.startBytes,
+        endBytes: line.endBytes,
+        contentEndBytes: line.endBytes,
+        boundaries: {},
+        sha256: line.sha256,
+        result: null,
+      };
+      turns.push(current);
+      continue;
+    }
+
+    if (!current) continue;
+
+    if (type === "PLANNER_RESPONSE") {
+      const content: ContentBlock[] = [];
+      const thinking = text(value.thinking);
+      if (thinking) content.push({ type: "thinking", thinking });
+      const reply = text(value.content);
+      if (reply) content.push({ type: "text", text: reply });
+      const toolCalls = array(value.tool_calls);
+      const stepIndex = typeof value.step_index === "number" ? value.step_index : current.messages.length;
+      const newPending: string[] = [];
+      for (const [position, rawCall] of toolCalls.entries()) {
+        const call = record(rawCall);
+        const name = text(call.name) || "tool";
+        const id = `agy_${line.sha256.slice(0, 16)}_${stepIndex}_${position}`;
+        content.push({ type: "tool_use", id, name, input: normalizeToolArgs(call.args) });
+        newPending.push(id);
+      }
+      pendingToolIds = newPending;
+      const isError = text(value.status) === "ERROR";
+      const hasTools = newPending.length > 0;
+      const message: NativeTurnMessage = {
+        content,
+        provider: "antigravity",
+        model: text(value.model) || null,
+        stopReason: isError ? "error" : hasTools ? "tool_use" : "stop",
+        errorMessage: isError ? text(value.error) || "Turn failed" : null,
+        usage: transcriptUsage(value),
+      };
+      if (content.length || isError) current.messages.push(message);
+      extendTurn(current, line, true);
+      if (!hasTools && (text(value.status) === "DONE" || isError)) {
+        current.result = {
+          messages: current.messages,
+          completedAt: timestamp,
+          status: isError ? "failed" : "completed",
+        };
+      }
+      continue;
+    }
+
+    if (type === "GENERIC" && pendingToolIds.length) {
+      const toolUseId = pendingToolIds.shift();
+      const owner = current.messages.at(-1);
+      if (toolUseId && owner) {
+        const isError = text(value.status) === "ERROR";
+        const output = text(value.error) || text(value.content);
+        owner.content.push({ type: "tool_result", tool_use_id: toolUseId, content: output, is_error: isError });
+        extendTurn(current, line, true);
+      }
+      continue;
+    }
+
+    extendTurn(current, line, false);
+  }
+
+  return {
+    nativeSessionId,
+    cwd: header?.cwd ?? "",
+    turns,
+    prefixes: read.prefixes,
+  };
+}
