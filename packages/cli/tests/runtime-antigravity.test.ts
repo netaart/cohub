@@ -21,6 +21,7 @@ import {
 import { discoverHarnesses } from "../src/runtime/harnesses/index.js";
 import { NativeRuntime } from "../src/runtime/native/daemon.js";
 import { executeTurn } from "../src/runtime/native/execution.js";
+import { discoverTranscripts } from "../src/runtime/native/ingest.js";
 import { archiveStorageFixture } from "./fixtures/runtime-archive-storage.js";
 import { runtimeProjectionSource } from "./fixtures/runtime-projection-source.js";
 
@@ -282,4 +283,51 @@ test("Antigravity transcript reader resolves cwd via SQLite, filters subagents, 
   assert.equal(antigravityHarness.transcript.replyEnded?.(firstTurn), true);
 
   assert.equal(extractAntigravityUserText("plain prompt\n<ADDITIONAL_METADATA>meta</ADDITIONAL_METADATA>"), "plain prompt");
+}));
+
+test("antigravity transcript matches secondary workspace_uris roots and reads WAL-mode SQLite databases", () => withEnvironment(async (root) => {
+  const repoA = join(root, "repo-a");
+  const repoB = join(root, "repo-b");
+  const repoC = join(root, "repo-c");
+  await Promise.all([
+    mkdir(repoA, { recursive: true }),
+    mkdir(repoB, { recursive: true }),
+    mkdir(repoC, { recursive: true }),
+  ]);
+
+  const appDataRoot = join(root, "gemini", "antigravity-cli");
+  await mkdir(appDataRoot, { recursive: true });
+  const convId = randomUUID();
+  const db = new DatabaseSync(join(appDataRoot, "conversation_summaries.db"));
+  try {
+    db.exec("PRAGMA journal_mode = WAL;");
+    db.exec("CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, workspace_uris TEXT, parent_conversation_id TEXT, nesting_depth INTEGER)");
+    db.prepare("INSERT INTO conversation_summaries VALUES (?, ?, '', 0)").run(
+      convId,
+      JSON.stringify([pathToFileURL(repoA).href, pathToFileURL(repoB).href, pathToFileURL(repoA).href]),
+    );
+
+    const transcriptPath = antigravityTranscriptPath(convId, "antigravity-cli");
+    await mkdir(join(appDataRoot, "brain", convId, ".system_generated", "logs"), { recursive: true });
+    await writeFile(transcriptPath, `${JSON.stringify({ step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-21T02:00:00Z", content: "hi" })}\n`);
+
+    // Keep WAL writer connection open while reading read-only.
+    const header = await antigravitySessionHeader(transcriptPath);
+    assert.deepEqual(header, {
+      harness: "antigravity",
+      nativeSessionId: convId,
+      cwd: repoA,
+      cwds: [repoB],
+      thread: "user",
+    });
+
+    const foundInA = await discoverTranscripts(repoA, ["antigravity"], { headers: true });
+    const foundInB = await discoverTranscripts(repoB, ["antigravity"], { headers: true });
+    const foundInC = await discoverTranscripts(repoC, ["antigravity"], { headers: true });
+    assert.deepEqual(foundInA.map((entry) => entry.nativeSessionId), [convId]);
+    assert.deepEqual(foundInB.map((entry) => entry.nativeSessionId), [convId]);
+    assert.deepEqual(foundInC, []);
+  } finally {
+    db.close();
+  }
 }));

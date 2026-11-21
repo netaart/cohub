@@ -94,21 +94,30 @@ function uriToPath(value: string): string | null {
   return trimmed;
 }
 
-function parseWorkspaceCwd(rawUris: unknown): string | null {
-  if (typeof rawUris !== "string" || !rawUris.trim()) return null;
+function parseWorkspaceCwds(rawUris: unknown): string[] {
+  if (typeof rawUris !== "string" || !rawUris.trim()) return [];
+  const results: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string) => {
+    const resolved = uriToPath(value);
+    if (resolved && !seen.has(resolved)) {
+      seen.add(resolved);
+      results.push(resolved);
+    }
+  };
   try {
     const parsed: unknown = JSON.parse(rawUris);
     if (Array.isArray(parsed)) {
       for (const entry of parsed) {
-        if (typeof entry !== "string") continue;
-        const resolved = uriToPath(entry);
-        if (resolved) return resolved;
+        if (typeof entry === "string") add(entry);
       }
+      return results;
     }
   } catch {
-    return uriToPath(rawUris);
+    add(rawUris);
+    return results;
   }
-  return null;
+  return results;
 }
 
 type SummaryRow = {
@@ -118,8 +127,9 @@ type SummaryRow = {
 };
 
 /**
- * Look up a conversation's workspace cwd and parent nesting from `conversation_summaries.db`.
- * Uses Node 24's built-in `node:sqlite` in read-only mode so Antigravity's DB is never mutated.
+ * Look up a conversation's workspace cwds and parent nesting from `conversation_summaries.db`.
+ * Uses Node 24's built-in `node:sqlite` in read-only mode with a busy timeout so active WAL writes
+ * from Antigravity Desktop do not cause spurious SQLITE_BUSY misses.
  */
 export async function antigravitySessionHeader(path: string): Promise<SessionHeader | null> {
   const parsed = parseAntigravityTranscriptPath(path);
@@ -128,19 +138,21 @@ export async function antigravitySessionHeader(path: string): Promise<SessionHea
   if (!existsSync(dbPath)) return null;
   let db: DatabaseSync | null = null;
   try {
-    db = new DatabaseSync(dbPath, { readOnly: true });
+    db = new DatabaseSync(dbPath, { readOnly: true, timeout: 1_000 });
     const row = db.prepare(
       "SELECT workspace_uris, parent_conversation_id, nesting_depth FROM conversation_summaries WHERE conversation_id = ?",
     ).get(parsed.nativeSessionId) as SummaryRow | undefined;
     if (!row) return null;
-    const cwd = parseWorkspaceCwd(row.workspace_uris);
-    if (!cwd) return null;
+    const cwds = parseWorkspaceCwds(row.workspace_uris);
+    const primaryCwd = cwds[0];
+    if (!primaryCwd) return null;
     const parentId = text(row.parent_conversation_id).trim();
     const nestingDepth = typeof row.nesting_depth === "number" ? row.nesting_depth : 0;
     return {
       harness: "antigravity",
       nativeSessionId: parsed.nativeSessionId,
-      cwd,
+      cwd: primaryCwd,
+      ...(cwds.length > 1 ? { cwds: cwds.slice(1) } : {}),
       thread: parentId || nestingDepth > 0 ? "spawned" : "user",
     };
   } catch {
