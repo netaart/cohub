@@ -10,7 +10,7 @@ import type { Command } from "commander";
 import { requireAccessToken } from "../auth.js";
 import { createClient } from "../client.js";
 import { currentIdentityKey, explicitSpace, resolveSpaceRef } from "../space.js";
-import { canonicalRuntimeRoot, getRuntimeSpaceBinding, resolveRuntimeSpace } from "./space-binding.js";
+import { canonicalRuntimeRoot, findNearestRuntimeSpaceBinding, getRuntimeSpaceBinding, resolveRuntimeSpace } from "./space-binding.js";
 import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
 import { ensureNativeSync, repairIntegrations } from "./native/attach.js";
 import { serializeDiagnosticError, type RuntimeDiagnostic } from "./diagnostics.js";
@@ -57,9 +57,9 @@ async function requestedRuntimeSpace(program: Command, target?: string): Promise
   return ref ? resolveSpaceRef(ref) : null;
 }
 
-export async function resolveRuntimeTarget(program: Command, target?: string) {
+export async function resolveRuntimeTarget(program: Command, target?: string, cwd = process.cwd()) {
   const spaceId = await requestedRuntimeSpace(program, target)
-    ?? (await getRuntimeSpaceBinding(process.cwd(), currentIdentityKey()))?.spaceId;
+    ?? (await findNearestRuntimeSpaceBinding(cwd, currentIdentityKey()))?.spaceId;
   if (!spaceId) throw new Error("No directory binding. Use --space <space> or runtime up");
   return spaceId;
 }

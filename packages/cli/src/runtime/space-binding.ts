@@ -117,6 +117,33 @@ export function findRuntimeSpaceBinding(
   return entries.find((binding) => binding.root === root && binding.key === key) ?? null;
 }
 
+/**
+ * Find the nearest (deepest) bound Runtime Space containing `cwd` for `key`.
+ * Walks ancestor directories via `dirname` (like Git), so sibling prefixes such as
+ * `/work/app-2` never match `/work/app`, and nested bindings override their parent.
+ */
+export function findContainingRuntimeSpaceBinding(
+  bindings: RuntimeSpaceBinding[] | RuntimeSpaceBindingsFile,
+  input: { cwd: string; key: string },
+): RuntimeSpaceBinding | null {
+  const entries = Array.isArray(bindings) ? bindings : bindings.bindings;
+  const key = input.key.trim();
+  const byRoot = new Map<string, RuntimeSpaceBinding>();
+  for (const binding of entries) {
+    if (binding.key === key) byRoot.set(binding.root, binding);
+  }
+  if (byRoot.size === 0) return null;
+
+  let current = normalizeRuntimeRoot(input.cwd);
+  while (true) {
+    const match = byRoot.get(current);
+    if (match) return match;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
 function upsertRuntimeSpaceBinding(
   file: RuntimeSpaceBindingsFile,
   binding: RuntimeSpaceBinding,
@@ -298,6 +325,23 @@ export async function getRuntimeSpaceBinding(
   const canonicalRoot = await canonicalRuntimeRoot(root);
   const file = await readRuntimeSpaceBindings(path);
   return findRuntimeSpaceBinding(file, { root: canonicalRoot, key: key.trim() });
+}
+
+export async function findNearestRuntimeSpaceBinding(
+  cwd: string,
+  key: string | null | undefined,
+  path = runtimeSpaceBindingsPath(),
+): Promise<RuntimeSpaceBinding | null> {
+  if (!nonEmptyString(key)) return null;
+  const canonicalCwd = await canonicalRuntimeRoot(cwd);
+  const file = await readRuntimeSpaceBindings(path);
+  const trimmedKey = key.trim();
+  return (
+    findContainingRuntimeSpaceBinding(file, { cwd: canonicalCwd, key: trimmedKey })
+    ?? (normalizeRuntimeRoot(cwd) !== canonicalCwd
+      ? findContainingRuntimeSpaceBinding(file, { cwd, key: trimmedKey })
+      : null)
+  );
 }
 
 /**

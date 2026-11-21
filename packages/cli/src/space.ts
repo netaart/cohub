@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { COHUB_ENVIRONMENTS, HOME_SPACE_SLUG, normalizeBaseUrl, parseSpaceRef, resolveApiBaseUrl, resolveCohubEnvironment } from "@neta-art/cohub";
 import { readAuthSession } from "./auth.js";
 import { createClient } from "./client.js";
-import { getRuntimeSpaceBinding } from "./runtime/space-binding.js";
+import { findNearestRuntimeSpaceBinding } from "./runtime/space-binding.js";
 import { error, handleHttp } from "./output.js";
 
 const CONFIG_DIR = join(homedir(), ".config", "cohub");
@@ -184,7 +184,7 @@ export function missingSpaceError(): never {
 export async function resolveBoundSpace(
   options: { cwd?: string; bindingsPath?: string } = {},
 ): Promise<string | null> {
-  const bound = await getRuntimeSpaceBinding(
+  const bound = await findNearestRuntimeSpaceBinding(
     options.cwd ?? process.cwd(),
     currentIdentityKey(),
     options.bindingsPath,

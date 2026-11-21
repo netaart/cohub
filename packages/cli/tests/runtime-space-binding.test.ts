@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, test } from "node:test";
-import { canonicalRuntimeRoot, findRuntimeSpaceBinding, parseRuntimeSpaceBindings, resolveRuntimeSpace, withRuntimeSpaceBindingsLock } from "../src/runtime/space-binding.js";
+import {
+  canonicalRuntimeRoot,
+  findContainingRuntimeSpaceBinding,
+  findNearestRuntimeSpaceBinding,
+  findRuntimeSpaceBinding,
+  parseRuntimeSpaceBindings,
+  resolveRuntimeSpace,
+  withRuntimeSpaceBindingsLock,
+} from "../src/runtime/space-binding.js";
 
 const roots: string[] = [];
 
@@ -195,4 +203,48 @@ test("a corrupt binding file fails closed instead of creating another Space", as
     /Runtime Space bindings are invalid/,
   );
   assert.equal(created, false);
+});
+
+test("containing binding walks ancestor directories, prefers deepest nested binding, and ignores sibling prefixes", () => {
+  const bindings = parseRuntimeSpaceBindings(JSON.stringify({
+    version: 1,
+    bindings: [
+      { root: "/work/app", key: "prod:alice", spaceId: "space-root" },
+      { root: "/work/app/packages/web", key: "prod:alice", spaceId: "space-web" },
+      { root: "/work/app", key: "dev:alice", spaceId: "space-dev" },
+    ],
+  }));
+
+  assert.equal(findContainingRuntimeSpaceBinding(bindings, { cwd: "/work/app", key: "prod:alice" })?.spaceId, "space-root");
+  assert.equal(findContainingRuntimeSpaceBinding(bindings, { cwd: "/work/app/packages/cli/src", key: "prod:alice" })?.spaceId, "space-root");
+  assert.equal(findContainingRuntimeSpaceBinding(bindings, { cwd: "/work/app/packages/web/src/routes", key: "prod:alice" })?.spaceId, "space-web");
+  assert.equal(findContainingRuntimeSpaceBinding(bindings, { cwd: "/work/app/packages/web/src", key: "dev:alice" })?.spaceId, "space-dev");
+  assert.equal(findContainingRuntimeSpaceBinding(bindings, { cwd: "/work/app-2/src", key: "prod:alice" }), null);
+  assert.equal(findContainingRuntimeSpaceBinding(bindings, { cwd: "/work/app/packages/web", key: "prod:bob" }), null);
+});
+
+test("findNearestRuntimeSpaceBinding resolves subdirectories and symlinked paths against canonical bound roots", async () => {
+  const base = await tempRoot("cohub-runtime-ancestor-");
+  const repo = join(base, "repo");
+  const nested = join(repo, "packages", "cli", "src");
+  const alias = join(base, "repo-link");
+  const bindingsPath = join(base, "runtime-spaces.json");
+  await mkdir(nested, { recursive: true });
+  await symlink(repo, alias);
+
+  await resolveRuntimeSpace({
+    root: repo,
+    identityKey: "prod:alice",
+    path: bindingsPath,
+    explicitSpaceId: "space-repo",
+  });
+
+  const fromSubdir = await findNearestRuntimeSpaceBinding(nested, "prod:alice", bindingsPath);
+  const fromSymlinkSubdir = await findNearestRuntimeSpaceBinding(join(alias, "packages", "cli"), "prod:alice", bindingsPath);
+  const fromOutside = await findNearestRuntimeSpaceBinding(base, "prod:alice", bindingsPath);
+
+  assert.equal(fromSubdir?.spaceId, "space-repo");
+  assert.equal(fromSubdir?.root, await realpath(repo));
+  assert.equal(fromSymlinkSubdir?.spaceId, "space-repo");
+  assert.equal(fromOutside, null);
 });

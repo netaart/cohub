@@ -5,7 +5,7 @@ import { createClient } from "../client.js";
 import { json as outJson, jsonRequested } from "../output.js";
 import { currentIdentityKey } from "../space.js";
 import { resolveRuntimeTarget, runtimeUp, parseRuntimeHarnesses, type RuntimeUpOptions } from "../runtime/launch.js";
-import { canonicalRuntimeRoot, getRuntimeSpaceBinding } from "../runtime/space-binding.js";
+import { canonicalRuntimeRoot, findNearestRuntimeSpaceBinding } from "../runtime/space-binding.js";
 import { join } from "node:path";
 import { RuntimeArchiveStore } from "../runtime/archive-store.js";
 import { readNativeConfig, runtimeStateRoot, writeNativeConfig } from "../runtime/native/config.js";
@@ -30,15 +30,15 @@ type ImportStatus = NativeStatus["import"];
 
 const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
-/** The bound Space of a directory, with its running Runtime; import and attach act through it. */
+/** The bound Space of a directory (or nearest bound ancestor), with its running Runtime; import and detach act through it. */
 async function boundRuntime(program: Command, dir: string | undefined, space: string | undefined) {
   const identity = currentIdentityKey();
   if (!identity) throw new Error("Sign in first");
-  const root = await canonicalRuntimeRoot(dir ?? process.cwd());
-  const spaceId = await resolveRuntimeTarget(program, space);
-  const binding = await getRuntimeSpaceBinding(root, identity);
+  const targetDir = await canonicalRuntimeRoot(dir ?? process.cwd());
+  const spaceId = await resolveRuntimeTarget(program, space, targetDir);
+  const binding = await findNearestRuntimeSpaceBinding(targetDir, identity);
   if (!binding || binding.spaceId !== spaceId) throw new Error("Bind this directory with runtime up first");
-  return { identity, root, spaceId, directory: runtimeInstanceDirectory(identity, spaceId) };
+  return { identity, root: binding.root, spaceId, directory: runtimeInstanceDirectory(identity, spaceId) };
 }
 
 export function registerRuntime(program: Command) {
