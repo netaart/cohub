@@ -253,6 +253,31 @@ describe("Node board export", { skip: available ? false : "@napi-rs/canvas is no
     texture.destroy(true);
   });
 
+  test("framed media print a see-through image on a card, plain media leave it see-through", async () => {
+    const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+    const source = createCanvas(8, 8);
+    const sourceContext = source.getContext("2d");
+    sourceContext.fillStyle = "#ff0000";
+    sourceContext.fillRect(0, 0, 8, 8);
+    sourceContext.clearRect(2, 2, 4, 4);
+    const texture = await renderer.decodeImage(source.toBuffer("image/png"), "image/png");
+    const center = async (props: Record<string, unknown>) => {
+      const image = boardDocument({ items: { i: { type: "image", size: { width: 160, height: 160 }, props: { src: "ring.png", ...props } } } });
+      const result = exportBoardImageBytes(renderer, image, {
+        scale: 1, padding: 0, background: "transparent", style: { media: "framed" }, palette: { surface: 0xffffff },
+        textures: new Map([["file:ring.png", texture]]),
+      });
+      assert.ok(result);
+      const canvas = createCanvas(result.plan.width, result.plan.height);
+      const context = canvas.getContext("2d");
+      context.drawImage(await loadImage(result.bytes), 0, 0);
+      return [...context.getImageData(80, 80, 1, 1).data];
+    };
+    assert.deepEqual(await center({}), [255, 255, 255, 255]);
+    assert.equal((await center({ presentation: "plain" }))[3], 0);
+    texture.destroy(true);
+  });
+
   test("draws DOM views over their items and under later items", async () => {
     const { createCanvas, loadImage } = await import("@napi-rs/canvas");
     const source = createCanvas(2, 2);
