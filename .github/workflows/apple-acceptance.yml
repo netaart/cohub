@@ -1,0 +1,246 @@
+name: Apple Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        type: choice
+        default: all
+        options: [all, mac, iphone, ipad]
+      build_run:
+        type: string
+        description: Successful Apple Store run containing the Mac PKG
+        default: '44271530623'
+      session_fixture:
+        type: boolean
+        description: Use an authenticated test session for screenshots instead of exercising native sign-in
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: apple-acceptance-${{ inputs.device || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  screenshots:
+    name: ${{ matrix.device }} acceptance
+    runs-on: macos-15
+    timeout-minutes: 40
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        device: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.device != 'all' && format('["{0}"]', inputs.device) || '["mac","iphone","ipad"]') }}
+    env:
+      DEVELOPER_DIR: ${{ matrix.device == 'mac' && '/Applications/Xcode_26.0.1.app/Contents/Developer' || '/Applications/Xcode_16.4.app/Contents/Developer' }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install xcodegen
+      - name: Initialize the selected Xcode
+        if: matrix.device != 'mac'
+        run: |
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          sudo xcodebuild -runFirstLaunch
+          xcrun xcodebuild -version
+      - name: Extract signed Mac client
+        if: matrix.device == 'mac'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN: ${{ inputs.build_run }}
+        run: |
+          gh run download "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --name cohub-macos-app-store --dir "$RUNNER_TEMP/signed-mac"
+          packages=("$RUNNER_TEMP/signed-mac/"*.pkg)
+          test "${#packages[@]}" -eq 1
+          pkgutil --check-signature "${packages[0]}"
+          pkgutil --expand-full "${packages[0]}" "$RUNNER_TEMP/mac-package"
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          app = next(pathlib.Path(os.environ['RUNNER_TEMP'],'mac-package').rglob('Cohub.app'))
+          subprocess.run(['codesign','--verify','--deep','--strict',str(app)],check=True)
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('COHUB_MAC_APP_PATH='+str(app)+'\n')
+          PY
+          xcodegen generate --spec apps/desktop/macos/acceptance.yml
+      - name: Prepare Mac screenshot copy
+        if: matrix.device == 'mac'
+        env:
+          CREDENTIALS: ${{ secrets.APPLE_SCREENSHOT_CREDENTIALS }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, plistlib, secrets, subprocess
+          app=pathlib.Path(os.environ['COHUB_MAC_APP_PATH'])
+          profile=app/'Contents/embedded.provisionprofile'
+          profile.unlink()
+          entitlements=plistlib.loads(pathlib.Path('apps/desktop/macos/Bundle/AppStore.entitlements').read_bytes())
+          entitlements.pop('com.apple.developer.associated-domains')
+          path=pathlib.Path(os.environ['RUNNER_TEMP'])/'Screenshot.entitlements'
+          path.write_bytes(plistlib.dumps(entitlements))
+          subprocess.run(['codesign','--force','--sign','-','--entitlements',str(path),str(app)],check=True)
+          secret=secrets.token_urlsafe(32)
+          print('::add-mask::'+secret)
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('COHUB_TEST_KEYCHAIN_PASSWORD='+secret+'\n')
+          def run(*args): subprocess.run(args,check=True,capture_output=True)
+          run('security','create-keychain','-p',secret,'cohub-acceptance.keychain')
+          run('security','unlock-keychain','-p',secret,'cohub-acceptance.keychain')
+          run('security','set-keychain-settings','-lut','3600','cohub-acceptance.keychain')
+          run('security','list-keychains','-d','user','-s','cohub-acceptance.keychain','login.keychain')
+          run('security','default-keychain','-d','user','-s','cohub-acceptance.keychain')
+          credentials=json.dumps(json.loads(os.environ['CREDENTIALS']))
+          run('security','add-generic-password','-a','session','-s','live.cohub.ios','-w',credentials,'-T',str(app/'Contents/MacOS/Cohub'),'cohub-acceptance.keychain')
+          print('Screenshot copy uses the verified binary with ad hoc sandbox signing and an authenticated review-session fixture. Store-package launch remains a separate TestFlight check.')
+          PY
+          cat > "$RUNNER_TEMP/display.swift" <<'SWIFT'
+          import CoreGraphics
+          let display = CGMainDisplayID()
+          let modes = CGDisplayCopyAllDisplayModes(display, [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary) as? [CGDisplayMode] ?? []
+          if let mode = modes.filter({ $0.width >= 1920 && $0.height >= 1080 }).min(by: { $0.width * $0.height < $1.width * $1.height }) {
+              let result = CGDisplaySetDisplayMode(display, mode, nil)
+              print("Display: \(mode.width)x\(mode.height), result: \(result.rawValue)")
+          }
+          SWIFT
+          swift "$RUNNER_TEMP/display.swift"
+      - name: Prepare simulator
+        if: matrix.device != 'mac'
+        timeout-minutes: 8
+        env:
+          DEVICE: ${{ matrix.device }}
+        run: |
+          xcodegen generate --spec apps/ios/acceptance.yml
+          python3 - <<'PY'
+          import json, os, subprocess
+          print('Reading available simulators',flush=True)
+          devices = json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json'],timeout=120))['devices']
+          prefix = 'iPhone' if os.environ['DEVICE'] == 'iphone' else 'iPad'
+          candidates = [{**d,'runtime':runtime} for runtime, rows in devices.items() if 'iOS' in runtime for d in rows if d['name'].startswith(prefix)]
+          candidates = [d for d in candidates if 'iOS-18-' in d['runtime']]
+          candidates.sort(key=lambda d: ('Pro Max' in d['name'] if prefix == 'iPhone' else '13-inch' in d['name'], d['name']), reverse=True)
+          chosen = candidates[0]
+          print('Booting:',chosen['name'],flush=True)
+          if chosen['state'] != 'Booted':subprocess.run(['xcrun','simctl','boot',chosen['udid']],check=True,timeout=90)
+          subprocess.run(['xcrun','simctl','bootstatus',chosen['udid'],'-b'],check=True,timeout=240)
+          subprocess.run(['xcrun','simctl','status_bar',chosen['udid'],'override','--time','9:41','--batteryState','charged','--batteryLevel','100'],check=True)
+          with open(os.environ['GITHUB_ENV'],'a') as f: f.write('SIMULATOR_ID='+chosen['udid']+'\n')
+          print('Simulator:',chosen['name'])
+          PY
+          open "$DEVELOPER_DIR/Applications/Simulator.app"
+      - name: Configure private test environment
+        env:
+          EMAIL: ${{ secrets.APPLE_REVIEW_EMAIL }}
+          MAILBOX: ${{ secrets.APPLE_REVIEW_MAILBOX_URL }}
+          SAMPLE_SPACE: ${{ vars.APPLE_SCREENSHOT_SPACE_ID }}
+          CHAT_EN: ${{ vars.APPLE_SCREENSHOT_CHAT_EN }}
+          CHAT_ZH: ${{ vars.APPLE_SCREENSHOT_CHAT_ZH }}
+          SESSION: ${{ inputs.session_fixture && secrets.APPLE_SCREENSHOT_CREDENTIALS || '' }}
+          DEVICE: ${{ matrix.device }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          project = 'apps/desktop/macos/CohubAcceptance.xcodeproj' if os.environ['DEVICE']=='mac' else 'apps/ios/Cohub.xcodeproj'
+          scheme = pathlib.Path(project)/'xcshareddata/xcschemes/Cohub Acceptance.xcscheme'
+          tree = ET.parse(scheme); action = tree.getroot().find('TestAction')
+          action.set('shouldUseLaunchSchemeArgsEnv','NO')
+          variables = ET.SubElement(action,'EnvironmentVariables')
+          values = {'COHUB_REVIEW_EMAIL':os.environ['EMAIL'],'COHUB_REVIEW_MAILBOX_URL':os.environ['MAILBOX'],'COHUB_SCREENSHOT_SPACE':os.environ['SAMPLE_SPACE'],'COHUB_MAC_APP_PATH':os.environ.get('COHUB_MAC_APP_PATH',''),'COHUB_TEST_KEYCHAIN_PASSWORD':os.environ.get('COHUB_TEST_KEYCHAIN_PASSWORD','')}
+          values.update(COHUB_CHAT_EN=os.environ['CHAT_EN'],COHUB_CHAT_ZH=os.environ['CHAT_ZH'])
+          values['COHUB_SCREENSHOT_SESSION']=os.environ['SESSION']
+          for key,value in values.items(): ET.SubElement(variables,'EnvironmentVariable',key=key,value=value,isEnabled='YES')
+          tree.write(scheme,encoding='UTF-8',xml_declaration=True)
+          PY
+      - name: Install authenticated iOS screenshot fixture
+        if: matrix.device != 'mac' && inputs.session_fixture
+        timeout-minutes: 15
+        uses: apple-actions/xcodebuild@v1.3.0
+        with:
+          project: apps/ios/Cohub.xcodeproj
+          scheme: Cohub Acceptance
+          configuration: Release
+          destination: ${{ format('platform=iOS Simulator,id={0}', env.SIMULATOR_ID) }}
+          action: test
+          extra-arguments: -only-testing:CohubSessionFixture -parallel-testing-enabled NO
+          result-bundle-path: ${{ runner.temp }}/Fixture.xcresult
+          build-settings: |
+            CODE_SIGNING_ALLOWED=YES
+            CODE_SIGN_IDENTITY=-
+            DEVELOPMENT_TEAM=6RKNFNT44H
+            ONLY_ACTIVE_ARCH=YES
+            MARKETING_VERSION=1.0.0
+            CURRENT_PROJECT_VERSION=20.1
+      - name: Exercise native login and capture screens
+        timeout-minutes: 18
+        uses: apple-actions/xcodebuild@v1.3.0
+        env:
+          NSUnbufferedIO: 'YES'
+        with:
+          project: ${{ matrix.device == 'mac' && 'apps/desktop/macos/CohubAcceptance.xcodeproj' || 'apps/ios/Cohub.xcodeproj' }}
+          scheme: Cohub Acceptance
+          configuration: ${{ matrix.device == 'mac' && 'Debug' || 'Release' }}
+          destination: ${{ matrix.device == 'mac' && 'platform=macOS' || format('platform=iOS Simulator,id={0}', env.SIMULATOR_ID) }}
+          action: test
+          extra-arguments: -only-testing:CohubAcceptance -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 -test-timeouts-enabled YES -default-test-execution-time-allowance 360 -maximum-test-execution-time-allowance 420
+          output-formatter: ''
+          result-bundle-path: ${{ runner.temp }}/Acceptance.xcresult
+          build-settings: |
+            CODE_SIGNING_ALLOWED=${{ matrix.device == 'mac' && 'NO' || 'YES' }}
+            CODE_SIGN_IDENTITY=-
+            DEVELOPMENT_TEAM=6RKNFNT44H
+            ONLY_ACTIVE_ARCH=YES
+            MARKETING_VERSION=1.0.0
+            CURRENT_PROJECT_VERSION=20.1
+      - name: Export selected screenshots
+        if: always()
+        run: |
+          if [[ -d "$RUNNER_TEMP/Acceptance.xcresult" ]]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/Acceptance.xcresult" --output-path "$RUNNER_TEMP/attachments"
+            python3 - <<'PY'
+          import json, os, pathlib, shutil
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          output=root/'screenshots';output.mkdir(exist_ok=True)
+          for manifest in (root/'attachments').rglob('manifest.json'):
+            def visit(value):
+              if isinstance(value,dict):
+                name=value.get('suggestedHumanReadableName',''); file=value.get('exportedFileName',value.get('fileName',''))
+                if name.startswith('STORE_') and file:
+                  source=manifest.parent/file
+                  if source.is_file():shutil.copyfile(source,output/(name if name.endswith('.png') else name+'.png'))
+                for item in value.values():visit(item)
+              elif isinstance(value,list):
+                for item in value:visit(item)
+            visit(json.loads(manifest.read_text()))
+          print('Exported store screenshots:',len(list(output.glob('*.png'))))
+          if not list(output.glob('*.png')):
+            for file in (root/'attachments').glob('manifest.json'):print(file.read_text()[:3000])
+          PY
+          fi
+      - name: Mac launch diagnostics
+        if: failure() && matrix.device == 'mac'
+        run: |
+          file "$COHUB_MAC_APP_PATH/Contents/MacOS/Cohub"
+          ls -l "$COHUB_MAC_APP_PATH/Contents/MacOS/Cohub"
+          codesign --display --verbose=4 --entitlements - "$COHUB_MAC_APP_PATH"
+          spctl --assess --verbose=4 "$COHUB_MAC_APP_PATH" || true
+          log show --last 8m --style compact --predicate 'eventMessage CONTAINS[c] "live.cohub.ios" OR eventMessage CONTAINS[c] "Cohub.app" OR (process == "amfid" AND eventMessage CONTAINS[c] "Cohub")' | tail -100
+      - name: iOS launch diagnostics
+        if: failure() && matrix.device != 'mac' && env.SIMULATOR_ID != ''
+        timeout-minutes: 2
+        run: |
+          xcrun simctl list devices booted
+          xcrun simctl spawn "$SIMULATOR_ID" log show --last 8m --style compact --predicate 'subsystem == "live.cohub.ios"' | tail -80
+          xcrun simctl spawn "$SIMULATOR_ID" log show --last 8m --style compact --predicate '(process == "Cohub" OR process == "SafariViewService") AND (messageType == error OR messageType == fault)' | python3 -c 'import re,sys; print(re.sub(r"https?://\S+", "<URL>", sys.stdin.read())[-16000:])'
+          xcrun simctl spawn "$SIMULATOR_ID" log show --last 8m --style compact --predicate 'process == "Cohub" OR eventMessage CONTAINS[c] "live.cohub.ios"' | tail -100
+          python3 - <<'PY'
+          import pathlib, os
+          roots=[pathlib.Path.home()/'Library/Logs/DiagnosticReports',pathlib.Path.home()/'Library/Developer/CoreSimulator/Devices'/os.environ['SIMULATOR_ID']/'data/Library/Logs/CrashReporter']
+          for root in roots:
+            for file in root.glob('Cohub*.ips'):
+              print(file.name)
+              print(file.read_text()[:10000])
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cohub-${{ matrix.device }}-screenshots
+          path: ${{ runner.temp }}/screenshots/*.png
+          if-no-files-found: warn
+          retention-days: 14
