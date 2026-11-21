@@ -24,6 +24,7 @@ import { registerSpaceCommerce } from "./space-commerce.js";
 import { formatBytes, registerSpaceFileTransfer } from "./space-files.js";
 import { registerSpaceWallet } from "./space-wallet.js";
 import { registerSpaceActivity } from "./space-activity.js";
+import { registerSessionRead, registerSpaceContext } from "./space-context.js";
 import { registerSpaceDisplays } from "./space-displays.js";
 import { registerSpaceInvitations } from "./space-invitations.js";
 import { registerSpaceTurns } from "./space-turns.js";
@@ -924,6 +925,7 @@ export function registerSpaces(program: Command): void {
   // ── spaces activity ──
   registerSpaceWallet(spacesCmd);
   registerSpaceActivity(spacesCmd);
+  registerSpaceContext(spacesCmd);
 
   // ── spaces usage ──
   spacesCmd
@@ -1747,6 +1749,9 @@ function registerSessions(spacesCmd: Command): void {
         process.exit(1);
       });
     });
+
+  // ── sessions read ──
+  registerSessionRead(sessionsCmd);
 
   // ── sessions turns ──
   registerTurns(sessionsCmd);

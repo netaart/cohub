@@ -88,6 +88,9 @@ cohub spaces ls --json
 cohub spaces create --name "Demo" --json
 cohub spaces get <spaceId> --json
 cohub -s <spaceId> spaces files ls
+cohub -s <spaceId> spaces context --author others
+cohub -s <spaceId> spaces sessions read <sessionId> --with-files
+cohub -s <spaceId> search "release notes"
 ```
 
 邀请链接与访问控制：

@@ -127,7 +127,9 @@ cohub spaces sessions ls
 cohub -s <spaceId> spaces sessions ls
 cohub spaces sessions create "<title>"
 cohub spaces sessions get <sessionId>
+cohub spaces sessions read <sessionId>           # chronological Markdown transcript (--all, --with-files, --out)
 cohub spaces sessions files <sessionId>          # Space files the Chat changed
+cohub spaces context                             # compact Space brief (files, diff, guides, chats, recent turns; supports --author others)
 cohub spaces sessions rename <sessionId> "<new title>"
 cohub spaces sessions archive <sessionId...>     # hidden for every member; a new message restores it
 cohub spaces sessions unarchive <sessionId...>

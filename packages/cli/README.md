@@ -122,6 +122,10 @@ cohub spaces prompt -h
 cohub spaces ls --json
 cohub spaces get <spaceId> --json
 cohub -s <spaceId> spaces get
+cohub -s <spaceId> spaces context
+cohub -s <spaceId> spaces context --author others --turns 15
+cohub -s <spaceId> spaces sessions read <sessionId> --with-files
+cohub -s <spaceId> search "release notes"
 COHUB_SPACE_ID=<spaceId> cohub spaces get
 cohub spaces create --name "<name>" --description "<description>" --json
 cohub spaces create --name "<name>" --checkpoint <checkpointId> --json
