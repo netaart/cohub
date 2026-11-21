@@ -272,7 +272,7 @@ function withRenderOptions(command: Command, camera: string): Command {
     .option("--rect <rect>", "Draw a world rect as x,y,width,height")
     .option("--scale <factor>", "Output pixels per board unit", "2")
     .option("--padding <units>", "Padding around the content in board units")
-    .option("--theme <name>", `Cohub theme: ${BOARD_THEME_IDS.join(", ")}`, "dark")
+    .option("--theme <name>", `Cohub theme: ${BOARD_THEME_IDS.join(", ")}; the neta-pixel themes print card images on photo cards`, "dark")
     .option("--paper <mode>", "Output paper: paper or transparent", "paper")
     .option("--format <format>", `Override the format (${BOARD_EXPORT_FORMATS.join(", ")}, ${BOARD_VIDEO_FORMATS.join(", ")})`)
     .option("--quality <q>", "JPEG/WebP quality from 0 to 1", "0.92")

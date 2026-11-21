@@ -48,6 +48,7 @@ import {
 	boardViewToWorld,
 	frameContainsPoint,
 	isBoardScriptScreenRoot,
+	boardMediaPresentation,
 	isBoardViewLevel,
 	isBoardViewPitched,
 	stableCullRect,
@@ -434,6 +435,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let prefetchContext: BoardRenderContext | null = null;
 	let cancelPrefetch: (() => void) | null = null;
 	const staleIds = new Set<string>();
+	let presentedItems: Readonly<Record<string, BoardItem>> | null = null;
+	let framePresentations = new Map<string, string>();
 	let canvasBox: BoardCanvasBox | null = null;
 	let canvasSize = { width: 0, height: 0, resolution: 0 };
 	let cardEpoch = 0;
@@ -590,6 +593,18 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 				naturalIds.add(id);
 			}
 		}
+	}
+
+	/** A frame's presentation changes how the media inside it draws, so repaint them. */
+	function staleFramePresentations(renderScene: BoardScene) {
+		const items = editor.document.items;
+		if (items === presentedItems) return;
+		presentedItems = items;
+		const next = new Map<string, string>();
+		for (const [id, item] of Object.entries(items)) if (item.type === "frame" && item.props.presentation) next.set(id, item.props.presentation);
+		for (const id of new Set([...next.keys(), ...framePresentations.keys()]))
+			if (next.get(id) !== framePresentations.get(id)) for (const child of renderScene.descendants(id)) staleIds.add(child);
+		framePresentations = next;
 	}
 
 	let lastCenter: (WorldPoint & { time: number }) | null = null;
@@ -890,7 +905,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			arrowEndpoints = [resolved.start.point, resolved.mid, resolved.end.point];
 		}
 		const hoverId = interaction.type === "idle" && editor.tool !== "play" ? editor.hoverId : null;
-		const hovered = hoverId && !editor.selection.includes(hoverId) ? (renderScene.get(hoverId) ?? null) : null;
+		const hoveredItem = hoverId && !editor.selection.includes(hoverId) ? (renderScene.get(hoverId) ?? null) : null;
+		// Read-only viewers see plain media as part of the scene, not as items to pick.
+		const hovered = hoveredItem && editor.readonly && boardMediaPresentation(hoveredItem, (id) => renderScene.get(id)) === "plain" ? null : hoveredItem;
 		drawBoardOverlay(overlay, {
 			zoom: camera.zoom,
 			pointerType: editor.pointerType,
@@ -1435,6 +1452,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			for (const id of [shownEditingId, editor.editingId]) if (id) staleIds.add(id);
 			shownEditingId = editor.editingId;
 		}
+		staleFramePresentations(renderScene);
 		for (const id of frame.items.keys()) {
 			pinnedIds.add(id);
 			for (const child of renderScene.descendants(id)) pinnedIds.add(child);

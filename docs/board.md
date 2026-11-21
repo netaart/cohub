@@ -56,12 +56,12 @@ Common fields: `type`, `parent`, `z`, `position`, `size`, `rotation` (degrees),
 
 | type | props |
 |---|---|
-| `frame` | `label`, `clip`, optional `decoration` (`frame` or `none`) |
+| `frame` | `label`, `clip`, optional `decoration` (`frame` or `none`), optional `presentation` (`card` or `plain`) for the images and videos inside |
 | `text` | `text`, `fontSize`, `fontWeight`, `font`, `align`, `lineHeight`, `width`, `reveal`, `revealBy` (`char` `word` `line`), `revealMotion` (`cut` `fade` `rise`) |
 | `shape` | `geometry` (`rectangle` `rounded` `ellipse` `diamond` `triangle` `path`), `path`, `text`, `fontSize`, `align` |
 | `draw` | `points` (`{x, y, p}` relative to `position`) |
 | `arrow` | `start`, `end` (a point, or `{ "item": id, "anchor"?, "port"? }`), `route`, `bend`, `waypoints`, `arrowStart`, `arrowEnd`, `label`, `fontSize`, `relation` |
-| `image` `video` `audio` `file` | `src` (public HTTP(S) URL or relative Space file path), `crop` (image: `{x, y, w, h}` as 0–1 fractions of the source), `snapshot` (cached media facts), `origin` (media: `{ taskRunId, artifactId }` of the run that produced it); video and audio: `time` (playback position in ms) and `volume` (0–1) |
+| `image` `video` `audio` `file` | `src` (public HTTP(S) URL or relative Space file path), `crop` (image: `{x, y, w, h}` as 0–1 fractions of the source), `snapshot` (cached media facts), `origin` (media: `{ taskRunId, artifactId }` of the run that produced it); image and video: `presentation` (`card` or `plain`, see [Cards and plain media](#cards-and-plain-media)); video and audio: `time` (playback position in ms) and `volume` (0–1) |
 | `task` | `taskRunId`, `snapshot` (server-maintained; see [Tasks on Boards](#tasks-on-boards)) |
 | `session` | `sessionId`, `snapshot` (server-maintained; see [Sessions on Boards](#sessions-on-boards)) |
 | `effect` | `kind` (`particles` `trail` `impact` `flash` `glow`) and its parameters; `shape` (`circle` `square` `star` `heart` `spark`) and `colors` for particles and impacts |
@@ -369,6 +369,24 @@ when children may extend outside it. The web selection toolbar can toggle its ap
 ```json
 {"items":{"train":{"type":"frame","props":{"decoration":"none","clip":false},"position":{"x":100,"y":200},"size":{"width":400,"height":180}},"body":{"type":"shape","parent":"train","size":{"width":400,"height":180}}}}
 ```
+
+### Cards and plain media
+
+Images and videos show as works by default: a card in the viewer's theme (the pixel
+themes print an image on a photo card unless its edges are transparent, and run
+videos on film), opened on tap by
+read-only viewers. `props.presentation: "plain"` draws only the picture instead, with
+its transparency, no placeholder while it loads, and no tap to open, for scenery,
+sprites and other parts of a scene or game. Set it on a frame to cover every image
+and video inside; an item's own value wins over its frames, and the nearest frame
+wins over outer ones. A script's temporary items are plain unless they say otherwise.
+
+```json
+{"items":{"stage":{"type":"frame","props":{"label":"Play","presentation":"plain"},"size":{"width":960,"height":540}},"hall":{"type":"image","parent":"stage","props":{"src":"art/hall.webp"},"size":{"width":960,"height":540}}}}
+```
+
+Exports draw cards in the chosen `--theme`; use `--theme neta-pixel` to check how the
+photo cards look.
 
 ### Frames as pages
 
