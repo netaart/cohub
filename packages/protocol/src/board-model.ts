@@ -261,6 +261,12 @@ export const BOARD_SHAPE_GEOMETRIES = [
 ] as const;
 export type BoardShapeGeometry = (typeof BOARD_SHAPE_GEOMETRIES)[number];
 
+export const BOARD_MEDIA_PRESENTATIONS = ["card", "plain"] as const;
+export type BoardMediaPresentation = (typeof BOARD_MEDIA_PRESENTATIONS)[number];
+export const BoardMediaPresentationSchema = z
+	.enum(BOARD_MEDIA_PRESENTATIONS)
+	.describe("card shows the media as a work on a card, in the theme's style, and opens it on tap when read-only; plain draws only the picture, keeping transparency, as part of a scene or game.");
+
 export const BoardFrameItemSchema = z
 	.object({
 		...boxed(BOARD_DEFAULT_SIZES.frame),
@@ -269,6 +275,7 @@ export const BoardFrameItemSchema = z
 			.object({
 				label: z.string().max(280).default(""),
 				decoration: z.enum(["frame", "none"]).optional().describe("none hides the title, border and background: an invisible group whose tracks move every child; with a label it is also a page viewers step to."),
+				presentation: BoardMediaPresentationSchema.optional().describe("How images and videos inside show, unless they set their own; the nearest frame that sets it wins."),
 				clip: z.boolean().default(true).describe("Hide children outside the frame."),
 			})
 			.strict()
@@ -450,6 +457,9 @@ export const BoardMediaOriginSchema = z
 	.describe("The generation run and result this media came from.");
 export type BoardMediaOrigin = z.infer<typeof BoardMediaOriginSchema>;
 const mediaProps = { ...fileProps, origin: BoardMediaOriginSchema.optional() };
+const presentedMedia = {
+	presentation: BoardMediaPresentationSchema.optional().describe("Overrides the enclosing frame. Without either, items you place show as cards and a script's temporary items show plain."),
+};
 const timedFileProps = {
 	...mediaProps,
 	time: nonNegative.optional().describe("Playback position in milliseconds; animate props.time to play it on a timeline. It sounds while its time moves forward."),
@@ -465,11 +475,11 @@ export const BoardImageItemSchema = z
 	.object({
 		...boxed(BOARD_DEFAULT_SIZES.image),
 		type: z.literal("image"),
-		props: z.object({ ...mediaProps, crop: BoardCropSchema.optional() }).strict(),
+		props: z.object({ ...mediaProps, ...presentedMedia, crop: BoardCropSchema.optional() }).strict(),
 	})
 	.strict();
 export const BoardVideoItemSchema = z
-	.object({ ...boxed(BOARD_DEFAULT_SIZES.video), type: z.literal("video"), props: z.object(timedFileProps).strict() })
+	.object({ ...boxed(BOARD_DEFAULT_SIZES.video), type: z.literal("video"), props: z.object({ ...timedFileProps, ...presentedMedia }).strict() })
 	.strict();
 export const BoardAudioItemSchema = z
 	.object({ ...boxed(BOARD_DEFAULT_SIZES.audio), type: z.literal("audio"), props: z.object(timedFileProps).strict() })

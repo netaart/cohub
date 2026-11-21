@@ -220,6 +220,11 @@ export function isBoardScriptScreenRoot(id: string): boolean {
   return id.startsWith("~script-") && id.endsWith("-~screen");
 }
 
+/** Whether an item is a script's temporary scene item or one of its layer roots. */
+export function isBoardScriptTemporary(id: string): boolean {
+  return id.startsWith("~script-");
+}
+
 export function scriptTemporaryPrefix(owner: string): string {
   let hash = 2166136261;
   for (const char of owner)
