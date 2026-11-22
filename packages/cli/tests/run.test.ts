@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,30 +75,32 @@ test("cohub run accepts -s/--space/--space= both before and after run, without s
 });
 
 test("cohub run resolves username/slug passed after run", async () => {
-  const server = createServer((req, res) => {
-    if (req.url === "/api/spaces/by-slug/atou/project") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ id: SPACE_PROJECT, slug: "project", name: "Project" }));
-      return;
-    }
-    res.writeHead(404);
-    res.end();
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const { port } = server.address() as AddressInfo;
-
+  const previousFetch = globalThis.fetch;
   const previousBaseUrl = process.env.COHUB_BASE_URL;
   const previousToken = process.env.COHUB_EXECUTION_TOKEN;
   const previousSpace = process.env.COHUB_SPACE_ID;
-  process.env.COHUB_BASE_URL = `http://127.0.0.1:${port}`;
+  process.env.COHUB_BASE_URL = "https://cohub-run-test.invalid";
   process.env.COHUB_EXECUTION_TOKEN = "test-token";
   delete process.env.COHUB_SPACE_ID;
+  globalThis.fetch = async (input) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (url.pathname === "/api/spaces/by-slug/atou/project") {
+      return new Response(JSON.stringify({ id: SPACE_PROJECT, slug: "project", name: "Project" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ message: `Unhandled ${url.pathname}` }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    });
+  };
   try {
     const options = await parseRunCliOptions(["run", "-s", "atou/project", "--", "git", "status"]);
     assert.equal(options.spaceId, SPACE_PROJECT);
     assert.equal(options.command, "git status");
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    globalThis.fetch = previousFetch;
     if (previousBaseUrl === undefined) delete process.env.COHUB_BASE_URL;
     else process.env.COHUB_BASE_URL = previousBaseUrl;
     if (previousToken === undefined) delete process.env.COHUB_EXECUTION_TOKEN;

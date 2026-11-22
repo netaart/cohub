@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { Command } from "commander";
 import { registerSearch } from "../src/commands/search.js";
@@ -10,6 +8,8 @@ const HOME_ID = "11111111-1111-4111-8111-111111111111";
 const OWNED_ID = "22222222-2222-4222-8222-222222222222";
 const OTHER_ID = "33333333-3333-4333-8333-333333333333";
 
+let mockApiSeq = 0;
+
 type RecordedRequest = {
   method: string;
   path: string;
@@ -17,11 +17,8 @@ type RecordedRequest = {
   body: unknown;
 };
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  const raw = Buffer.concat(chunks).toString("utf-8").trim();
-  if (!raw) return undefined;
+function parseRequestBody(raw: BodyInit | null | undefined): unknown {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
   return JSON.parse(raw);
 }
 
@@ -29,68 +26,68 @@ async function withMockApi(
   fn: (ctx: { requests: RecordedRequest[]; runCli: (argv: string[]) => Promise<string> }) => Promise<void>,
 ): Promise<void> {
   const requests: RecordedRequest[] = [];
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const body = await readJsonBody(req);
-    requests.push({ method: req.method ?? "GET", path: url.pathname, query: url.searchParams, body });
-
-    const json = (status: number, payload: unknown) => {
-      res.writeHead(status, { "content-type": "application/json" });
-      res.end(JSON.stringify(payload));
-    };
-
-    if (req.method === "POST" && url.pathname === "/api/me/spaces/home") {
-      return json(200, { id: HOME_ID, name: "Home", slug: "home" });
-    }
-    if (req.method === "GET" && url.pathname === "/api/me/spaces/by-slug/notes") {
-      return json(200, { id: OWNED_ID, name: "Notes", slug: "notes" });
-    }
-    if (req.method === "GET" && url.pathname === "/api/spaces/by-slug/atou/project") {
-      return json(200, { id: OTHER_ID, name: "Project", slug: "project" });
-    }
-    if (req.method === "GET" && url.pathname === "/api/search") {
-      return json(200, { items: [], degraded: false });
-    }
-    if (req.method === "GET" && /^\/api\/spaces\/[^/]+$/.test(url.pathname)) {
-      const id = url.pathname.split("/").at(-1);
-      return json(200, { id, name: "Space", slug: "space", status: "active", createdAt: "2026-01-01T00:00:00.000Z" });
-    }
-    if (req.method === "GET" && /^\/api\/spaces\/[^/]+\/overview$/.test(url.pathname)) {
-      return json(200, { days: 30, apps: { count: 0, views: 0, likes: 0 } });
-    }
-    if (req.method === "GET" && /^\/api\/spaces\/[^/]+\/sandbox$/.test(url.pathname)) {
-      return json(200, { sandbox: { provider: "cloud", meta: { setup: null } } });
-    }
-    if (req.method === "PATCH" && /^\/api\/spaces\/[^/]+$/.test(url.pathname)) {
-      const id = url.pathname.split("/").at(-1);
-      return json(200, { space: { id, name: "Updated", slug: "updated" } });
-    }
-    if (req.method === "GET" && /^\/api\/spaces\/[^/]+\/config$/.test(url.pathname)) {
-      return json(200, { config: { sandbox: { spec: "standard", allowedSpec: "standard" }, guest: null } });
-    }
-    if (req.method === "PATCH" && /^\/api\/spaces\/[^/]+\/config$/.test(url.pathname)) {
-      return json(200, { config: { sandbox: { spec: "boost" }, guest: null }, sandbox: { pendingRestart: false } });
-    }
-    if (req.method === "GET" && /^\/api\/apps\/space\/[^/]+$/.test(url.pathname)) {
-      return json(200, { apps: [{ id: "app-1", slug: "welcome" }] });
-    }
-    if (req.method === "PATCH" && url.pathname === "/api/me/resources/space/labels") {
-      return json(200, { assignments: [] });
-    }
-    if (req.method === "PATCH" && url.pathname === "/api/me/resources/space/labels/batch") {
-      return json(200, { resourceRefs: [], affectedLabelIds: [] });
-    }
-    return json(404, { message: `Unhandled ${req.method} ${url.pathname}` });
-  });
-
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const { port } = server.address() as AddressInfo;
-
+  const previousFetch = globalThis.fetch;
   const previousBaseUrl = process.env.COHUB_BASE_URL;
   const previousToken = process.env.COHUB_EXECUTION_TOKEN;
   const previousSpace = process.env.COHUB_SPACE_ID;
-  process.env.COHUB_BASE_URL = `http://127.0.0.1:${port}`;
+  process.env.COHUB_BASE_URL = `https://cohub-space-ref-test-${++mockApiSeq}.invalid`;
   process.env.COHUB_EXECUTION_TOKEN = "test-token";
+
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const body = parseRequestBody(init?.body);
+    requests.push({ method, path: url.pathname, query: url.searchParams, body });
+
+    const json = (status: number, payload: unknown) =>
+      new Response(JSON.stringify(payload), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+
+    if (method === "POST" && url.pathname === "/api/me/spaces/home") {
+      return json(200, { id: HOME_ID, name: "Home", slug: "home" });
+    }
+    if (method === "GET" && url.pathname === "/api/me/spaces/by-slug/notes") {
+      return json(200, { id: OWNED_ID, name: "Notes", slug: "notes" });
+    }
+    if (method === "GET" && url.pathname === "/api/spaces/by-slug/atou/project") {
+      return json(200, { id: OTHER_ID, name: "Project", slug: "project" });
+    }
+    if (method === "GET" && url.pathname === "/api/search") {
+      return json(200, { items: [], degraded: false });
+    }
+    if (method === "GET" && /^\/api\/spaces\/[^/]+$/.test(url.pathname)) {
+      const id = url.pathname.split("/").at(-1);
+      return json(200, { id, name: "Space", slug: "space", status: "active", createdAt: "2026-01-01T00:00:00.000Z" });
+    }
+    if (method === "GET" && /^\/api\/spaces\/[^/]+\/overview$/.test(url.pathname)) {
+      return json(200, { days: 30, apps: { count: 0, views: 0, likes: 0 } });
+    }
+    if (method === "GET" && /^\/api\/spaces\/[^/]+\/sandbox$/.test(url.pathname)) {
+      return json(200, { sandbox: { provider: "cloud", meta: { setup: null } } });
+    }
+    if (method === "PATCH" && /^\/api\/spaces\/[^/]+$/.test(url.pathname)) {
+      const id = url.pathname.split("/").at(-1);
+      return json(200, { space: { id, name: "Updated", slug: "updated" } });
+    }
+    if (method === "GET" && /^\/api\/spaces\/[^/]+\/config$/.test(url.pathname)) {
+      return json(200, { config: { sandbox: { spec: "standard", allowedSpec: "standard" }, guest: null } });
+    }
+    if (method === "PATCH" && /^\/api\/spaces\/[^/]+\/config$/.test(url.pathname)) {
+      return json(200, { config: { sandbox: { spec: "boost" }, guest: null }, sandbox: { pendingRestart: false } });
+    }
+    if (method === "GET" && /^\/api\/apps\/space\/[^/]+$/.test(url.pathname)) {
+      return json(200, { apps: [{ id: "app-1", slug: "welcome" }] });
+    }
+    if (method === "PATCH" && url.pathname === "/api/me/resources/space/labels") {
+      return json(200, { assignments: [] });
+    }
+    if (method === "PATCH" && url.pathname === "/api/me/resources/space/labels/batch") {
+      return json(200, { resourceRefs: [], affectedLabelIds: [] });
+    }
+    return json(404, { message: `Unhandled ${method} ${url.pathname}` });
+  };
 
   const runCli = async (argv: string[]): Promise<string> => {
     const program = new Command("cohub")
@@ -114,7 +111,7 @@ async function withMockApi(
   try {
     await fn({ requests, runCli });
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    globalThis.fetch = previousFetch;
     if (previousBaseUrl === undefined) delete process.env.COHUB_BASE_URL;
     else process.env.COHUB_BASE_URL = previousBaseUrl;
     if (previousToken === undefined) delete process.env.COHUB_EXECUTION_TOKEN;
