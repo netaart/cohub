@@ -53,17 +53,19 @@ function topLevelRunIndex(argv: string[]): number {
   return -1;
 }
 
-function parseSpaceId(tokens: string[]): string | undefined {
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index] ?? "";
-    if (token === "-s" || token === "--space") {
-      const value = tokens[index + 1];
-      if (!value) return error("Missing space", `${token} requires a value`);
-      return value.trim() || undefined;
-    }
-    if (token.startsWith("--space=")) return token.slice("--space=".length).trim() || undefined;
+function parseSpaceOption(tokens: string[], index: number): { value: string; nextIndex: number } | null {
+  const token = tokens[index] ?? "";
+  if (token === "-s" || token === "--space") {
+    const value = tokens[index + 1]?.trim();
+    if (!value) return error("Missing space", `${token} requires a value`);
+    return { value, nextIndex: index + 1 };
   }
-  return undefined;
+  if (token.startsWith("--space=")) {
+    const value = token.slice("--space=".length).trim();
+    if (!value) return error("Missing space", "--space requires a value");
+    return { value, nextIndex: index };
+  }
+  return null;
 }
 
 export async function parseRunCliOptions(
@@ -76,12 +78,20 @@ export async function parseRunCliOptions(
   const beforeRun = argv.slice(0, runIndex);
   const afterRun = argv.slice(runIndex + 1);
 
+  let explicitSpaceId: string | undefined;
   for (let index = 0; index < beforeRun.length; index += 1) {
-    index = consumeBaseUrlOption(beforeRun, index) ?? index;
-    if (beforeRun[index] === "-s" || beforeRun[index] === "--space") index += 1;
+    const endpointIndex = consumeBaseUrlOption(beforeRun, index);
+    if (endpointIndex !== null) {
+      index = endpointIndex;
+      continue;
+    }
+    const spaceOption = parseSpaceOption(beforeRun, index);
+    if (spaceOption) {
+      explicitSpaceId = spaceOption.value;
+      index = spaceOption.nextIndex;
+    }
   }
 
-  const explicitSpaceId = parseSpaceId(beforeRun) ?? process.env.COHUB_SPACE_ID?.trim() ?? "";
   let json = beforeRun.includes("--json");
   let async = false;
   let commandOption: string | null = null;
@@ -93,6 +103,13 @@ export async function parseRunCliOptions(
     const endpointIndex = consumeBaseUrlOption(afterRun, index);
     if (endpointIndex !== null) {
       index = endpointIndex;
+      continue;
+    }
+
+    const spaceOption = parseSpaceOption(afterRun, index);
+    if (spaceOption) {
+      explicitSpaceId = spaceOption.value;
+      index = spaceOption.nextIndex;
       continue;
     }
 
@@ -159,9 +176,11 @@ export function printRunHelp(): void {
   process.stdout.write(`
 Usage:
   cohub [--base-url <url>] [-s <space>] run [options] -- <shell command>
+  cohub run [-s <space>] [options] -- <shell command>
   cohub [-s <space>] run --command <shell command>
 
 Options:
+  -s, --space <space>      Target Space: ID, slug, or username/slug
       --base-url <url>     API base URL (overrides COHUB_BASE_URL)
   -c, --command <command>  Shell command to execute in the space workspace
       --async              Queue the command and return immediately
@@ -169,9 +188,10 @@ Options:
   -h, --help               Show this help
 
 Examples:
-  cohub -s <spaceId> run --command "git status"
-  cohub -s <spaceId> run --async --command "pnpm test"
-  cohub -s <spaceId> run -- git status -sb
+  cohub -s <space> run --command "git status"
+  cohub run -s <space> -- git status -sb
+  cohub -s <space> run --async --command "pnpm test"
+  cohub -s <space> run -- git status -sb
 
 Notes:
   - Without -s or COHUB_SPACE_ID, the command uses the current directory Runtime binding; it never falls back to Home.

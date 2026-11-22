@@ -1,7 +1,8 @@
-import { isUuid, type GlobalSearchResult, type GlobalSearchType } from "@neta-art/cohub";
+import type { GlobalSearchResult, GlobalSearchType } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { formatLocalDateTime, table, json as outJson, jsonRequested, error, handleHttp, truncateText, type Row } from "../output.js";
+import { formatLocalDateTime, table, json as outJson, jsonRequested, error, truncateText, type Row } from "../output.js";
+import { explicitSpaceFlag, failSpaceTarget, resolveSpaceRef } from "../space.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_TITLE_LENGTH = 72;
@@ -50,9 +51,7 @@ function parseTypes(value: string | undefined): GlobalSearchType[] | undefined {
 
 function parseSearchInput(opts: SearchCliOptions) {
   const types = parseTypes(opts.types);
-  const spaceId = opts.spaceId?.trim();
-  if (spaceId && !isUuid(spaceId)) throw new Error("Invalid space id");
-  return { types, spaceId: spaceId || undefined, labelRef: opts.labelRef?.trim() || undefined };
+  return { types, labelRef: opts.labelRef?.trim() || undefined };
 }
 
 function rowsFor(items: GlobalSearchResult[]): Row[] {
@@ -73,7 +72,7 @@ export function registerSearch(program: Command): void {
     .argument("[query]", "Search query")
     .option("--limit <n>", "Maximum results, 1-50", String(DEFAULT_LIMIT))
     .option("--types <types>", "Comma-separated result types: chat,space,label")
-    .option("--space-id <id>", "Limit search to a space")
+    .option("--space-id <space>", "Limit search to a space (ID, home, slug, or username/slug)")
     .option("--label-ref <ref>", "Search items under an exact label ref")
     .option("--json", "Output as JSON")
     .addHelpText("after", `
@@ -81,22 +80,25 @@ export function registerSearch(program: Command): void {
 Examples:
   cohub search "release notes"
   cohub search "failing tests" --limit 10
-  cohub search "bug" --types chat --space-id <spaceId>
+  cohub search "bug" --types chat --space-id <space>
+  cohub -s <space> search "bug" --types chat
   cohub search --types label --label-ref bug
   cohub search "login" --types label --label-ref bug
   cohub search "design review" --json
 `)
-    .action(async (query: string | undefined, opts: SearchCliOptions) => {
+    .action(async (query: string | undefined, opts: SearchCliOptions, command: Command) => {
       const client = createClient();
       try {
         const input = parseSearchInput(opts);
         const q = query ?? "";
         if (!q.trim() && !input.labelRef) return error("Search query is required unless --label-ref is provided.");
+        const spaceRef = opts.spaceId !== undefined ? opts.spaceId.trim() : explicitSpaceFlag(command);
+        const spaceId = spaceRef !== null ? await resolveSpaceRef(spaceRef) : undefined;
         const result = await client.search.query({
           q,
           limit: clampLimit(opts.limit),
           types: input.types,
-          spaceId: input.spaceId,
+          spaceId,
           labelRef: input.labelRef,
         });
         if (jsonRequested(opts)) return outJson(result);
@@ -114,10 +116,10 @@ Examples:
           { key: "href", label: "Href" },
         ]);
       } catch (e: unknown) {
-        if (e instanceof Error && (e.message === "Invalid space id" || e.message.startsWith("Invalid search type:"))) {
+        if (e instanceof Error && e.message.startsWith("Invalid search type:")) {
           return error(e.message);
         }
-        handleHttp(e);
+        failSpaceTarget(e);
       }
     });
 }

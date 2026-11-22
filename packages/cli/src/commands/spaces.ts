@@ -17,7 +17,7 @@ import { createClient, createRealtimeClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
 import { SESSION_INITIATOR_COLUMN, SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
-import { resolveSpace } from "../space.js";
+import { failSpaceTarget, resolveSpace, resolveSpaceRef } from "../space.js";
 import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
 import { registerDecisionCommand } from "./decision.js";
 import { registerSpaceCommerce } from "./space-commerce.js";
@@ -563,7 +563,7 @@ export function registerSpaceSetup(spacesCmd: Command, deps: { createClient?: ty
     .option("--json", "Output as JSON")
     .action(async (id: string | undefined, opts: { json?: boolean }) => {
       try {
-        const spaceId = id ?? await resolveSpace(spacesCmd);
+        const spaceId = id !== undefined ? await resolveSpaceRef(id) : await resolveSpace(spacesCmd);
         const { sandbox } = await (deps.createClient ?? createClient)().space(spaceId).sandbox.get();
         const setup = sandbox?.meta?.setup ?? null;
         if (jsonRequested(opts)) return outJson({ provider: sandbox?.provider ?? null, setup });
@@ -580,7 +580,7 @@ export function registerSpaceSetup(spacesCmd: Command, deps: { createClient?: ty
           { key: "script", label: "Script" }, { key: "status", label: "Status" },
           { key: "duration", label: "Duration" }, { key: "logs", label: "Logs" },
         ]);
-      } catch (e: unknown) { handleHttp(e); }
+      } catch (e: unknown) { failSpaceTarget(e); }
     });
 }
 
@@ -638,13 +638,14 @@ export function registerSpaces(program: Command): void {
       .action(async (ids: string[], opts: { json?: boolean }) => {
         const client = createClient();
         try {
-          const chunks = Array.from({ length: Math.ceil(ids.length / 200) }, (_, index) => ids.slice(index * 200, (index + 1) * 200));
+          const resolvedIds = await Promise.all(ids.map((id) => resolveSpaceRef(id)));
+          const chunks = Array.from({ length: Math.ceil(resolvedIds.length / 200) }, (_, index) => resolvedIds.slice(index * 200, (index + 1) * 200));
           for (const chunk of chunks) await client.user.labels.patchResources(chunk, archive
             ? { addLabelRefs: ["Archived"], removeLabelRefs: ["Pinned"] }
             : { removeLabelRefs: ["Archived"] });
-          if (jsonRequested(opts)) return outJson({ ids, archived: archive });
-          ok(`${archive ? "Archived" : "Unarchived"} ${ids.length} space(s)`);
-        } catch (e: unknown) { handleHttp(e); }
+          if (jsonRequested(opts)) return outJson({ ids: resolvedIds, archived: archive });
+          ok(`${archive ? "Archived" : "Unarchived"} ${resolvedIds.length} space(s)`);
+        } catch (e: unknown) { failSpaceTarget(e); }
       });
   }
 
@@ -654,9 +655,9 @@ export function registerSpaces(program: Command): void {
     .description("Show space details")
     .option("--json", "Output as JSON")
     .action(async (id: string | undefined, opts: { json?: boolean }) => {
-      const spaceId = id?.trim() || await resolveSpace(spacesCmd);
       const client = createClient();
       try {
+        const spaceId = id !== undefined ? await resolveSpaceRef(id) : await resolveSpace(spacesCmd);
         const [space, overview] = await Promise.all([
           client.spaces.get(spaceId),
           client.space(spaceId).overview.get().catch(() => null),
@@ -677,7 +678,7 @@ export function registerSpaces(program: Command): void {
         ]);
         if (overview) printSpaceOverview(overview);
       } catch (e: unknown) {
-        handleHttp(e);
+        failSpaceTarget(e);
       }
     });
 
@@ -702,7 +703,8 @@ export function registerSpaces(program: Command): void {
 
       const client = createClient();
       try {
-        const result = await client.space(id).update(input);
+        const spaceId = await resolveSpaceRef(id);
+        const result = await client.space(spaceId).update(input);
         if (jsonRequested(opts)) return outJson(result);
         ok("Space updated");
         table([result.space], [
@@ -711,7 +713,7 @@ export function registerSpaces(program: Command): void {
           { key: "slug", label: "Slug" },
         ]);
       } catch (e: unknown) {
-        handleHttp(e);
+        failSpaceTarget(e);
       }
     });
 
@@ -722,10 +724,11 @@ export function registerSpaces(program: Command): void {
     .action(async (id: string, name: string) => {
       const client = createClient();
       try {
-        await client.space(id).rename(name);
+        const spaceId = await resolveSpaceRef(id);
+        await client.space(spaceId).rename(name);
         ok(`Space renamed to "${name}"`);
       } catch (e: unknown) {
-        handleHttp(e);
+        failSpaceTarget(e);
       }
     });
 
@@ -785,10 +788,11 @@ export function registerSpaces(program: Command): void {
         const autoDestroy = parseAutoDestroy(opts);
         const spec = opts.spec === "auto" ? null : parseSandboxSpec(opts.spec);
         const image = opts.image === "auto" ? null : opts.image ? parseChoice(opts.image, "sandbox image", ["default", "game"] as const) : undefined;
-        const guest = opts.guestApp === undefined ? undefined : await resolveGuestApp(client, id, opts.guestApp);
+        const spaceId = await resolveSpaceRef(id);
+        const guest = opts.guestApp === undefined ? undefined : await resolveGuestApp(client, spaceId, opts.guestApp);
         const sandboxChanged = Boolean(autoDestroy) || spec !== undefined || image !== undefined;
         if (sandboxChanged || guest !== undefined) {
-          const result = await client.space(id).updateConfig({
+          const result = await client.space(spaceId).updateConfig({
             ...(sandboxChanged ? { sandbox: { ...(autoDestroy ? { autoDestroy } : {}), ...(spec !== undefined ? { spec } : {}), ...(image !== undefined ? { image } : {}) } } : {}),
             ...(guest !== undefined ? { guest } : {}),
           });
@@ -796,7 +800,7 @@ export function registerSpaces(program: Command): void {
           ok(`Space config updated${autoDestroy ? ` — sandbox auto destroy: ${formatAutoDestroy(autoDestroy)}` : ""}${spec ? ` — sandbox spec: ${spec}` : ""}${result.sandbox?.pendingRestart ? " — restart the sandbox to apply" : ""}`);
           return;
         }
-        const result = await client.space(id).getConfig();
+        const result = await client.space(spaceId).getConfig();
         if (jsonRequested(opts)) return outJson(result);
         table([
           { key: "sandbox.autoDestroy", value: formatAutoDestroy(result.config.sandbox.autoDestroy) },
@@ -814,7 +818,7 @@ export function registerSpaces(program: Command): void {
           { key: "value", label: "Value" },
         ]);
       } catch (e: unknown) {
-        handleHttp(e);
+        failSpaceTarget(e);
       }
     });
 
@@ -898,10 +902,11 @@ export function registerSpaces(program: Command): void {
     .action(async (id: string) => {
       const client = createClient();
       try {
-        await client.user.labels.patchResourceLabels("space", id.trim(), { addLabelRefs: ["Pinned"] });
+        const spaceId = await resolveSpaceRef(id);
+        await client.user.labels.patchResourceLabels("space", spaceId, { addLabelRefs: ["Pinned"] });
         ok("Space pinned");
       } catch (e: unknown) {
-        handleHttp(e);
+        failSpaceTarget(e);
       }
     });
 
@@ -911,10 +916,11 @@ export function registerSpaces(program: Command): void {
     .action(async (id: string) => {
       const client = createClient();
       try {
-        await client.user.labels.patchResourceLabels("space", id.trim(), { removeLabelRefs: ["Pinned"] });
+        const spaceId = await resolveSpaceRef(id);
+        await client.user.labels.patchResourceLabels("space", spaceId, { removeLabelRefs: ["Pinned"] });
         ok("Space unpinned");
       } catch (e: unknown) {
-        handleHttp(e);
+        failSpaceTarget(e);
       }
     });
 
@@ -1511,6 +1517,72 @@ type SessionCreateOptions = {
   json?: boolean;
 };
 
+type TailSession = {
+  on(event: "turn.patch" | "turn.finalized" | "turn.error", handler: (event: { payload?: Record<string, unknown> }) => void): unknown;
+};
+
+type TailClient = {
+  disconnect(): Promise<void>;
+};
+
+export function attachSessionTail(
+  client: TailClient,
+  session: TailSession,
+  options: {
+    json: boolean;
+    stdout?: { write(chunk: string): unknown };
+    stderr?: { write(chunk: string): unknown };
+    exit?: (code: number) => void;
+  },
+): void {
+  const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
+  const exit = options.exit ?? ((code: number) => process.exit(code));
+  let exiting = false;
+  const finish = async (code: number) => {
+    if (exiting) return;
+    exiting = true;
+    await client.disconnect().catch(() => undefined);
+    exit(code);
+  };
+
+  if (!options.json) stdout.write("  Listening for events...\n\n");
+
+  let lastAppendPath: string | null = null;
+  session.on("turn.patch", (e: { payload?: Record<string, unknown> }) => {
+    if (options.json) {
+      stdout.write(`${JSON.stringify(e)}\n`);
+      return;
+    }
+    const ops = e.payload?.ops as Array<{ o?: string; p?: string; v?: unknown }> | undefined;
+    for (const op of ops ?? []) {
+      if (op.o === "append" && typeof op.v === "string" && op.p?.endsWith("/text")) {
+        lastAppendPath = op.p;
+        stdout.write(op.v);
+        continue;
+      }
+      if (op.o === "append" && typeof op.p === "string") {
+        lastAppendPath = op.p;
+        continue;
+      }
+      if (!op.o && !op.p && typeof op.v === "string" && lastAppendPath?.endsWith("/text")) {
+        stdout.write(op.v);
+      }
+    }
+  });
+
+  session.on("turn.finalized", () => {
+    if (!options.json) stdout.write("\n\n  ✓ Done\n");
+    void finish(0);
+  });
+
+  session.on("turn.error", (e: unknown) => {
+    stderr.write("\n  ✗ Error\n");
+    if (options.json) stderr.write(`${JSON.stringify(e)}\n`);
+    void finish(1);
+  });
+}
+
 function registerSessions(spacesCmd: Command): void {
   const sessionsCmd = spacesCmd
     .command("sessions")
@@ -1710,42 +1782,8 @@ function registerSessions(spacesCmd: Command): void {
       const client = createRealtimeClient();
       const session = client.space(spaceId).session(id);
 
-      process.stdout.write("  Listening for events...\n\n");
-      process.once("SIGINT", () => void client.disconnect().finally(() => process.exit(130)));
-
-      let lastAppendPath: string | null = null;
-      session.on("turn.patch", (e: { payload?: Record<string, unknown> }) => {
-        if (jsonRequested(opts)) {
-          console.log(JSON.stringify(e));
-        } else {
-          const ops = e.payload?.ops as Array<{ o?: string; p?: string; v?: unknown }> | undefined;
-          for (const op of ops ?? []) {
-            if (op.o === "append" && typeof op.v === "string" && op.p?.endsWith("/text")) {
-              lastAppendPath = op.p;
-              process.stdout.write(op.v);
-              continue;
-            }
-            if (op.o === "append" && typeof op.p === "string") {
-              lastAppendPath = op.p;
-              continue;
-            }
-            if (!op.o && !op.p && typeof op.v === "string" && lastAppendPath?.endsWith("/text")) {
-              process.stdout.write(op.v);
-            }
-          }
-        }
-      });
-
-      session.on("turn.finalized", () => {
-        process.stdout.write("\n\n  ✓ Done\n");
-        process.exit(0);
-      });
-
-      session.on("turn.error", (e: unknown) => {
-        process.stderr.write(`\n  ✗ Error\n`);
-        if (jsonRequested(opts)) process.stderr.write(`${JSON.stringify(e)}\n`);
-        process.exit(1);
-      });
+      process.once("SIGINT", () => void client.disconnect().catch(() => undefined).finally(() => process.exit(130)));
+      attachSessionTail(client, session, { json: jsonRequested(opts) });
     });
 
   // ── sessions turns ──
