@@ -5,7 +5,7 @@ description: Work with Cohub spaces, chats, files, saves, labels, search, tasks,
 
 # Cohub
 
-Use the Cohub CLI for platform operations, and use file tools for normal file work.
+Use the Cohub CLI for platform operations, and use file tools for normal file work inside a Cohub Sandbox. Outside a Cohub Sandbox (local agents such as Antigravity, Claude Code, Codex, or Cursor), use `cohub spaces files` and `cohub run` to work with cloud Spaces instead of browsing `cohub.live` in a browser.
 
 Prefer simple, explicit commands. Use `--json` when reading output for decisions, extracting IDs, or chaining commands.
 
@@ -47,13 +47,13 @@ COHUB_SPACE_ID
 COHUB_SESSION_ID
 ```
 
-Use them as defaults when the user has not specified a target.
+Use them as defaults when set (such as inside a Cohub Sandbox).
 
 ```bash
 env | grep '^COHUB_'
 ```
 
-Do not guess IDs. If no target is available and the command cannot infer context, ask the user.
+Outside a Cohub Sandbox, these variables are usually unset: pass `-s <space>` explicitly or run inside a directory bound with `cohub runtime up`, and verify sign-in with `cohub auth whoami --json` if needed. Do not guess IDs. If no target is available and the command cannot infer context, ask the user.
 
 ## Chats and Prompts
 

@@ -9,6 +9,12 @@ npm install -g @neta-art/cohub-cli
 cohub --help
 ```
 
+To install the official Cohub skills (`cohub`, `cohub-apps`, `cohub-board`, `cohub-generate`, `public-files`) for local agents such as Antigravity, Claude Code, Codex, or Cursor:
+
+```bash
+npx skills add netaart/cohub
+```
+
 ## Sign in
 
 For normal use outside Cohub Sandbox, sign in once:
