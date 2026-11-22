@@ -1,7 +1,8 @@
-import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { createReadStream, existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
+import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { ContentBlock, NativeTurnMessage } from "@neta-art/cohub";
@@ -19,6 +20,8 @@ const SUMMARIES_DB = "conversation_summaries.db";
 const DEFAULT_APP_DATA_DIRS = ["antigravity-cli", "antigravity"] as const;
 const USER_REQUEST = /<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/;
 const METADATA_BLOCKS = /<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>[\s\S]*?<\/(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>/g;
+const HYDRATED_FIELDS = new Set(["content", "thinking", "tool_calls"]);
+const STEP_INDEX_PREFIX = /^\s*\{\s*"step_index"\s*:\s*(\d+)(?=\s*[,}])/;
 
 export const antigravityGeminiDir = () => process.env.ANTIGRAVITY_GEMINI_DIR?.trim() || join(homedir(), ".gemini");
 
@@ -192,25 +195,64 @@ function transcriptUsage(value: JsonRecord): NativeTurnMessage["usage"] {
   return { input, output, cacheRead, cacheWrite: 0, totalTokens: input + output + cacheRead };
 }
 
-/** Load matching lines from `transcript_full.jsonl` lazily only when `truncated_fields` is encountered. */
-async function loadFullRecords(transcriptPath: string): Promise<Map<number, JsonRecord>> {
-  const fullPath = join(dirname(transcriptPath), FULL_TRANSCRIPT_FILE);
+/** Only hydrate `transcript_full.jsonl` when a step's truncated fields include data this parser consumes. */
+function needsHydration(value: JsonRecord): boolean {
+  if (typeof value.step_index !== "number" || !Array.isArray(value.truncated_fields) || !value.truncated_fields.length) {
+    return false;
+  }
+  const type = text(value.type);
+  if (type === "PLANNER_RESPONSE") {
+    return value.truncated_fields.some((field) => typeof field === "string" && HYDRATED_FIELDS.has(field));
+  }
+  if (type === "GENERIC" || (type === "USER_INPUT" && text(value.source) !== "SYSTEM")) {
+    return value.truncated_fields.includes("content");
+  }
+  return false;
+}
+
+/** Stream `transcript_full.jsonl` and parse/retain only the `step_index` entries needed for hydration. */
+async function loadFullRecords(
+  transcriptPath: string,
+  neededSteps: ReadonlySet<number>,
+  signal?: AbortSignal,
+): Promise<Map<number, JsonRecord>> {
   const byStep = new Map<number, JsonRecord>();
-  const raw = await readFile(fullPath, "utf8").catch(() => "");
-  if (!raw) return byStep;
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const obj = record(JSON.parse(line));
-      if (typeof obj.step_index === "number") byStep.set(obj.step_index, obj);
-    } catch { /* skip incomplete trailing line */ }
+  if (!neededSteps.size) return byStep;
+  signal?.throwIfAborted();
+  const fullPath = join(dirname(transcriptPath), FULL_TRANSCRIPT_FILE);
+  if (!existsSync(fullPath)) return byStep;
+  const stream = createReadStream(fullPath, { encoding: "utf8", signal });
+  const rl = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      const prefixMatch = STEP_INDEX_PREFIX.exec(line);
+      if (prefixMatch) {
+        if (!neededSteps.has(Number(prefixMatch[1]))) continue;
+      } else if (!line.includes('"step_index"')) {
+        continue;
+      }
+      try {
+        const obj = record(JSON.parse(line));
+        if (typeof obj.step_index === "number" && neededSteps.has(obj.step_index)) {
+          byStep.set(obj.step_index, obj);
+        }
+      } catch { /* skip incomplete trailing line */ }
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    // Ignore transient/missing full transcript errors and fall back to compact lines.
+  } finally {
+    rl.close();
+    stream.destroy();
   }
   return byStep;
 }
 
 export function antigravityReplyEnded(turn: NativeTranscriptTurn): boolean {
+  if (!turn.result) return false;
   const last = turn.messages.at(-1);
-  return Boolean(last && last.stopReason !== "tool_use");
+  return Boolean(last?.stopReason && last.stopReason !== "tool_use");
 }
 
 /**
@@ -223,15 +265,20 @@ export async function readAntigravityTranscript(path: string, nativeSessionId: s
   const read = await readChainedLines(path, signal);
   const modified = (await stat(path)).mtime.toISOString();
   const header = await antigravitySessionHeader(path);
-  let fullRecords: Map<number, JsonRecord> | null = null;
+  const neededSteps = new Set<number>();
+  for (const line of read.lines) {
+    if (needsHydration(line.value) && typeof line.value.step_index === "number") {
+      neededSteps.add(line.value.step_index);
+    }
+  }
+  const fullRecords = neededSteps.size ? await loadFullRecords(path, neededSteps, signal) : null;
   const turns: NativeTranscriptTurn[] = [];
   let current: NativeTranscriptTurn | null = null;
   let pendingToolIds: string[] = [];
 
   for (const line of read.lines) {
     let value = line.value;
-    if (Array.isArray(value.truncated_fields) && value.truncated_fields.length && typeof value.step_index === "number") {
-      fullRecords ??= await loadFullRecords(path);
+    if (fullRecords && needsHydration(value) && typeof value.step_index === "number") {
       const full = fullRecords.get(value.step_index);
       if (full) value = full;
     }
@@ -263,6 +310,19 @@ export async function readAntigravityTranscript(path: string, nativeSessionId: s
 
     if (!current) continue;
 
+    if (type === "ERROR_MESSAGE") {
+      pendingToolIds = [];
+      current.result = null;
+      extendTurn(current, line, false);
+      continue;
+    }
+
+    if (type === "SYSTEM_MESSAGE" || (type === "USER_INPUT" && source === "SYSTEM")) {
+      current.result = null;
+      extendTurn(current, line, false);
+      continue;
+    }
+
     if (type === "PLANNER_RESPONSE") {
       const content: ContentBlock[] = [];
       const thinking = text(value.thinking);
@@ -280,24 +340,28 @@ export async function readAntigravityTranscript(path: string, nativeSessionId: s
         newPending.push(id);
       }
       pendingToolIds = newPending;
-      const isError = text(value.status) === "ERROR";
+      const status = text(value.status);
+      const isError = status === "ERROR";
+      const isDone = status === "DONE";
       const hasTools = newPending.length > 0;
       const message: NativeTurnMessage = {
         content,
         provider: "antigravity",
         model: text(value.model) || null,
-        stopReason: isError ? "error" : hasTools ? "tool_use" : "stop",
+        stopReason: isError ? "error" : hasTools ? "tool_use" : isDone ? "stop" : null,
         errorMessage: isError ? text(value.error) || "Turn failed" : null,
         usage: transcriptUsage(value),
       };
       if (content.length || isError) current.messages.push(message);
       extendTurn(current, line, true);
-      if (!hasTools && (text(value.status) === "DONE" || isError)) {
+      if (!hasTools && (isDone || isError)) {
         current.result = {
           messages: current.messages,
           completedAt: timestamp,
           status: isError ? "failed" : "completed",
         };
+      } else {
+        current.result = null;
       }
       continue;
     }

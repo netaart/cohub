@@ -331,3 +331,210 @@ test("antigravity transcript matches secondary workspace_uris roots and reads WA
     db.close();
   }
 }));
+
+test("Antigravity transcript clears stale result across background wakeups until final response settles", () => withEnvironment(async (root) => {
+  const appDataRoot = join(root, "gemini", "antigravity-cli");
+  const convId = randomUUID();
+  const transcriptPath = antigravityTranscriptPath(convId, "antigravity-cli");
+  await mkdir(join(appDataRoot, "brain", convId, ".system_generated", "logs"), { recursive: true });
+
+  const writeLines = async (entries: unknown[]) => {
+    await writeFile(transcriptPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  };
+  const readTurn = async (index = 0) => {
+    const parsed = await readAntigravityTranscript(transcriptPath, convId);
+    const turn = parsed.turns[index];
+    assert(turn);
+    return { parsed, turn };
+  };
+
+  const base: unknown[] = [
+    { step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-22T02:00:00.000Z", content: "<USER_REQUEST>run tests</USER_REQUEST>" },
+    { step_index: 1, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T02:00:01.000Z", content: "Waiting for background command." },
+  ];
+  await writeLines(base);
+  let { parsed, turn } = await readTurn();
+  assert.equal(turn.result?.status, "completed");
+  assert.equal(turn.result?.completedAt, "2026-11-22T02:00:01.000Z");
+  assert.equal(antigravityHarness.transcript.replyEnded?.(turn), true);
+
+  // Wakeup arrives in the same user turn: prior result must be cleared.
+  base.push({ step_index: 2, source: "SYSTEM", type: "SYSTEM_MESSAGE", status: "DONE", created_at: "2026-11-22T02:00:05.000Z", content: "Background task exited 0" });
+  await writeLines(base);
+  ({ parsed, turn } = await readTurn());
+  assert.equal(parsed.turns.length, 1);
+  assert.equal(turn.result, null);
+  assert.equal(antigravityHarness.transcript.replyEnded?.(turn), false);
+
+  // Model issues follow-up tool call after wakeup: result remains null.
+  base.push({
+    step_index: 3,
+    source: "MODEL",
+    type: "PLANNER_RESPONSE",
+    status: "DONE",
+    created_at: "2026-11-22T02:00:06.000Z",
+    tool_calls: [{ name: "read_file", args: { Path: '"report.txt"' } }],
+  });
+  await writeLines(base);
+  ({ parsed, turn } = await readTurn());
+  assert.equal(turn.result, null);
+  assert.equal(antigravityHarness.transcript.replyEnded?.(turn), false);
+
+  // Tool finishes and an in-progress non-tool planner response starts: still not settled.
+  base.push(
+    { step_index: 4, source: "MODEL", type: "GENERIC", status: "DONE", created_at: "2026-11-22T02:00:07.000Z", content: "10 passed" },
+    { step_index: 5, source: "MODEL", type: "PLANNER_RESPONSE", status: "RUNNING", created_at: "2026-11-22T02:00:08.000Z", thinking: "summarizing" },
+  );
+  await writeLines(base);
+  ({ parsed, turn } = await readTurn());
+  assert.equal(turn.result, null);
+  assert.equal(turn.messages.at(-1)?.stopReason, null);
+  assert.equal(antigravityHarness.transcript.replyEnded?.(turn), false);
+
+  // Final non-tool response settles the turn with the new completion timestamp.
+  base.push({ step_index: 6, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T02:00:09.000Z", content: "All 10 tests passed." });
+  await writeLines(base);
+  ({ parsed, turn } = await readTurn());
+  assert.equal(turn.result?.status, "completed");
+  assert.equal(turn.result?.completedAt, "2026-11-22T02:00:09.000Z");
+  assert.equal(turn.result?.messages.length, turn.messages.length);
+  assert.equal(antigravityHarness.transcript.replyEnded?.(turn), true);
+
+  // Direct wakeup -> failed final response also transitions cleanly.
+  base.push(
+    { step_index: 7, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-22T02:01:00.000Z", content: "deploy" },
+    { step_index: 8, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T02:01:01.000Z", content: "Triggered deploy." },
+    { step_index: 9, source: "SYSTEM", type: "SYSTEM_MESSAGE", status: "DONE", created_at: "2026-11-22T02:01:05.000Z", content: "Deploy hook failed" },
+    { step_index: 10, source: "MODEL", type: "PLANNER_RESPONSE", status: "ERROR", created_at: "2026-11-22T02:01:06.000Z", error: "Upstream unavailable" },
+  );
+  await writeLines(base);
+  ({ parsed, turn } = await readTurn(1));
+  assert.equal(parsed.turns.length, 2);
+  assert.equal(turn.result?.status, "failed");
+  assert.equal(turn.result?.completedAt, "2026-11-22T02:01:06.000Z");
+  assert.equal(antigravityHarness.transcript.replyEnded?.(turn), true);
+}));
+
+test("Antigravity transcript clears pending tool ids and result on mid-turn ERROR_MESSAGE", () => withEnvironment(async (root) => {
+  const appDataRoot = join(root, "gemini", "antigravity-cli");
+  const convId = randomUUID();
+  const transcriptPath = antigravityTranscriptPath(convId, "antigravity-cli");
+  await mkdir(join(appDataRoot, "brain", convId, ".system_generated", "logs"), { recursive: true });
+
+  const lines = [
+    { step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-22T03:00:00.000Z", content: "inspect files" },
+    {
+      step_index: 1,
+      source: "MODEL",
+      type: "PLANNER_RESPONSE",
+      status: "DONE",
+      created_at: "2026-11-22T03:00:01.000Z",
+      tool_calls: [
+        { name: "read_file", args: { Path: '"a.ts"' } },
+        { name: "read_file", args: { Path: '"b.ts"' } },
+      ],
+    },
+    { step_index: 2, source: "MODEL", type: "GENERIC", status: "DONE", created_at: "2026-11-22T03:00:02.000Z", content: "contents of a.ts" },
+    { step_index: 3, source: "SYSTEM", type: "ERROR_MESSAGE", status: "ERROR", created_at: "2026-11-22T03:00:03.000Z", content: "stream interrupted, retrying" },
+    // Orphaned GENERIC after ERROR_MESSAGE must not attach to the abandoned second tool_use_id.
+    { step_index: 4, source: "MODEL", type: "GENERIC", status: "DONE", created_at: "2026-11-22T03:00:04.000Z", content: "stray output" },
+    {
+      step_index: 5,
+      source: "MODEL",
+      type: "PLANNER_RESPONSE",
+      status: "DONE",
+      created_at: "2026-11-22T03:00:05.000Z",
+      tool_calls: [{ name: "read_file", args: { Path: '"b.ts"' } }],
+    },
+    { step_index: 6, source: "MODEL", type: "GENERIC", status: "DONE", created_at: "2026-11-22T03:00:06.000Z", content: "contents of b.ts" },
+    { step_index: 7, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T03:00:07.000Z", content: "Inspected both files." },
+    // ERROR_MESSAGE after a completed response clears stale result until recovery settles.
+    { step_index: 8, source: "SYSTEM", type: "ERROR_MESSAGE", status: "ERROR", created_at: "2026-11-22T03:00:08.000Z", content: "transient disconnect" },
+  ];
+  await writeFile(transcriptPath, `${lines.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+  const parsed = await readAntigravityTranscript(transcriptPath, convId);
+  const turn = parsed.turns[0];
+  assert(turn);
+  assert.equal(turn.messages.length, 3);
+
+  const firstMsgToolUses = turn.messages[0]?.content.filter((block) => block.type === "tool_use") ?? [];
+  const firstMsgToolResults = turn.messages[0]?.content.filter((block) => block.type === "tool_result") ?? [];
+  assert.equal(firstMsgToolUses.length, 2);
+  assert.equal(firstMsgToolResults.length, 1);
+  assert.equal(firstMsgToolResults[0]?.type === "tool_result" && firstMsgToolResults[0].tool_use_id, firstMsgToolUses[0]?.type === "tool_use" && firstMsgToolUses[0].id);
+  assert.equal(firstMsgToolResults[0]?.type === "tool_result" && firstMsgToolResults[0].content, "contents of a.ts");
+
+  const retryToolUse = turn.messages[1]?.content.find((block) => block.type === "tool_use");
+  const retryToolResult = turn.messages[1]?.content.find((block) => block.type === "tool_result");
+  assert(retryToolUse?.type === "tool_use");
+  assert(retryToolResult?.type === "tool_result");
+  assert.equal(retryToolResult.tool_use_id, retryToolUse.id);
+  assert.equal(retryToolResult.content, "contents of b.ts");
+  assert.equal(turn.result, null);
+}));
+
+test("Antigravity transcript only hydrates transcript_full.jsonl for consumed truncated fields and needed step indices", () => withEnvironment(async (root) => {
+  const appDataRoot = join(root, "gemini", "antigravity-cli");
+  const convId = randomUUID();
+  const logsDir = join(appDataRoot, "brain", convId, ".system_generated", "logs");
+  const transcriptPath = antigravityTranscriptPath(convId, "antigravity-cli");
+  const fullPath = join(logsDir, "transcript_full.jsonl");
+  await mkdir(logsDir, { recursive: true });
+
+  // 1. Truncated fields we do not consume (and ignored step types) must not hydrate from transcript_full.jsonl.
+  const skippedLines = [
+    { step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-22T04:00:00.000Z", content: "hello" },
+    { step_index: 1, source: "SYSTEM", type: "SYSTEM_MESSAGE", status: "DONE", created_at: "2026-11-22T04:00:01.000Z", content: "truncated sys", truncated_fields: ["content"] },
+    { step_index: 2, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:00:02.000Z", content: "compact reply", truncated_fields: ["metadata"] },
+  ];
+  await writeFile(transcriptPath, `${skippedLines.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  await writeFile(
+    fullPath,
+    `${JSON.stringify({ step_index: 2, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:00:02.000Z", content: "SHOULD_NOT_HYDRATE" })}\n`,
+  );
+
+  const skippedParsed = await readAntigravityTranscript(transcriptPath, convId);
+  assert.deepEqual(skippedParsed.turns[0]?.messages[0]?.content, [{ type: "text", text: "compact reply" }]);
+
+  // 2. When consumed fields are truncated, only needed step_index lines are parsed and hydrated.
+  const selectiveLines = [
+    { step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-22T04:01:00.000Z", content: "check full" },
+    { step_index: 1, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:01:01.000Z", thinking: "trunc...", tool_calls: [], truncated_fields: ["thinking", "tool_calls"] },
+    { step_index: 2, source: "MODEL", type: "GENERIC", status: "DONE", created_at: "2026-11-22T04:01:02.000Z", content: "compact tool output" },
+    { step_index: 3, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:01:03.000Z", content: "trunc...", truncated_fields: ["content"] },
+  ];
+  const fullContent = [
+    // Unneeded step 0 with invalid JSON after prefix is skipped without JSON.parse.
+    '{"step_index":0,"source":"USER_EXPLICIT",NOT_VALID_JSON',
+    JSON.stringify({
+      step_index: 1,
+      source: "MODEL",
+      type: "PLANNER_RESPONSE",
+      status: "DONE",
+      created_at: "2026-11-22T04:01:01.000Z",
+      thinking: "full reasoning trace",
+      tool_calls: [{ name: "run_command", args: { CommandLine: '"ls"' } }],
+    }),
+    // Unneeded step 2 must not replace compact content.
+    JSON.stringify({ step_index: 2, source: "MODEL", type: "GENERIC", status: "DONE", created_at: "2026-11-22T04:01:02.000Z", content: "SHOULD_NOT_REPLACE" }),
+    // Needed step 3 where step_index is not the first JSON property still hydrates via fallback.
+    JSON.stringify({ source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:01:03.000Z", content: "full final answer", step_index: 3 }),
+  ].join("\n");
+
+  await writeFile(transcriptPath, `${selectiveLines.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  await writeFile(fullPath, `${fullContent}\n`);
+
+  const selectiveParsed = await readAntigravityTranscript(transcriptPath, convId);
+  const turn = selectiveParsed.turns[0];
+  assert(turn);
+  assert.deepEqual(turn.userContent, [{ type: "text", text: "check full" }]);
+  assert.equal(turn.messages.length, 2);
+  const thinkingBlock = turn.messages[0]?.content.find((block) => block.type === "thinking");
+  const toolUseBlock = turn.messages[0]?.content.find((block) => block.type === "tool_use");
+  const toolResultBlock = turn.messages[0]?.content.find((block) => block.type === "tool_result");
+  assert.equal(thinkingBlock?.type === "thinking" && thinkingBlock.thinking, "full reasoning trace");
+  assert.deepEqual(toolUseBlock?.type === "tool_use" && toolUseBlock.input, { CommandLine: "ls" });
+  assert.equal(toolResultBlock?.type === "tool_result" && toolResultBlock.content, "compact tool output");
+  assert.deepEqual(turn.messages[1]?.content, [{ type: "text", text: "full final answer" }]);
+}));
