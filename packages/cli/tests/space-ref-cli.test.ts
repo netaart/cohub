@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Command } from "commander";
+import { registerApps } from "../src/commands/apps.js";
 import { registerSearch } from "../src/commands/search.js";
 import { attachSessionTail, registerSpaces } from "../src/commands/spaces.js";
 
 const HOME_ID = "11111111-1111-4111-8111-111111111111";
 const OWNED_ID = "22222222-2222-4222-8222-222222222222";
 const OTHER_ID = "33333333-3333-4333-8333-333333333333";
+const APP_ID = "44444444-4444-4444-8444-444444444444";
 
 let mockApiSeq = 0;
 
@@ -80,6 +82,12 @@ async function withMockApi(
     if (method === "GET" && /^\/api\/apps\/space\/[^/]+$/.test(url.pathname)) {
       return json(200, { apps: [{ id: "app-1", slug: "welcome" }] });
     }
+    if (method === "GET" && url.pathname === `/api/apps/${APP_ID}`) {
+      return json(200, { app: { id: APP_ID } });
+    }
+    if (method === "POST" && url.pathname === `/api/apps/${APP_ID}/authorize`) {
+      return json(200, { grant: { scopes: ["space.view"], spaceId: (body as { spaceId?: string }).spaceId ?? "app-space" } });
+    }
     if (method === "PATCH" && url.pathname === "/api/me/resources/space/labels") {
       return json(200, { assignments: [] });
     }
@@ -94,6 +102,7 @@ async function withMockApi(
       .option("-s, --space <space>", "Target Space");
     registerSearch(program);
     registerSpaces(program);
+    registerApps(program);
 
     const logs: string[] = [];
     const originalLog = console.log;
@@ -199,6 +208,19 @@ test("spaces positional Space-ref commands resolve UUID, home, own slug, and use
       removeLabelRefs: ["Archived"],
     });
     assert.deepEqual(JSON.parse(unarchiveOut), { ids: [OWNED_ID], archived: false });
+  });
+});
+
+test("apps authorize --space resolves the ref and otherwise keeps the app's own Space", async () => {
+  await withMockApi(async ({ requests, runCli }) => {
+    process.env.COHUB_SPACE_ID = HOME_ID;
+    const authorizeBody = () => requests.findLast((r) => r.path === `/api/apps/${APP_ID}/authorize`)?.body;
+
+    await runCli(["apps", "authorize", APP_ID, "--scope", "space.view", "--space", "atou/project", "--json"]);
+    assert.deepEqual(authorizeBody(), { scopes: ["space.view"], spaceId: OTHER_ID });
+
+    await runCli(["apps", "authorize", APP_ID, "--scope", "space.view", "--json"]);
+    assert.deepEqual(authorizeBody(), { scopes: ["space.view"] });
   });
 });
 

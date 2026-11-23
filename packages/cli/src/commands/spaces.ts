@@ -17,7 +17,7 @@ import { createClient, createRealtimeClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
 import { SESSION_INITIATOR_COLUMN, SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
-import { failSpaceTarget, resolveSpace, resolveSpaceRef } from "../space.js";
+import { explicitSpace, failSpaceTarget, resolveSpace, resolveSpaceRef, resolveSpaceTarget } from "../space.js";
 import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
 import { registerDecisionCommand } from "./decision.js";
 import { registerSpaceCommerce } from "./space-commerce.js";
@@ -558,12 +558,12 @@ function registerUserLabels(program: Command) {
 
 export function registerSpaceSetup(spacesCmd: Command, deps: { createClient?: typeof createClient } = {}): void {
   spacesCmd
-    .command("setup [id]")
+    .command("setup [space]")
     .description("Show cloud sandbox startup scripts, results, and log paths")
     .option("--json", "Output as JSON")
     .action(async (id: string | undefined, opts: { json?: boolean }) => {
       try {
-        const spaceId = id !== undefined ? await resolveSpaceRef(id) : await resolveSpace(spacesCmd);
+        const spaceId = await resolveSpaceTarget(id?.trim() || explicitSpace(spacesCmd));
         const { sandbox } = await (deps.createClient ?? createClient)().space(spaceId).sandbox.get();
         const setup = sandbox?.meta?.setup ?? null;
         if (jsonRequested(opts)) return outJson({ provider: sandbox?.provider ?? null, setup });
@@ -632,13 +632,14 @@ export function registerSpaces(program: Command): void {
 
   for (const archive of [true, false]) {
     spacesCmd
-      .command(archive ? "archive <ids...>" : "unarchive <ids...>")
+      .command(archive ? "archive <spaces...>" : "unarchive <spaces...>")
       .description(archive ? "Archive spaces in your personal view" : "Restore archived spaces")
       .option("--json", "Output as JSON")
       .action(async (ids: string[], opts: { json?: boolean }) => {
         const client = createClient();
         try {
-          const resolvedIds = await Promise.all(ids.map((id) => resolveSpaceRef(id)));
+          const resolvedIds: string[] = [];
+          for (const id of ids) resolvedIds.push(await resolveSpaceRef(id));
           const chunks = Array.from({ length: Math.ceil(resolvedIds.length / 200) }, (_, index) => resolvedIds.slice(index * 200, (index + 1) * 200));
           for (const chunk of chunks) await client.user.labels.patchResources(chunk, archive
             ? { addLabelRefs: ["Archived"], removeLabelRefs: ["Pinned"] }
@@ -651,13 +652,13 @@ export function registerSpaces(program: Command): void {
 
   // ── spaces get ──
   spacesCmd
-    .command("get [id]")
+    .command("get [space]")
     .description("Show space details")
     .option("--json", "Output as JSON")
     .action(async (id: string | undefined, opts: { json?: boolean }) => {
       const client = createClient();
       try {
-        const spaceId = id !== undefined ? await resolveSpaceRef(id) : await resolveSpace(spacesCmd);
+        const spaceId = await resolveSpaceTarget(id?.trim() || explicitSpace(spacesCmd));
         const [space, overview] = await Promise.all([
           client.spaces.get(spaceId),
           client.space(spaceId).overview.get().catch(() => null),
@@ -687,7 +688,7 @@ export function registerSpaces(program: Command): void {
 
   // ── spaces update ──
   spacesCmd
-    .command("update <id>")
+    .command("update <space>")
     .description("Update a space")
     .option("--name <name>", "Space name")
     .option("--slug <slug>", "Public space slug")
@@ -719,7 +720,7 @@ export function registerSpaces(program: Command): void {
 
   // ── spaces rename ──
   spacesCmd
-    .command("rename <id> <name>")
+    .command("rename <space> <name>")
     .description("Rename a space")
     .action(async (id: string, name: string) => {
       const client = createClient();
@@ -774,7 +775,7 @@ export function registerSpaces(program: Command): void {
 
   // ── spaces config ──
   spacesCmd
-    .command("config <id>")
+    .command("config <space>")
     .description("Show or update space configuration")
     .option("--auto-destroy <mode>", "Sandbox auto destroy mode: idle or never")
     .option("--idle-ttl <seconds>", "Idle auto destroy TTL in seconds, max 2592000 (30d)")
@@ -897,7 +898,7 @@ export function registerSpaces(program: Command): void {
 
   // ── spaces pin / unpin (user-scope label convenience) ──
   spacesCmd
-    .command("pin <id>")
+    .command("pin <space>")
     .description("Pin a space (add the Pinned user label)")
     .action(async (id: string) => {
       const client = createClient();
@@ -911,7 +912,7 @@ export function registerSpaces(program: Command): void {
     });
 
   spacesCmd
-    .command("unpin <id>")
+    .command("unpin <space>")
     .description("Unpin a space (remove the Pinned user label)")
     .action(async (id: string) => {
       const client = createClient();
@@ -1537,7 +1538,8 @@ export function attachSessionTail(
 ): void {
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  const exit = options.exit ?? ((code: number) => process.exit(code));
+  // process.exit drops pending pipe writes; the empty write's callback runs once earlier records are flushed.
+  const exit = options.exit ?? ((code: number) => process.stdout.write("", () => process.exit(code)));
   let exiting = false;
   const finish = async (code: number) => {
     if (exiting) return;

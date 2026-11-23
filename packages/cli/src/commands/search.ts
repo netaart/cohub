@@ -49,11 +49,6 @@ function parseTypes(value: string | undefined): GlobalSearchType[] | undefined {
   return [...new Set(types)] as GlobalSearchType[];
 }
 
-function parseSearchInput(opts: SearchCliOptions) {
-  const types = parseTypes(opts.types);
-  return { types, labelRef: opts.labelRef?.trim() || undefined };
-}
-
 function rowsFor(items: GlobalSearchResult[]): Row[] {
   return items.map((item) => ({
     type: item.type,
@@ -89,17 +84,18 @@ Examples:
     .action(async (query: string | undefined, opts: SearchCliOptions, command: Command) => {
       const client = createClient();
       try {
-        const input = parseSearchInput(opts);
+        const types = parseTypes(opts.types);
+        const labelRef = opts.labelRef?.trim() || undefined;
         const q = query ?? "";
-        if (!q.trim() && !input.labelRef) return error("Search query is required unless --label-ref is provided.");
-        const spaceRef = opts.spaceId !== undefined ? opts.spaceId.trim() : explicitSpaceFlag(command);
-        const spaceId = spaceRef !== null ? await resolveSpaceRef(spaceRef) : undefined;
+        if (!q.trim() && !labelRef) return error("Search query is required unless --label-ref is provided.");
+        const spaceRef = opts.spaceId?.trim() || explicitSpaceFlag(command);
+        const spaceId = spaceRef ? await resolveSpaceRef(spaceRef) : undefined;
         const result = await client.search.query({
           q,
           limit: clampLimit(opts.limit),
-          types: input.types,
+          types,
           spaceId,
-          labelRef: input.labelRef,
+          labelRef,
         });
         if (jsonRequested(opts)) return outJson(result);
 

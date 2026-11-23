@@ -189,7 +189,6 @@ Options:
 
 Examples:
   cohub -s <space> run --command "git status"
-  cohub run -s <space> -- git status -sb
   cohub -s <space> run --async --command "pnpm test"
   cohub -s <space> run -- git status -sb
 
