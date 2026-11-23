@@ -1,13 +1,13 @@
-import {
-  isUuid,
-  type ReferenceAggregateGroupBy,
-  type ReferenceDirection,
-  type ReferenceKind,
-  type ReferenceQueryableType,
+import type {
+  ReferenceAggregateGroupBy,
+  ReferenceDirection,
+  ReferenceKind,
+  ReferenceQueryableType,
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { formatLocalDateTime, table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
+import { failSpaceTarget, resolveSpaceRef } from "../space.js";
 
 const RESOURCE_TYPES = new Set<ReferenceQueryableType>([
   "turn",
@@ -152,7 +152,7 @@ Examples:
   references
     .command("aggregate")
     .description("Grouped reference counts for a space")
-    .argument("<spaceId>", "Space id")
+    .argument("<space>", "Space: ID, home, slug, or username/slug")
     .option("--group-by <field>", "kind | targetType | target | sourceType | day", "kind")
     .option("--kinds <kinds>", "Comma-separated kinds (see list below)")
     .option("--days <n>", "Only references seen within the last N days")
@@ -166,21 +166,21 @@ Notes:
   --group-by target: file targets look like {spaceId}:{path}
 
 Examples:
-  cohub references aggregate <spaceId> --json
-  cohub references aggregate <spaceId> --group-by targetType
-  cohub references aggregate <spaceId> --group-by target --kinds agent_tool_file_read --limit 20
-  cohub references aggregate <spaceId> --group-by day --days 30
+  cohub references aggregate <space> --json
+  cohub references aggregate <space> --group-by targetType
+  cohub references aggregate <space> --group-by target --kinds agent_tool_file_read --limit 20
+  cohub references aggregate <space> --group-by day --days 30
 `)
-    .action(async (spaceId: string, opts: AggregateOpts) => {
+    .action(async (space: string, opts: AggregateOpts) => {
       const client = createClient();
       try {
-        if (!isUuid(spaceId.trim())) return error("Invalid space id");
         const groupBy = (opts.groupBy ?? "kind") as ReferenceAggregateGroupBy;
         if (!GROUP_BYS.has(groupBy)) return error(`Invalid group-by: ${opts.groupBy}`);
         const kinds = parseKinds(opts.kinds);
         const days = opts.days ? clampNumber(opts.days, 30, 1, 365) : undefined;
         const limit = clampNumber(opts.limit, 200, 1, 500);
-        const result = await client.references.aggregate({ spaceId: spaceId.trim(), groupBy, kinds, days, limit });
+        const spaceId = await resolveSpaceRef(space).catch(failSpaceTarget);
+        const result = await client.references.aggregate({ spaceId, groupBy, kinds, days, limit });
         if (jsonRequested(opts)) return outJson(result);
         const rows: Row[] = result.groups.map((g) => ({
           group: g.group,

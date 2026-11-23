@@ -4,7 +4,7 @@ import { getCohubContext, HttpError, isUserAppFilter, type CohubHttpClient, type
 import type { Command } from "commander";
 import { createClient, createClientWithAccessToken } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
-import { resolveSpace } from "../space.js";
+import { explicitSpaceFlag, failSpaceTarget, resolveSpace, resolveSpaceRef } from "../space.js";
 import { downloadApp } from "../app-download.js";
 import { getAppByRef, parseAppRef } from "../app-ref.js";
 import { checkAppTarget } from "../app-target.js";
@@ -799,22 +799,25 @@ export function registerApps(program: Command): void {
     .command("authorize <app>")
     .description("Grant an app scopes as the current user")
     .requiredOption("--scope <scope>", "Scope to grant (repeatable)", collectOption, [])
-    .option("--space <spaceId>", "Target space; defaults to the app's own space")
+    .option("--space <space>", "Target space (ID, home, slug, or username/slug); defaults to the app's own space")
     .option("--extend", "Add scopes without replacing active grants")
     .option("--json", "Output as JSON")
-    .action(async (appRef: string, opts: { scope: string[]; space?: string; extend?: boolean; json?: boolean }) => {
+    .action(async (appRef: string, opts: { scope: string[]; space?: string; extend?: boolean; json?: boolean }, command: Command) => {
       const client = createClient();
       try {
+        // The root `-s, --space` option claims `--space` after the subcommand too; COHUB_SPACE_ID must not apply here.
+        const spaceRef = explicitSpaceFlag(command);
+        const spaceId = spaceRef ? await resolveSpaceRef(spaceRef) : undefined;
         const detail = await getAppByRef(client, appRef);
         const result = await client.apps.authorize(detail.app.id, {
           scopes: opts.scope as Permission[],
-          ...(opts.space ? { spaceId: opts.space } : {}),
+          ...(spaceId ? { spaceId } : {}),
           ...(opts.extend ? { scopeMode: "extend" as const } : {}),
         });
         if (jsonRequested(opts)) return outJson(result);
         ok(`Granted ${result.grant.scopes.join(", ")} on space ${result.grant.spaceId}`);
       } catch (e: unknown) {
-        handleHttp(e);
+        failSpaceTarget(e);
       }
     });
 

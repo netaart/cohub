@@ -199,7 +199,7 @@ export function registerModels(program: Command): void {
 
 Examples:
   cohub models ls
-  cohub models ls --space <spaceId>
+  cohub models ls --space <space>
   cohub models ls --model-type multimodal
   cohub models ls --model-type multimodal --category video
   cohub models ls --model-type multimodal --json

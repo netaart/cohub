@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { resolveCohubEnvironment } from "@neta-art/cohub";
 import { parseRunCliOptions } from "../src/commands/run.js";
+
+const SPACE_A = "11111111-1111-4111-8111-111111111111";
+const SPACE_B = "22222222-2222-4222-8222-222222222222";
 
 const roots: string[] = [];
 
@@ -17,7 +20,7 @@ afterEach(async () => {
 });
 
 test("cohub run uses the current directory Runtime binding", async () => {
-  const root = await mkdtemp(join(tmpdir(), "cohub-run-binding-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "cohub-run-binding-")));
   roots.push(root);
   const path = join(root, "runtime-spaces.json");
   const previousToken = process.env.COHUB_EXECUTION_TOKEN;
@@ -35,6 +38,28 @@ test("cohub run uses the current directory Runtime binding", async () => {
   } finally {
     if (previousToken === undefined) delete process.env.COHUB_EXECUTION_TOKEN;
     else process.env.COHUB_EXECUTION_TOKEN = previousToken;
+    if (previousSpace === undefined) delete process.env.COHUB_SPACE_ID;
+    else process.env.COHUB_SPACE_ID = previousSpace;
+  }
+});
+
+test("cohub run accepts -s/--space after run without taking the command's own flags", async () => {
+  const previousSpace = process.env.COHUB_SPACE_ID;
+  delete process.env.COHUB_SPACE_ID;
+  try {
+    assert.deepEqual(
+      await parseRunCliOptions(["run", "--space", SPACE_A, "--async", "--json", "--", "git", "status", "-s"]),
+      { spaceId: SPACE_A, json: true, async: true, command: "git status -s" },
+    );
+    assert.deepEqual(
+      await parseRunCliOptions(["run", `--space=${SPACE_A}`, "git", "status", "-s"]),
+      { spaceId: SPACE_A, json: false, async: false, command: "git status -s" },
+    );
+    assert.deepEqual(
+      await parseRunCliOptions(["-s", SPACE_A, "run", "-s", SPACE_B, "-c", "git status"]),
+      { spaceId: SPACE_B, json: false, async: false, command: "git status" },
+    );
+  } finally {
     if (previousSpace === undefined) delete process.env.COHUB_SPACE_ID;
     else process.env.COHUB_SPACE_ID = previousSpace;
   }

@@ -83,11 +83,11 @@ function runRemainderRequestsHelp(argv: string[]): boolean {
     if (token === "--") return false;
     if (isHelpFlag(token)) return true;
     if (token === "--async" || token === "--json") continue;
-    if (token === "-c" || token === "--command" || token === "--base-url") {
+    if (token === "-c" || token === "--command" || token === "--base-url" || token === "-s" || token === "--space") {
       index += 1;
       continue;
     }
-    if (token.startsWith("--command=") || token.startsWith("--base-url=")) continue;
+    if (token.startsWith("--command=") || token.startsWith("--base-url=") || token.startsWith("--space=")) continue;
     return false;
   }
   return false;

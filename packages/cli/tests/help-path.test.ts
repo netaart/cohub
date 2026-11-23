@@ -45,7 +45,10 @@ test("unknown prefixes error instead of dumping root help", () => {
 
 test("run help follows run's own parsing rules", () => {
   assert.equal(kind(["run", "--help"]), "run-help");
+  assert.equal(kind(["run", "-s", "atou/project", "--help"]), "run-help");
+  assert.equal(kind(["run", "--space=atou/project", "--help"]), "run-help");
   assert.equal(kind(["run", "npm", "--help"]), "passthrough");
+  assert.equal(kind(["run", "-s", "atou/project", "npm", "--help"]), "passthrough");
   assert.equal(kind(["run", "--async", "npm", "--help"]), "passthrough");
   assert.equal(kind(["run", "--command", "--help"]), "passthrough");
 });

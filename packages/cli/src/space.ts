@@ -114,15 +114,20 @@ export function clearHomeSpaceCache(): void {
   }
 }
 
-/** Explicit target from `-s/--space` (any ancestor) or `COHUB_SPACE_ID`, else null. */
-export function explicitSpace(program: Command): string | null {
-  let current: Command | null = program;
+/** Explicit `-s/--space` flag from `command` or any ancestor, ignoring `COHUB_SPACE_ID`. */
+export function explicitSpaceFlag(command: Command): string | null {
+  let current: Command | null = command;
   while (current) {
     const opts = current.opts() as Record<string, unknown>;
     if (typeof opts.space === "string" && opts.space.trim()) return opts.space.trim();
     current = current.parent ?? null;
   }
-  return process.env.COHUB_SPACE_ID?.trim() || null;
+  return null;
+}
+
+/** Explicit target from `-s/--space` (any ancestor) or `COHUB_SPACE_ID`, else null. */
+export function explicitSpace(program: Command): string | null {
+  return explicitSpaceFlag(program) ?? (process.env.COHUB_SPACE_ID?.trim() || null);
 }
 
 /** Cached per identity and memoized per process. */
