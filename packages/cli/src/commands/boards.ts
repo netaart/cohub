@@ -652,21 +652,14 @@ export function registerBoards(program: Command): Command {
     .command("boards")
     .description("Read, write, animate and export Boards (by id or .board path)")
     .addHelpText("after", `
-A Board is one JSON document: { board, items, animations }.
-  get       read it
-  apply     write it with a JSON Merge Patch; null deletes
-  schema    the fields of any part and what they mean; also the script API
-  examples  starter documents and a custom script module
-  preset    tracks for a preset motion, ready to apply
-  sequence  join chapter animations into one timeline
-  path      sample a polyline into a position track
-  inspect   measure items and report layout hints
-  frames    the frames viewers step through, in order
-  export    render an image, a frame sequence or a video
-  play      shared playback; also pause, resume, next, seek, stop
-  watch     stream changes and playback
-  history   list versions, or restore one
-  diff      what changed between two versions
+A Board is one JSON document: { board, items, animations }. A .board file points to one;
+a copy of the file opens the same Board.
+  look up    schema, examples, get
+  write      create, apply (fields merge, arrays replace, null deletes)
+  generate   preset, sequence, place, path print patches for apply
+  check      inspect, export, simulate, profile
+  present    frames, play, pause, resume, seek, next, stop, watch
+  recover    history, diff
 Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
 
   withJson(boards.command("create <path>")
@@ -675,8 +668,8 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
     .option("-i, --input <file>", "Initial document JSON; - for stdin")
     .option("--mutation-id <id>", "Stable id for safe retries"))
     .addHelpText("after", `
-  cohub boards examples lesson > lesson.json
-  cohub boards create lesson.board -i lesson.json`)
+  cohub boards examples slides > slides.json
+  cohub boards create slides.board -i slides.json`)
     .action(async (path: string, options: JsonOptions & { title?: string; input?: string; mutationId?: string }) => {
       try {
         const spaceId = await resolveSpace(boards);
@@ -804,6 +797,9 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
     .option("--before <version>", "Versions older than this")
     .option("--limit <n>", "Number of versions", "20")
     .option("--restore <version>", "Return the Board to this version as a new write"))
+    .addHelpText("after", `
+  cohub boards history plan.board
+  cohub boards history plan.board --restore 12`)
     .action(async (target: string, options: JsonOptions & { before?: string; limit?: string; restore?: string }) => {
       try {
         const board = await boardClient(boards, target);
@@ -877,7 +873,10 @@ Before rewriting a Board with apply --replace, see what others changed since the
     .addHelpText("after", `
 Without a target: units, item types, colors and every animatable property.
 With a target: its fields and what they mean; script also lists the module API.
-Targets: ${BOARD_SCHEMA_TARGETS.join(", ")}`)
+Targets: ${BOARD_SCHEMA_TARGETS.join(", ")}
+  cohub boards schema
+  cohub boards schema frame --field props.decoration
+  cohub boards schema script`)
     .action((target: string | undefined, options: { field?: string }) => {
       try {
         if (options.field && !target) throw new Error("--field needs a schema target, e.g. schema frame --field props.decoration.");
@@ -985,6 +984,9 @@ function registerPlaybackCommands(boards: Command): void {
     .option("--at <time>", "Start position, e.g. 2.5s")
     .option("--speed <factor>", "Playback speed, up to 4")
     .option("--seed <seed>", "Seed for procedural effects"))
+    .addHelpText("after", `
+  cohub boards play plan.board lecture
+  cohub boards play plan.board lecture --at 2.5s --speed 1.5`)
     .action((target: string, animation: string, options: JsonOptions & { at?: string; speed?: string; seed?: string }) =>
       run(target, options, (board) => board.play(animation, {
         ...(options.at ? { position: parseBoardTime(options.at, "--at") } : {}),

@@ -100,7 +100,7 @@ export const BOARD_SCRIPT_API = {
       "browser:video": "data: frame (an ImageBitmap from the camera, up to 30 a second, closed when the next arrives), width, height, t. Draw it in draw(); recordings leave it out.",
       "browser:position": "data: the GeolocationPosition: coords { latitude, longitude, accuracy, altitude, altitudeAccuracy, heading, speed } and timestamp.",
     } satisfies Record<keyof BoardScriptHostEvents, string>,
-    browser: "browser:* events are browser input as the browser reports it. Listening to one starts its source (see env.senses); readings never reach the document unless a script commits them. cohub boards examples senses --module prints helpers for screen-axis motion and audio level, pitch and spectrum.",
+    browser: "browser:* events are browser input as the browser reports it. Listening to one starts its source (see env.senses); readings never reach the document unless a script commits them.",
     keys: "In play, keydown and keyup without modifiers also reach every listening script when no focused region takes them.",
   },
   env: {

@@ -392,7 +392,7 @@ cohub -s <spaceId> boards apply <boardId> -i - < changes.json
 ```bash
 cohub -s <spaceId> boards schema                 # units, scale, item types, colors, animatable properties
 cohub -s <spaceId> boards schema arrow           # one target
-cohub -s <spaceId> boards examples lesson > lesson.json
+cohub -s <spaceId> boards examples slides > slides.json
 cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub boards apply <boardId> -i -
 cohub -s <spaceId> boards preset float --targets ship   # bare tracks, to fold into your own animation
 ```

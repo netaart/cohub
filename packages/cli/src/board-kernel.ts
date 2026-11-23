@@ -1,7 +1,5 @@
 
 export {
-  BOARD_SCRIPT_DRAWING_EXAMPLE,
-  BOARD_SCRIPT_RAIN_EXAMPLE,
   hasBoardScripts,
   boardAnimatesScriptParams,
   boardAssetKey,

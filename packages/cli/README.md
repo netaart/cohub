@@ -377,7 +377,7 @@ Start from an example and write it with `apply`, a JSON Merge Patch where fields
 merge, `null` deletes, and unmentioned fields stay:
 
 ```bash
-cohub boards examples workflow > seed.json
+cohub boards examples diagram > seed.json
 cohub -s <spaceId> boards create boards/plan.board --title "Plan" -i seed.json
 
 cohub -s <spaceId> boards apply <boardId> '{"items":{"title":{"props":{"text":"Updated"}}}}'

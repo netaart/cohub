@@ -343,7 +343,7 @@ cohub -s <spaceId> boards apply <boardId> -i - < changes.json
 ```bash
 cohub -s <spaceId> boards schema                 # 单位、尺度、item 类型、颜色、可动画属性
 cohub -s <spaceId> boards schema arrow           # 指定一个 target
-cohub -s <spaceId> boards examples lesson > lesson.json
+cohub -s <spaceId> boards examples slides > slides.json
 cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub boards apply <boardId> -i -
 cohub -s <spaceId> boards preset float --targets ship   # 纯 tracks，可自行折进动画
 ```

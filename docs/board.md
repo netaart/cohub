@@ -224,9 +224,8 @@ on the Board clock. Use `time` where an export must match the timeline to the fr
 
 The web app loads PixiJS 3D only once something leaves the plane. Exports draw depth
 in WebGL, like shaders (see [Export](#export)); a whole-board export frames lifted
-items where they appear. `cohub boards examples depth` is a handkerchief that tosses
-on three taps and a card that flips to its back; `cohub boards schema depth` lists
-every field.
+items where they appear. `cohub boards preset flip` turns a card over to its back;
+`cohub boards schema depth` lists every field.
 
 ### Media sources
 

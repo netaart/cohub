@@ -104,6 +104,13 @@ Viewers step with N, the arrow keys and swipes; #focus=<frame>&present presents.
     .description("Compile chapters to an apply-ready animation patch; does not write")
     .requiredOption("-i, --input <file>", "JSON with a chapters array; use - for stdin")
     .requiredOption("--animation <id>", "Parent animation id; recompiling replaces its tracks")
+    .addHelpText("after", `
+Chapters are animations written from time 0, played in order:
+  {"chapters": [{"animation": "intro", "frame": "s1", "pause": true}, {"animation": "proof", "frame": "s2", "gap": 500}]}
+frame shows only that frame during its chapter and focuses the camera on it; gap waits
+before the chapter; pause holds at its end until next; label names its marker.
+Regenerate after changing a chapter.
+  cohub boards sequence plan.board --animation lecture -i chapters.json | cohub boards apply plan.board -i -`)
     .action(async (target: string, options: { input: string; animation: string }) => {
       try {
         const input = await readBoardJsonObject(options.input);
@@ -165,6 +172,9 @@ their time moves forward. Placing a target that is already on the timeline moves
     .command("path <target>")
     .description("Sample a polyline into a position track; does not write")
     .requiredOption("-i, --input <file>", "JSON with points, duration (ms), optional at, samples and orient")
+    .addHelpText("after", `
+orient turns the target along the path.
+  echo '{"points":[{"x":0,"y":0},{"x":400,"y":120},{"x":800,"y":0}],"duration":2000,"orient":true}' | cohub boards path ship -i -`)
     .action(async (target: string, options: { input: string }) => {
       try {
         const input = await readBoardJsonObject(options.input);

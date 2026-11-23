@@ -31,12 +31,12 @@ Selecting a scripted item adds **Interactive settings** to its toolbar: controls
 the module's declared `parameters` (saved to `script.params`), the run status or
 error, the source file, and **Restart**, which starts that instance fresh.
 
-CLI and SDK use the ordinary Board patch API. To create a complete drawing example
+CLI and SDK use the ordinary Board patch API. To create a complete scripted example
 in the current Space workspace:
 
 ```sh
 mkdir -p scripts
-cohub boards examples custom --module > scripts/wave.js
+cohub boards examples custom --module > scripts/sparks.js
 cohub boards examples custom > custom.json
 cohub boards create demo.board -i custom.json
 ```
@@ -390,10 +390,7 @@ ctx.on("browser:position", ({ data }) => center(data.coords.latitude, data.coord
 Motion arrives in device axes and the browser's units, one event per reading; turn it
 by `ctx.env.angle` for screen axes. Gamepads, positions and camera frames keep only the
 latest reading while a worker is busy. A camera frame stays usable until the next one
-arrives, up to 30 a second; draw it in `draw()`. `cohub boards examples senses --module`
-prints optional helpers to copy into the Space: `onMotion()` batches motion once a frame
-in screen axes with gravity split out, and `onAudio()` turns samples into level, pitch,
-onsets and a 32-band spectrum; `cohub boards examples tilt` uses them.
+arrives, up to 30 a second; draw it in `draw()`.
 
 `senses` says what listening would bring: `on`, `ask`, `denied` or `unavailable`.
 Motion and gamepads need nothing else, except that iOS asks for motion on the viewer's
@@ -572,7 +569,7 @@ times a second:
 ctx.on("peerschange", ({ data }) => { ctx.state.peers = data; ctx.invalidate(); });
 ```
 
-`cohub boards examples sparks --module` combines both. In tests, `board.broadcasts`
+`cohub boards examples custom --module` combines both. In tests, `board.broadcasts`
 lists what scripts sent, `board.broadcast(owner, type, data, from)` delivers another
 viewer's broadcast, and `board.peers([...])` sets the others; `boards simulate` has
 `peers` and `broadcast` steps.

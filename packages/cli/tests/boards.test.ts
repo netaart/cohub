@@ -52,10 +52,10 @@ test("every example is a valid Board document", () => {
 test("examples list and print documents", async () => {
   const { boards } = createProgram();
   const listed = await capture(() => boards.parseAsync(["examples"], { from: "user" }));
-  assert.ok(listed.some((line) => line.startsWith("lesson")));
-  const printed = await capture(() => boards.parseAsync(["examples", "workflow"], { from: "user" }));
-  const workflow = JSON.parse(printed.join("")) as { items: Record<string, unknown> };
-  assert.deepEqual(Object.keys(workflow.items), ["request", "agent", "result", "request-agent", "agent-result"]);
+  assert.ok(listed.some((line) => line.startsWith("slides")));
+  const printed = await capture(() => boards.parseAsync(["examples", "diagram"], { from: "user" }));
+  const diagram = JSON.parse(printed.join("")) as { items: Record<string, unknown> };
+  assert.deepEqual(Object.keys(diagram.items), ["title", "request", "agent", "result", "request-agent", "agent-result"]);
 });
 
 test("preset prints an apply-ready patch", async () => {
