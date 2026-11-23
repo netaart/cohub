@@ -14,13 +14,15 @@ export type BoardMediaAction = {
 	itemId: string;
 };
 
+export type BoardMediaKeyOptions = { materialized: boolean; hasVideoPreview: boolean; decorated?: boolean };
+
 export function mediaPlayBadgeVisible(
 	item: BoardSceneItem,
 	zoom: number,
-	options: { materialized: boolean; hasVideoPreview: boolean },
+	options: BoardMediaKeyOptions,
 ): boolean {
 	if (!options.materialized) return false;
-	if (item.type === "video") return item.props.time === undefined;
+	if (item.type === "video") return options.decorated !== false && item.props.time === undefined;
 	if (item.type === "audio") return true;
 	if (isBoardModelItem(item)) return boardCardDetailed(zoom);
 	if (item.type !== "task" || !boardCardDetailed(zoom)) return false;
@@ -61,7 +63,7 @@ export function boardMediaActionAt(
 	item: BoardSceneItem,
 	point: WorldPoint,
 	zoom: number,
-	options: { materialized: boolean; hasVideoPreview: boolean },
+	options: BoardMediaKeyOptions,
 ): BoardMediaAction | null {
 	return mediaPlayBadgeVisible(item, zoom, options) &&
 		mediaPlayBadgeHit(item, point, zoom)
@@ -77,6 +79,7 @@ export function mediaPlayHit(item: BoardSceneItem, point: WorldPoint, context: B
 	const action = boardMediaActionAt(item, point, context.zoom, {
 		materialized: true,
 		hasVideoPreview: Boolean(key && context.getTexture(key)),
+		decorated: context.scene.decorated(item.id),
 	});
 	return action ? PLAY_HIT : null;
 }

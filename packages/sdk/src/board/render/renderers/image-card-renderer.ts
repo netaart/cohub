@@ -1,13 +1,13 @@
 import type { BoardSceneItem, SceneItem } from "../../model/scene.js";
 import { Container, Graphics } from "pixi.js";
 import type { BoardImageItem } from "@cohub/protocol";
-import { type CardCrop, cardElevation, containRect, drawCardSurface, fillCardPicture } from "../surface.js";
+import { type CardCrop, SQUARE_PICTURE, cardElevation, containRect, drawCardSurface, fillCardPicture } from "../surface.js";
 import { positionShell } from "./base-card-renderer.js";
 import type {
 	BoardCardRenderer,
 	BoardRenderContext,
 } from "./board-renderer-registry.js";
-import { drawFarPlate, farPictureTone } from "./far-plate.js";
+import { drawFarBarePicture, drawFarPlate, farPictureTone } from "./far-plate.js";
 
 type ImageParts = {
 	root: Container;
@@ -46,7 +46,8 @@ function sync(
 	const texture = key ? context.getTexture(key) : null;
 	const failed = Boolean(key && !texture && context.hasError(key));
 	const elevation = cardElevation(context, item.id);
-	const framed = context.style.media === "framed" && !(texture && key && context.assetCutout?.(key));
+	const bare = !context.scene.decorated(item.id);
+	const framed = !bare && context.style.media === "framed" && !(texture && key && context.assetCutout?.(key));
 	const sig = [
 		key ?? "",
 		width,
@@ -56,10 +57,11 @@ function sync(
 		failed,
 		elevation,
 		framed,
+		bare,
 		context.themeKey,
 	].join("|");
 	if (sig === parts.sig) return;
-	if (texture && !parts.textured && parts.sig !== "" && !context.reducedMotion) {
+	if (texture && !parts.textured && parts.sig !== "" && !bare && !context.reducedMotion) {
 		parts.fadeFrom = performance.now();
 		parts.picture.alpha = 0;
 	} else if (!texture) {
@@ -79,10 +81,11 @@ function sync(
 	const card = framed ? { x: picture.x - margin, y: picture.y - margin, width: picture.width + margin * 2, height: picture.height + margin * 2 } : picture;
 
 	parts.picture.clear();
-	if (texture) fillCardPicture(parts.picture, texture, picture, framed ? { corner: "round", radius: 0 } : context.style, crop);
+	if (texture) fillCardPicture(parts.picture, texture, picture, framed || bare ? SQUARE_PICTURE : context.style, crop);
 
 	parts.placeholder.clear();
 	parts.clearSurface = !framed;
+	if (bare) return;
 	if (texture && !framed && parts.fadeFrom === null) return;
 	drawCardSurface(parts.placeholder, card, context.style, {
 		fill: failed || framed ? context.palette.surface : context.palette.hover,
@@ -134,6 +137,7 @@ export const imageCardRenderer: BoardCardRenderer = {
 	},
 	lod: { kind: "media" },
 	renderFar: (graphics, item, context) => {
+		if (!context.scene.decorated(item.id)) return drawFarBarePicture(graphics, item, context);
 		drawFarPlate(graphics, item.frame, {
 			fill: farPictureTone(item, context) ?? context.palette.hover,
 			fillAlpha: FAR_ALPHA,

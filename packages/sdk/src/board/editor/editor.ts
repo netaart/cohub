@@ -225,6 +225,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		get selectionAutoplay() {
 			return read(["scene", "selection"], selection.autoplay);
 		},
+		get selectionBare() {
+			return read(["scene", "selection"], selection.bare);
+		},
 		get bounds() {
 			return read(["scene", "motion", "selection"], selection.bounds);
 		},
@@ -458,6 +461,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		fillFrame: selection.fillFrame,
 		toggleSelectionLock: selection.toggleLock,
 		setSelectionAutoplay: selection.setAutoplay,
+		setSelectionBare: selection.setBare,
 		setSelectionColor: selection.setColor,
 		setSelectionStyle: selection.setStyle,
 		setSelectionProps: selection.setProps,

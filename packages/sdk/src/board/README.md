@@ -67,6 +67,8 @@ same reason.
 A renderer reads colors from `BoardRenderPalette` and everything else a theme
 may change from `BoardRenderStyle` (`render/style.ts`): card silhouette, radius,
 shadow, selection chrome, framed media, progress, icons, motion and chrome font.
+An image or video that `scene.decorated(id)` reports bare skips the card and the
+framed media style and draws only its picture.
 Cards draw their body through `render/surface.ts`, so one silhouette and one
 shadow serve every card type, and short facts above a card through
 `render/card-tag.ts`. Selection and hover are not drawn by cards: the stage
