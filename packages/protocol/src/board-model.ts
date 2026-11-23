@@ -312,7 +312,7 @@ export const BoardShapeItemSchema = z
 			.object({
 				geometry: z.enum(BOARD_SHAPE_GEOMETRIES).default("rectangle"),
 				path: z.string().min(1).max(200_000).optional().describe("SVG path data for path geometry, fitted to the item size."),
-				text: z.string().default(""),
+				text: z.string().default("").describe("Label inside the shape, drawn in the stroke color."),
 				fontSize: fontSize.default(20),
 				align: z.enum(BOARD_TEXT_ALIGNS).default("center"),
 			})

@@ -109,7 +109,8 @@ Chapters are animations written from time 0, played in order:
   {"chapters": [{"animation": "intro", "frame": "s1", "pause": true}, {"animation": "proof", "frame": "s2", "gap": 500}]}
 frame shows only that frame during its chapter and focuses the camera on it; gap waits
 before the chapter; pause holds at its end until next; label names its marker.
-Regenerate after changing a chapter.
+Regenerate after changing a chapter. The parent animation is rebuilt each time, dropping
+tracks added to it; put camera moves in the chapters, which keep theirs.
   cohub boards sequence plan.board --animation lecture -i chapters.json | cohub boards apply plan.board -i -`)
     .action(async (target: string, options: { input: string; animation: string }) => {
       try {

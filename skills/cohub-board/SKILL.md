@@ -42,7 +42,8 @@ CLI: `npm install -g @neta-art/cohub-cli`.
 3. **Build in visible steps.** One coherent patch per step, such as a section, a page
    or a timeline. Use `--dry-run` when unsure, then `apply`.
 4. **Look at the result.** Run `boards inspect`, then export an image and view it,
-   before calling the work done (see Check and export).
+   before calling the work done (see Check and export). Link the `.board` file in
+   your reply.
 
 ## Authoring rules
 
@@ -135,7 +136,8 @@ cohub boards path ship -i path.json            # a position track along a polyli
 - `preset -h` lists the motions; without `--animation` you get bare tracks.
 - `sequence` joins chapter animations, each written from time 0, into one timeline with
   frame visibility, camera focus and pause markers. Apply the chapters first, and
-  regenerate after changing one.
+  regenerate after changing one. The sequence owns its animation: regenerating resets
+  it and drops tracks added there, so put camera moves in the chapters.
 - Video editing uses clips. `place` shows each target only for its span and plays its
   video, audio or nested animation. Cut, trim and fade with ordinary tracks
   (`props.volume` for sound); titles are text items and layers are `z`.
@@ -173,7 +175,7 @@ cohub boards export <board> --view 1300,3400,0.7 -o /tmp/spot.png    # a tempora
 
 - `inspect` checks native layout only. It misses camera cropping, script drawing and
   shader pixels, so also review exported images at the moments that matter.
-- To look at a spot, use `--view` or `--rect`; never add probe animations to the Board.
+- To look at a spot, use `--view` or `--rect`; never add probe items or animations to the Board.
 - `-o` picks the format, and `%d` writes a frame sequence.
 - Long videos, especially with shaders, render slowly on a CPU. Add `--async` to run
   the export as a Task and follow it with `cohub tasks get <id>`; never sleep and poll.
