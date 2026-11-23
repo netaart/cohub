@@ -127,16 +127,20 @@ export function warn(msg: string): void {
   console.log(`\n  ⚠ ${msg}\n`);
 }
 
-/** Print a failure and set exit code 1 without exiting, so stdout still drains. */
-export function reportError(msg: string, detail?: string): void {
+function writeError(msg: string, detail?: string): void {
   process.stderr.write(`\n  ✗ ${msg}\n`);
   if (detail) process.stderr.write(`    ${detail}\n`);
   process.stderr.write("\n");
+}
+
+/** Print a failure and set exit code 1 without exiting, so stdout still drains. */
+export function reportError(msg: string, detail?: string): void {
+  writeError(msg, detail);
   process.exitCode = 1;
 }
 
 export function error(msg: string, detail?: string): never {
-  reportError(msg, detail);
+  writeError(msg, detail);
   process.exit(1);
 }
 
