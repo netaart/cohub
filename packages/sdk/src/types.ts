@@ -7,8 +7,12 @@ export type {
   SpaceWalletTransferState,
   SpaceWalletTransferStatus,
   WorkspaceUsage,
+  BillingQuota,
+  ListBillingQuotasResponse,
+  ModelOffer,
+  ModelQuotaOffer,
 } from "@cohub/protocol";
-import type { WorkspaceUsage } from "@cohub/protocol";
+import type { ModelOffer, WorkspaceUsage } from "@cohub/protocol";
 import type { AppRecord } from "./apis/apps.js";
 export type { SessionArchiveFilter, SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
 import type { MediaFacts } from "@cohub/protocol/core";
@@ -609,6 +613,8 @@ export type BillingBalanceActivity = {
   amountUsd: number;
   status: BillingBalanceActivityStatus;
   createdAt: string;
+  /** Usage paid entirely from a quota balance, in its raw units; `amountUsd` is then 0. */
+  quota?: { tokenType: string; units: number } | null;
 };
 
 export type BillingBalanceActivityFilter = "usage" | "grant" | "refund";
@@ -1123,6 +1129,7 @@ export type ModelCatalogEntry = {
   provider: string;
   id: string;
   model: Record<string, unknown>;
+  offer?: ModelOffer | null;
 };
 
 export type PromptTemplateCatalogEntry = {

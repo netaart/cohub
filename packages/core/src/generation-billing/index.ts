@@ -163,6 +163,8 @@ export function createGenerationReserveHolds(input: {
     model: string;
     usageType: string;
     amountUsd: number;
+    /** What the Space wallet would hold, since personal benefits never discount wallet charges. */
+    walletAmountUsd: number;
   }): Promise<GenerationReserveHoldResult> {
     const context = {
       taskRunId: request.taskRunId,
@@ -173,22 +175,23 @@ export function createGenerationReserveHolds(input: {
     };
     // Set when the Space wallet was tried and its live holds left too little.
     let walletAvailableUsd: number | null = null;
-    const held = (payer: GenerationReservePayer, balanceUsd: number, otherHeldUsd: number): GenerationReserveHoldResult => {
-      info?.("[GenerationReserve] held", { ...context, payerType: payer.type, payerId: payer.id, balanceUsd, otherHeldUsd, walletAvailableUsd });
-      return { status: "held", hold: { payer, amountUsd: request.amountUsd } };
+    const { walletAmountUsd } = request;
+    const held = (payer: GenerationReservePayer, amountUsd: number, balanceUsd: number, otherHeldUsd: number): GenerationReserveHoldResult => {
+      info?.("[GenerationReserve] held", { ...context, amountUsd, payerType: payer.type, payerId: payer.id, balanceUsd, otherHeldUsd, walletAvailableUsd });
+      return { status: "held", hold: { payer, amountUsd } };
     };
-    if (request.spaceId && walletBilling.status.configured && billing.status.configured) {
+    if (request.spaceId && walletAmountUsd > 0 && walletBilling.status.configured && billing.status.configured) {
       const payer: GenerationReservePayer = { type: "space_wallet", id: spaceWalletCustomerId(request.spaceId) };
       let balanceUsd: number | null = null;
       try {
         const credit = await walletBilling.getCreditStatus({ userId: payer.id, createCustomer: false });
-        if (walletCreditsUsable(credit)) balanceUsd = await availableBalance(payer, request.amountUsd, request.usageType);
+        if (walletCreditsUsable(credit)) balanceUsd = await availableBalance(payer, walletAmountUsd, request.usageType);
       } catch (error) {
         warn?.("[GenerationReserve] Space wallet preview failed; trying the personal balance", { ...context, error });
       }
       if (balanceUsd !== null) {
-        const attempt = await tryHold(payer, request.taskRunId, request.amountUsd, balanceUsd);
-        if (attempt.held) return held(payer, balanceUsd, attempt.otherHeldUsd);
+        const attempt = await tryHold(payer, request.taskRunId, walletAmountUsd, balanceUsd);
+        if (attempt.held) return held(payer, walletAmountUsd, balanceUsd, attempt.otherHeldUsd);
         walletAvailableUsd = attempt.availableUsd;
       }
     }
@@ -201,8 +204,9 @@ export function createGenerationReserveHolds(input: {
       throw new GenerationBillingUnavailableError(undefined, { cause: error });
     }
     const attempt = await tryHold(payer, request.taskRunId, request.amountUsd, balanceUsd);
-    if (attempt.held) return held(payer, balanceUsd, attempt.otherHeldUsd);
-    const availableUsd = Math.max(walletAvailableUsd ?? 0, attempt.availableUsd);
+    if (attempt.held) return held(payer, request.amountUsd, balanceUsd, attempt.otherHeldUsd);
+    // Report the personal shortfall: the wallet price can differ, so mixing its balance in would misstate it.
+    const availableUsd = attempt.availableUsd;
     info?.("[GenerationReserve] blocked", {
       ...context,
       availableUsd,
@@ -229,3 +233,4 @@ export function createGenerationReserveHolds(input: {
 }
 
 export type GenerationReserveHolds = ReturnType<typeof createGenerationReserveHolds>;
+export { consumeGenerationQuota, refundGenerationQuota, type GenerationQuotaUse } from "./quota.js";

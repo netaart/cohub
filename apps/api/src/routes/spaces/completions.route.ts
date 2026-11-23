@@ -36,12 +36,15 @@ import {
 import { archiveCompletionBestEffort, createModelCallId } from "../../model-call-archive.js";
 import { resolveCompletionModel } from "../../llm/models.js";
 import { loadImageToTextConfig } from "../../llm/image-to-text-config.js";
+import { needsImageToText } from "../../llm/image-to-text.js";
 import {
   runCompletion,
   streamCompletionEvents,
   type RunCompletionOutcome,
 } from "../../llm/stream-completion.js";
 import { spaceWalletBilling } from "../../space-wallet-billing.js";
+import { admitPricing } from "../../usage-pricing.js";
+import { priceUsage, type FrozenPricing } from "@cohub/core/usage-pricing";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
@@ -210,22 +213,27 @@ async function recordCompletionBilling(input: {
   usage: RunCompletionOutcome["usage"];
   aborted: boolean;
   error: RunCompletionOutcome["error"];
+  price: FrozenPricing;
 }) {
   if (!billingOperations.status.configured) return;
   if (input.aborted || input.error) return;
-  const amountUsd = normalizePositiveUsd(input.usage?.cost?.total);
-  if (amountUsd <= 0) return;
+  const officialUsd = normalizePositiveUsd(input.usage?.cost?.total);
+  if (officialUsd <= 0) return;
+  let amountUsd = officialUsd;
 
   try {
+    const usageType = COHUB_BILLING_USAGE_TYPES.generationLlmRaw;
+    const quote = await input.price({ usageType, model: input.model, provider: input.provider });
+    const priced = priceUsage(quote, officialUsd, `Raw LLM completion ${input.provider}/${input.model}`);
+    amountUsd = priced.amountUsd;
     const result = await spaceWalletBilling.recordUsage({
       spaceId: input.spaceId,
       userId: input.userId,
-      amountUsd,
+      ...priced,
       tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-      usageType: COHUB_BILLING_USAGE_TYPES.generationLlmRaw,
+      usageType,
       sourceId: input.completionId,
       operationId: `raw_completion:${input.completionId}`,
-      reason: `Raw LLM completion ${input.provider}/${input.model}`,
     });
     if (result.status === "overage") {
       logger.warn("[Billing] raw completion usage recorded as overage", {
@@ -366,7 +374,15 @@ router.post("/", async (c) => {
   });
 
   // Pre-check balance before spending tokens. Fail-open if credit lookup errors.
-  const decision = await billingUsageGate.evaluate({
+  const usageType = COHUB_BILLING_USAGE_TYPES.generationLlmRaw;
+  const fallback = needsImageToText(messages, model, imageToTextConfig) ? imageToTextConfig?.model : null;
+  const admitted = await admitPricing(user.uuid, [
+    { usageType, model: model.id, provider: model.provider },
+    ...(fallback ? [{ usageType, model: fallback.id, provider: fallback.provider }] : []),
+  ]);
+  if (!admitted) return requestErrorResponse(c, 503, "pricing_unavailable", "Pricing is temporarily unavailable. Please try again later.");
+  const { price, free } = admitted;
+  const decision = free ? null : await billingUsageGate.evaluate({
     userId: user.uuid,
     usageKind: "llm.raw_completion",
     source: "raw_completion",
@@ -374,7 +390,7 @@ router.post("/", async (c) => {
     provider: model.provider,
     spaceId,
   });
-  if (decision.status === "blocked") {
+  if (decision?.status === "blocked") {
     const blocked = new BillingAccessBlockedError(decision);
     return c.json(serializeBillingBlocked(blocked), 402);
   }
@@ -405,6 +421,7 @@ router.post("/", async (c) => {
       usage: outcome.usage,
       aborted: outcome.aborted,
       error: outcome.error,
+      price,
     });
     await Promise.all(outcome.imageToTextCalls.map((call, index) => call.status === "succeeded"
       ? recordCompletionBilling({
@@ -416,6 +433,7 @@ router.post("/", async (c) => {
           usage: call.usage,
           aborted: false,
           error: null,
+          price,
         })
       : Promise.resolve()));
     archiveCompletionBestEffort({

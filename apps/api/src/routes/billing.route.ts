@@ -12,6 +12,7 @@ import {
 import { config } from "../config.js";
 import { jsonError } from "../lib/json-error.js";
 import { getOptionalAuth, useAuth } from "../lib/middleware.js";
+import { usagePricing } from "../usage-pricing.js";
 
 const router = new Hono();
 const BILLING_PAGE_SIZE = 10;
@@ -157,6 +158,28 @@ router.get("/credits", async (c) => {
   return c.json(credit);
 });
 
+/** Quota token → the request parameter one unit covers, for every quota the pricing rules can draw on. */
+async function quotaParameters() {
+  const parameters = new Map<string, string>();
+  for (const rule of (await usagePricing.loadConfig()).rules) {
+    if (rule.enabled && rule.effect.type === "quota" && !parameters.has(rule.effect.tokenType)) parameters.set(rule.effect.tokenType, rule.effect.parameter);
+  }
+  return parameters;
+}
+
+/** Balances of every quota token the pricing rules can draw on. */
+router.get("/quotas", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  if (!billingOperations.status.configured) return c.json({ quotas: [] });
+  const quotas = await Promise.all([...await quotaParameters()].map(async ([tokenType, parameter]) => ({
+    ...await billingOperations.getQuotaStatus({ userId: user.uuid, tokenType, grants: true }),
+    parameter,
+  })));
+  // Zero balances are kept so clients can tell a spent quota from one not loaded yet.
+  return c.json({ quotas });
+});
+
 const ACTIVITY_LIMIT = 100;
 const LEGACY_ACTIVITY_MAX_OFFSET = 2_000;
 
@@ -187,6 +210,7 @@ router.get("/balance-activities", async (c) => {
     offset,
     limit,
     filter: filter as BillingBalanceActivityFilter | undefined,
+    quotaTokenTypes: [...(await quotaParameters()).keys()],
   });
   if (!legacyPage) return c.json({ activities });
   const hasMore = activities.nextCursor !== null && offset + limit < LEGACY_ACTIVITY_MAX_OFFSET;

@@ -85,7 +85,6 @@ import {
   type BillingUsageRecordResult,
   type BillingUserRef,
 } from "./interfaces.js";
-import { resolveGenerationModelDiscount } from "./generation-usage.js";
 import type { BillingClientConfig } from "./types.js";
 import { checkoutLockRedisRef } from "./runtime.js";
 
@@ -406,6 +405,8 @@ function resolveCreditGrantBenefitName(grant: CreditGrant): string | null {
     CREDIT_BENEFIT_DISPLAY_NAMES[benefitKey] ?? humanizeIdentifier(benefitKey)
   );
 }
+
+const QUOTA_REQUESTED = / \[requested=(\d+)\]$/;
 
 function ledgerTransactionRow(row: CreditTransaction): LedgerRow {
   return {
@@ -1644,6 +1645,7 @@ export function createTalesofaiBillingOperations(
     userId: string;
     tokenType: string;
     filter?: BillingBalanceActivityFilter;
+    quotaTokenTypes?: readonly string[];
   }): LedgerSource[] => {
     const scope = { business_key: businessKey, external_user_id: input.userId, token_type: input.tokenType, include_count: false as const };
     const transactions = (type?: CreditTransaction["type"]): LedgerSource => async ({ to, page, limit }) => {
@@ -1654,15 +1656,35 @@ export function createTalesofaiBillingOperations(
       const result = await sdk.admin.credits.listUsageOverages({ ...scope, created_at_to: to, sorting: "-created_at", page, limit });
       return { hasMore: result.pagination.has_more, items: result.items.map((row) => ledgerOverageRow(row)) };
     };
+    // Usage a quota fully covered has no money row; list it from the quota draw, at no charge.
+    const coveredByQuota = (quotaTokenType: string): LedgerSource => async ({ to, page, limit }) => {
+      const query = { ...scope, token_type: quotaTokenType };
+      const result = await sdk.admin.credits.listTransactions({ ...query, type: "consume", created_at_to: to, sorting: "-created_at", page, limit });
+      const rows = await Promise.all(result.items.map(async (row): Promise<LedgerRow | null> => {
+        const requested = Number(row.reason?.match(QUOTA_REQUESTED)?.[1]);
+        if (!row.operation_id || !Number.isSafeInteger(requested) || requested <= 0) return null;
+        const consumption = await sdk.admin.credits.getConsumption({ ...query, operation_id: row.operation_id });
+        const units = consumption.original_amount - consumption.total_reversed;
+        if (units !== requested) return null;
+        return {
+          ...ledgerTransactionRow(row),
+          amountUsd: 0,
+          reason: row.reason?.replace(QUOTA_REQUESTED, "") ?? null,
+          quota: { tokenType: quotaTokenType, units },
+        };
+      }));
+      return { hasMore: result.pagination.has_more, items: rows.filter((row): row is LedgerRow => row !== null) };
+    };
+    const quotaSources = (input.quotaTokenTypes ?? []).map(coveredByQuota);
     switch (input.filter) {
       case "usage":
-        return [transactions("consume"), overages];
+        return [transactions("consume"), overages, ...quotaSources];
       case "grant":
         return [transactions("grant")];
       case "refund":
         return [transactions("refund"), transactions("reversal")];
       default:
-        return [transactions(), overages];
+        return [transactions(), overages, ...quotaSources];
     }
   };
 
@@ -1677,7 +1699,7 @@ export function createTalesofaiBillingOperations(
     if (input.createCustomer !== false) await ensureCustomer({ userId: input.userId });
     else if (!await getCustomerCreditsOrEmpty({ sdk, businessKey, userId: input.userId })) return list([], null);
     const page = await readLedger({
-      sources: ledgerSources({ userId: input.userId, tokenType, filter: input.filter }),
+      sources: ledgerSources({ userId: input.userId, tokenType, filter: input.filter, quotaTokenTypes: input.quotaTokenTypes }),
       cursor: input.cursor ?? null,
       offset: input.offset,
       limit,
@@ -2745,21 +2767,71 @@ export function createTalesofaiBillingOperations(
       return getStateAfterEnsure(input.userId);
     },
 
-    async getGenerationModelDiscount(input) {
+    async getActiveBenefits(input) {
       await ensureCustomer({ userId: input.userId });
       const response = await sdk.admin.customers.getEntitlements({
         external_user_id: input.userId,
         business_key: businessKey,
       });
-      return resolveGenerationModelDiscount({
-        model: input.model,
-        entitlements: response.active_benefits.map((benefit) => ({
-          benefitKey: benefit.benefit_key,
-          enabled: benefit.config.metadata.enabled !== false,
-          metadata: benefit.config.metadata,
-          grantId: benefit.grant_id,
-        })),
-      });
+      return response.active_benefits.map((benefit) => ({
+        benefitKey: benefit.benefit_key,
+        enabled: benefit.config.metadata.enabled !== false,
+        metadata: benefit.config.metadata,
+        grantId: benefit.grant_id,
+      }));
+    },
+
+    async getQuotaStatus(input) {
+      const state = await getCustomerCreditsOrEmpty({ sdk, businessKey, userId: input.userId });
+      const summary = state?.credits.find((credit) => credit.tokenType === input.tokenType);
+      const balance = Math.max(0, summary?.netBalance ?? 0);
+      if (!input.grants || !state) return { tokenType: input.tokenType, balance, grants: [] };
+      const grants = await listAllCreditGrants({ userId: input.userId, tokenType: input.tokenType, status: "active" });
+      return {
+        tokenType: input.tokenType,
+        balance,
+        grants: grants
+          .filter((grant) => grant.available_now !== false && grant.remaining_amount > 0)
+          .map((grant) => ({
+            benefitName: resolveCreditGrantBenefitName(grant),
+            remaining: grant.remaining_amount,
+            original: typeof grant.original_amount === "number" ? grant.original_amount : null,
+            expiresAt: grant.expires_at ?? null,
+          })),
+      };
+    },
+
+    async consumeQuota(input) {
+      if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new Error("Quota amount must be a positive integer");
+      await ensureCustomer({ userId: input.userId });
+      const response = await sdk.admin.credits.consume(
+        {
+          business_key: businessKey,
+          external_user_id: input.userId,
+          token_type: input.tokenType,
+          amount: input.amount,
+          source_type: "usage",
+          source_id: input.sourceId,
+          usage_type: input.usageType,
+          operation_id: input.operationId,
+          reason: input.reason,
+        },
+        { idempotencyKey: input.operationId },
+      );
+      return { amount: input.amount, overage: Math.min(input.amount, response.overage?.original_amount ?? 0) };
+    },
+
+    async reverseQuota(input) {
+      const receipt = await sdk.admin.credits.reverseConsume({
+        business_key: businessKey,
+        external_user_id: input.userId,
+        token_type: input.tokenType,
+        original_operation_id: input.originalOperationId,
+        operation_id: input.operationId,
+        amount: input.amount,
+        reason: input.reason.slice(0, 1024),
+      }, { idempotencyKey: input.operationId });
+      return { amount: receipt.amount, overageCancelled: receipt.open_overage_cancelled_amount };
     },
 
     async getCreditStatus(

@@ -1,8 +1,4 @@
-import {
-  billingOperations,
-  resolveGenerationUsageType,
-  type BillingAccessDecision,
-} from "@cohub/billing";
+import { resolveGenerationUsageType, type BillingAccessDecision } from "@cohub/billing";
 import { defaultJobRetention } from "@cohub/infra/bullmq";
 import { createLogger } from "@cohub/infra/logging";
 import {
@@ -13,7 +9,13 @@ import {
   type GenerationTaskData,
 } from "@cohub/protocol/generation";
 import { GenerationValidationError } from "@neta-art/generation";
-import { admitGeneration, GenerationBillingUnavailableError, generationReserveHolds } from "../generation-billing.js";
+import {
+  admitGeneration,
+  GenerationBillingUnavailableError,
+  GenerationPricingUnavailableError,
+  releaseGenerationAdmission,
+  type GenerationAdmission,
+} from "../generation-billing.js";
 import { enqueueTask } from "../tasks.js";
 import { loadGenerationDeclaration } from "./declarations.js";
 import { resolveOutputReferences } from "./output-references.js";
@@ -62,24 +64,8 @@ export async function enqueueGeneration(input: GenerationRequestInput & {
   const usageType = resolveGenerationUsageType(declaration.category);
   const context = { userId: input.userId, spaceId: input.spaceId, model: input.model };
 
-  let discount: Awaited<ReturnType<typeof billingOperations.getGenerationModelDiscount>>;
-  try {
-    discount = await billingOperations.getGenerationModelDiscount({ userId: input.userId, model: input.model });
-  } catch (error) {
-    logger.error("[Billing] failed to resolve generation model discount before enqueue", { ...context, error });
-    throw new GenerationRequestError(503, "generation_pricing_unavailable", "Generation pricing is temporarily unavailable. Please try again later.");
-  }
-  if (discount.benefitKey) {
-    logger.info("[Billing] generation model discount resolved", {
-      ...context,
-      multiplier: discount.multiplier,
-      benefitKey: discount.benefitKey,
-      resolvedAt: discount.resolvedAt,
-    });
-  }
-
   const taskRunId = input.taskRunId ?? crypto.randomUUID();
-  let admission: Awaited<ReturnType<typeof admitGeneration>>;
+  let admission: GenerationAdmission;
   try {
     admission = await admitGeneration({
       taskRunId,
@@ -88,14 +74,16 @@ export async function enqueueGeneration(input: GenerationRequestInput & {
       sessionId: input.sessionId ?? null,
       turnId: input.turnId ?? null,
       model: input.model,
+      provider: declaration.adapter?.type ?? null,
       usageType,
-      discount,
+      parameters,
     });
   } catch (error) {
+    if (error instanceof GenerationPricingUnavailableError) throw new GenerationRequestError(503, "generation_pricing_unavailable", error.message);
     if (error instanceof GenerationBillingUnavailableError) throw new GenerationRequestError(503, "generation_balance_unavailable", error.message);
     throw error;
   }
-  const { decision, hold } = admission;
+  const { decision, hold, pricing } = admission;
 
   const data: GenerationTaskData = {
     model: input.model,
@@ -103,7 +91,7 @@ export async function enqueueGeneration(input: GenerationRequestInput & {
     parameters,
     meta: input.meta,
     requestSource: input.requestSource ?? null,
-    modelDiscount: { multiplier: discount.multiplier, resolvedAt: discount.resolvedAt },
+    pricing,
     ...(hold ? { reserveHold: hold } : {}),
     ...(input.speech ? { speech: input.speech } : {}),
   };
@@ -118,7 +106,7 @@ export async function enqueueGeneration(input: GenerationRequestInput & {
     }, { attempts: 1, ...defaultJobRetention, taskRunId });
     return { taskRunId: enqueued.taskRunId, billing: decision, hold };
   } catch (error) {
-    if (hold) await generationReserveHolds.release(taskRunId, hold.payer, "enqueue_failed");
+    await releaseGenerationAdmission({ taskRunId, userId: input.userId, admission }, "enqueue_failed");
     logger.error("[generations] failed to enqueue generation task", { ...context, error });
     throw new GenerationRequestError(503, "generation_queue_unavailable", "Generation queue is temporarily unavailable. Please try again later.");
   }

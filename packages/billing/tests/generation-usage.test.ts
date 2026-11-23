@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-	applyGenerationModelDiscount,
-	calculateGenerationUsageCharge,
+	applyPricingMultiplier,
+	calculateUsageCharge,
 	GenerationModelDiscountConfigError,
 	generationUsageKind,
-	isGenerationModelDiscountFree,
 	normalizePositiveUsd,
-	reconcileGenerationModelDiscountSnapshot,
 	resolveGenerationModelDiscount,
 	resolveGenerationUsageType,
 } from "../src/generation-usage.js";
@@ -43,106 +41,66 @@ test("normalizePositiveUsd rejects non-positive values", () => {
 	assert.equal(normalizePositiveUsd(0.123456789), 0.12345679);
 });
 
-const resolvedAt = "2026-07-13T00:00:00.000Z";
 const entitlement = (
 	benefitKey: string,
 	metadata: Record<string, string | number | boolean>,
 ) => ({ benefitKey, enabled: true, metadata, grantId: `grant:${benefitKey}` });
+const FULL_PRICE = { multiplier: 1, benefitKey: null };
 
 test("generation model discount defaults to full price without a matching entitlement", () => {
-	assert.deepEqual(
-		resolveGenerationModelDiscount({ model: "gpt-image-2", entitlements: [], resolvedAt }),
-		{ multiplier: 1, benefitKey: null, grantId: null, resolvedAt },
-	);
+	assert.deepEqual(resolveGenerationModelDiscount({ model: "gpt-image-2", entitlements: [] }), FULL_PRICE);
 	assert.deepEqual(
 		resolveGenerationModelDiscount({
 			model: "gpt-image-2",
 			entitlements: [entitlement("studio_pro_model_discount_v1", { "gpt-image-2": 0 })],
-			resolvedAt,
 		}),
-		{ multiplier: 1, benefitKey: null, grantId: null, resolvedAt },
+		FULL_PRICE,
 	);
-	// Benefit present but model key absent in metadata → no discount (not a config error).
 	assert.deepEqual(
 		resolveGenerationModelDiscount({
 			model: "gemini-3.1-flash-lite-image",
 			entitlements: [entitlement("pro_model_discount_v1", { "gpt-image-2": 0.6 })],
-			resolvedAt,
 		}),
-		{ multiplier: 1, benefitKey: null, grantId: null, resolvedAt },
+		FULL_PRICE,
 	);
 });
 
-test("generation model discount is driven by metadata keys, not a code allowlist", () => {
-	const discount = resolveGenerationModelDiscount({
-		model: "any-new-model",
-		entitlements: [entitlement("pro_model_discount_v1", { "any-new-model": 0.5 })],
-		resolvedAt,
-	});
-	assert.deepEqual(discount, {
-		multiplier: 0.5,
-		benefitKey: "pro_model_discount_v1",
-		grantId: "grant:pro_model_discount_v1",
-		resolvedAt,
-	});
+test("generation model discount takes the lowest benefit multiplier from metadata keys", () => {
+	assert.deepEqual(
+		resolveGenerationModelDiscount({
+			model: "any-new-model",
+			entitlements: [
+				entitlement("pro_model_discount_v1", { "any-new-model": 0.6 }),
+				entitlement("max_model_discount_v1", { "any-new-model": 0 }),
+			],
+		}),
+		{ multiplier: 0, benefitKey: "max_model_discount_v1" },
+	);
 });
 
-test("Pro generation model discount charges sixty percent of official cost", () => {
-	const discount = resolveGenerationModelDiscount({
-		model: "gpt-image-2-auto",
-		entitlements: [entitlement("pro_model_discount_v1", { "gpt-image-2-auto": 0.6 })],
-		resolvedAt,
-	});
-	assert.deepEqual(discount, {
-		multiplier: 0.6,
-		benefitKey: "pro_model_discount_v1",
-		grantId: "grant:pro_model_discount_v1",
-		resolvedAt,
-	});
-	assert.equal(applyGenerationModelDiscount(0.1, discount), 0.06);
-	assert.equal(isGenerationModelDiscountFree(discount), false);
+test("pricing multiplier rounds once in usd_micro_cent units", () => {
+	assert.equal(applyPricingMultiplier(0.1, 0.6), 0.06);
+	assert.equal(applyPricingMultiplier(0.1, 0), 0);
+	assert.equal(applyPricingMultiplier(0.000000006, 0.6), 0);
+	assert.equal(applyPricingMultiplier(0.00000001, 0.6), 0.00000001);
+	assert.equal(applyPricingMultiplier(0.00000002, 0.6), 0.00000001);
+	assert.throws(() => applyPricingMultiplier(0.1, 1.5));
 });
 
-test("Max generation model discount preserves zero as free", () => {
-	const discount = resolveGenerationModelDiscount({
-		model: "gemini-3.1-flash-image-preview-auto",
-		entitlements: [
-			entitlement("pro_model_discount_v1", { "gemini-3.1-flash-image-preview-auto": 0.6 }),
-			entitlement("max_model_discount_v1", { "gemini-3.1-flash-image-preview-auto": 0 }),
-		],
-		resolvedAt,
-	});
-	assert.equal(discount.multiplier, 0);
-	assert.equal(discount.benefitKey, "max_model_discount_v1");
-	assert.equal(applyGenerationModelDiscount(0.1, discount), 0);
-	assert.equal(isGenerationModelDiscountFree(discount), true);
-});
-
-test("generation model discount rounds once in usd_micro_cent units", () => {
-	const discount = resolveGenerationModelDiscount({
-		model: "gpt-image-2",
-		entitlements: [entitlement("pro_model_discount_v1", { "gpt-image-2": 0.6 })],
-		resolvedAt,
-	});
-	assert.equal(applyGenerationModelDiscount(0.000000006, discount), 0);
-	assert.equal(applyGenerationModelDiscount(0.00000001, discount), 0.00000001);
-	assert.equal(applyGenerationModelDiscount(0.00000002, discount), 0.00000001);
-});
-
-test("generation charge distinguishes missing provider cost, free pricing, and Pro pricing", () => {
-	assert.deepEqual(calculateGenerationUsageCharge(undefined, { multiplier: 1 }), {
+test("usage charge distinguishes missing provider cost, free pricing, and discounted pricing", () => {
+	assert.deepEqual(calculateUsageCharge(undefined, 1), {
 		officialCostUsd: 0,
 		amountUsd: 0,
 		discountMultiplier: 1,
 		skipReason: "missing_cost",
 	});
-	assert.deepEqual(calculateGenerationUsageCharge(0.04, { multiplier: 0 }), {
+	assert.deepEqual(calculateUsageCharge(0.04, 0), {
 		officialCostUsd: 0.04,
 		amountUsd: 0,
 		discountMultiplier: 0,
 		skipReason: "discounted_free",
 	});
-	assert.deepEqual(calculateGenerationUsageCharge(0.04, { multiplier: 0.6 }), {
+	assert.deepEqual(calculateUsageCharge(0.04, 0.6), {
 		officialCostUsd: 0.04,
 		amountUsd: 0.024,
 		discountMultiplier: 0.6,
@@ -156,59 +114,22 @@ test("generation model discount rejects invalid active configuration", () => {
 			() => resolveGenerationModelDiscount({
 				model: "gpt-image-2",
 				entitlements: [entitlement("pro_model_discount_v1", { "gpt-image-2": value })],
-				resolvedAt,
 			}),
 			GenerationModelDiscountConfigError,
 		);
 	}
-	// Disabled benefit with a matching model key is a config error.
 	assert.throws(
 		() => resolveGenerationModelDiscount({
 			model: "gpt-image-2",
-			entitlements: [{
-				...entitlement("pro_model_discount_v1", { "gpt-image-2": 0.6 }),
-				enabled: false,
-			}],
-			resolvedAt,
+			entitlements: [{ ...entitlement("pro_model_discount_v1", { "gpt-image-2": 0.6 }), enabled: false }],
 		}),
 		GenerationModelDiscountConfigError,
 	);
-	// Disabled benefit without the requested model key is ignored.
 	assert.deepEqual(
 		resolveGenerationModelDiscount({
 			model: "gpt-image-2",
-			entitlements: [{
-				...entitlement("pro_model_discount_v1", { "gpt-image-2-auto": 0.6 }),
-				enabled: false,
-			}],
-			resolvedAt,
+			entitlements: [{ ...entitlement("pro_model_discount_v1", { "gpt-image-2-auto": 0.6 }), enabled: false }],
 		}),
-		{ multiplier: 1, benefitKey: null, grantId: null, resolvedAt },
+		FULL_PRICE,
 	);
-});
-
-test("worker pricing reconciliation resolves legacy payloads and rejects stale or forged snapshots", () => {
-	const resolved = resolveGenerationModelDiscount({
-		model: "gpt-image-2",
-		entitlements: [entitlement("pro_model_discount_v1", { "gpt-image-2": 0.6 })],
-		resolvedAt,
-	});
-	assert.deepEqual(
-		reconcileGenerationModelDiscountSnapshot({ model: "gpt-image-2", resolved }),
-		{ multiplier: 0.6, resolvedAt },
-	);
-	const acceptedAt = "2026-07-13T00:01:00.000Z";
-	assert.deepEqual(
-		reconcileGenerationModelDiscountSnapshot({
-			model: "gpt-image-2",
-			snapshot: { multiplier: 0.6, resolvedAt: acceptedAt },
-			resolved,
-		}),
-		{ multiplier: 0.6, resolvedAt: acceptedAt },
-	);
-	assert.throws(() => reconcileGenerationModelDiscountSnapshot({
-		model: "gpt-image-2",
-		snapshot: { multiplier: 0, resolvedAt: acceptedAt },
-		resolved,
-	}), /Generation pricing changed/);
 });

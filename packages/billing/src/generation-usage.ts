@@ -2,7 +2,7 @@ import {
   COHUB_BILLING_BENEFITS,
   COHUB_BILLING_CREDIT_UNITS,
   COHUB_BILLING_USAGE_TYPES,
-  type GenerationModelDiscount,
+  type BillingActiveBenefit,
   type CohubBillingUsageType,
 } from "./interfaces.js";
 import type { BillingUsageKind } from "./usage-gate.js";
@@ -12,13 +12,6 @@ const GENERATION_MODEL_DISCOUNT_BENEFIT_KEYS = new Set<string>([
   COHUB_BILLING_BENEFITS.maxModelDiscount,
 ]);
 
-export type GenerationModelDiscountEntitlement = {
-  benefitKey: string;
-  enabled: boolean;
-  metadata: Record<string, string | number | boolean>;
-  grantId?: string | null;
-};
-
 export class GenerationModelDiscountConfigError extends Error {
   constructor(benefitKey: string, model: string, value: unknown) {
     super(`Invalid generation model discount ${benefitKey}.${model}: ${String(value)}`);
@@ -26,31 +19,16 @@ export class GenerationModelDiscountConfigError extends Error {
   }
 }
 
-export class GenerationModelDiscountSnapshotMismatchError extends Error {
-  constructor(model: string) {
-    super(`Generation pricing changed for ${model}. Please retry the request.`);
-    this.name = "GenerationModelDiscountSnapshotMismatchError";
-  }
-}
-
 /**
- * Resolve the best (lowest) model discount from active entitlements.
+ * Resolve the best (lowest) per-model discount from active benefits.
  * Eligible models are defined entirely by benefit metadata keys — no code allowlist.
  * Missing model keys are skipped; present keys must be valid 0..1 numbers.
  */
 export function resolveGenerationModelDiscount(input: {
   model: string;
-  entitlements: Iterable<GenerationModelDiscountEntitlement>;
-  resolvedAt?: string;
-}): GenerationModelDiscount {
-  const resolvedAt = input.resolvedAt ?? new Date().toISOString();
-  let resolved: GenerationModelDiscount = {
-    multiplier: 1,
-    benefitKey: null,
-    grantId: null,
-    resolvedAt,
-  };
-
+  entitlements: Iterable<BillingActiveBenefit>;
+}): { multiplier: number; benefitKey: string | null } {
+  let resolved: { multiplier: number; benefitKey: string | null } = { multiplier: 1, benefitKey: null };
   for (const entitlement of input.entitlements) {
     if (!GENERATION_MODEL_DISCOUNT_BENEFIT_KEYS.has(entitlement.benefitKey)) continue;
     if (!Object.hasOwn(entitlement.metadata, input.model)) continue;
@@ -61,57 +39,28 @@ export function resolveGenerationModelDiscount(input: {
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
       throw new GenerationModelDiscountConfigError(entitlement.benefitKey, input.model, value);
     }
-    if (value < resolved.multiplier) {
-      resolved = {
-        multiplier: value,
-        benefitKey: entitlement.benefitKey,
-        grantId: entitlement.grantId ?? null,
-        resolvedAt,
-      };
-    }
+    if (value < resolved.multiplier) resolved = { multiplier: value, benefitKey: entitlement.benefitKey };
   }
-
   return resolved;
 }
 
-export function isGenerationModelDiscountFree(discount: Pick<GenerationModelDiscount, "multiplier">): boolean {
-  return discount.multiplier === 0;
+export class PricingMultiplierError extends Error {
+  constructor(multiplier: number) {
+    super(`Invalid pricing multiplier: ${multiplier}`);
+    this.name = "PricingMultiplierError";
+  }
 }
 
-export function reconcileGenerationModelDiscountSnapshot(input: {
-  model: string;
-  snapshot?: { multiplier: number; resolvedAt: string };
-  resolved: GenerationModelDiscount;
-}): { multiplier: number; resolvedAt: string } {
-  if (!input.snapshot) {
-    return {
-      multiplier: input.resolved.multiplier,
-      resolvedAt: input.resolved.resolvedAt,
-    };
-  }
-  if (input.snapshot.multiplier !== input.resolved.multiplier) {
-    throw new GenerationModelDiscountSnapshotMismatchError(input.model);
-  }
-  return input.snapshot;
-}
-
-export function applyGenerationModelDiscount(
-  officialCostUsd: number | null | undefined,
-  discount: Pick<GenerationModelDiscount, "multiplier"> & Partial<Pick<GenerationModelDiscount, "benefitKey">>,
-): number {
+/** Applies a 0..1 multiplier to a USD list price, rounded to billing's micro-cent precision. */
+export function applyPricingMultiplier(officialCostUsd: number | null | undefined, multiplier: number): number {
   if (typeof officialCostUsd !== "number" || !Number.isFinite(officialCostUsd) || officialCostUsd <= 0) return 0;
-  if (discount.multiplier === 0) return 0;
-  if (!Number.isFinite(discount.multiplier) || discount.multiplier < 0 || discount.multiplier > 1) {
-    throw new GenerationModelDiscountConfigError(discount.benefitKey ?? "unknown", "snapshot", discount.multiplier);
-  }
+  if (multiplier === 0) return 0;
+  if (!Number.isFinite(multiplier) || multiplier < 0 || multiplier > 1) throw new PricingMultiplierError(multiplier);
   const unitsPerUsd = COHUB_BILLING_CREDIT_UNITS.usdMicroCent.unitsPerUsd;
-  return Math.round(officialCostUsd * discount.multiplier * unitsPerUsd) / unitsPerUsd;
+  return Math.round(officialCostUsd * multiplier * unitsPerUsd) / unitsPerUsd;
 }
 
-export function calculateGenerationUsageCharge(
-  officialCostUsd: number | null | undefined,
-  discount: Pick<GenerationModelDiscount, "multiplier"> & Partial<Pick<GenerationModelDiscount, "benefitKey">>,
-): {
+export function calculateUsageCharge(officialCostUsd: number | null | undefined, multiplier: number): {
   officialCostUsd: number;
   amountUsd: number;
   discountMultiplier: number;
@@ -121,20 +70,15 @@ export function calculateGenerationUsageCharge(
     typeof officialCostUsd === "number" && Number.isFinite(officialCostUsd) && officialCostUsd > 0
       ? officialCostUsd
       : 0;
-  const amountUsd = applyGenerationModelDiscount(officialCostUsd, discount);
+  const amountUsd = applyPricingMultiplier(officialCostUsd, multiplier);
   const skipReason = officialCost <= 0
     ? "missing_cost"
     : amountUsd > 0
       ? null
-      : discount.multiplier === 0
+      : multiplier === 0
         ? "discounted_free"
         : "discounted_below_minimum";
-  return {
-    officialCostUsd: officialCost,
-    amountUsd,
-    discountMultiplier: discount.multiplier,
-    skipReason,
-  };
+  return { officialCostUsd: officialCost, amountUsd, discountMultiplier: multiplier, skipReason };
 }
 
 const GENERATION_CATEGORY_USAGE_TYPES = new Map<string, CohubBillingUsageType>([

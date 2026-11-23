@@ -50,7 +50,7 @@ registerTask(GENERATION_BILLING_RETRY_TASK_TYPE, async (job: Job) => {
     usageType: data.usageType as CohubBillingUsageType,
     sourceId: data.taskRunId,
     operationId: `generation:${data.taskRunId}`,
-    reason: `Generation ${data.model}`,
+    reason: data.reason ?? `Generation ${data.model}`,
   });
 
   if (result.status === "overage") {
@@ -76,6 +76,7 @@ registerTask(GENERATION_BILLING_RETRY_TASK_TYPE, async (job: Job) => {
     amountUsd,
     discountMultiplier: data.modelDiscount.multiplier,
     usageType: data.usageType,
+    ...(data.quota ? { quota: data.quota } : {}),
     ...(result.status === "disabled"
       ? { reason: "billing_disabled" }
       : result.status === "skipped"

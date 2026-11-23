@@ -61,18 +61,19 @@ type GenerationTaskResult = {
 Generation requests share the platform credit balance with LLM turns.
 
 1. **Preflight gate** — `POST /api/generations` and the worker re-check the caller's balance before enqueue/execute. Video generation requires at least `$1.01`; a lower balance returns the standard 402 `billing` conversion payload before the provider is called. Other paid generations require a positive balance. Video balance lookup failures fail closed with a temporary-unavailable error.
-2. **Post-success charge** — after a successful provider call, the worker applies the request-time model discount snapshot to the official provider `cost` (USD), then attempts to record the effective charge amount:
+2. **Admission pricing** — before enqueue the API prices the request with the [pricing rules](billing-pricing.md) and per-model benefit discounts, draws any quota the rules grant (for example daily video seconds, counted from the request's `duration`), and admits only the uncovered remainder against the balance or reserve hold. The resulting `pricing` snapshot (a multiplier for each payer plus quota units covered of requested) travels in the task payload; a task whose admission fails, whose enqueue fails, or whose queued turn is cancelled returns its quota.
+3. **Post-success charge** — after a successful provider call, the worker charges the official provider `cost` (USD) scaled by the snapshot:
 
 ```ts
 operationId: `generation:${taskRunId}`  // idempotent
 usageType: "generation.image" | "generation.video" | "generation.audio" | "generation.3d" | "generation.decision" | "generation"
 officialCostUsd: result.cost
-amountUsd: officialCostUsd * discountMultiplier
+amountUsd: officialCostUsd * multiplier * (requested - covered) / requested
 ```
 
-The server resolves `pro_model_discount_v1` and `max_model_discount_v1` entitlements from billing benefit metadata. Eligible models are the metadata keys themselves (for example `metadata["gpt-image-2"] = 0.6`); there is no code allowlist. A benefit without the requested model key is ignored for that request. If both supported benefits apply to the same model, the lower multiplier wins. The resolved multiplier is snapshotted before enqueue, verified against authoritative entitlements by the worker, and reused by any billing retry. If the applicable multiplier changes while a task is queued, the worker fails before provider execution and the caller can retry at the new price. Benefit and grant identifiers are retained only in internal logs. Pricing snapshots and billing amounts are visible only to the task creator; collaborator task views redact them because the multiplier can reveal subscription tier.
+Queued tasks keep the price they were admitted at: the worker does not re-price, so turning a rule off only affects new requests. A personal benefit that makes a request free (a zero multiplier or full quota coverage) is never routed to a Space wallet; otherwise a wallet pays its own price, which ignores benefit-based discounts. Pricing snapshots, quota coverage, and billing amounts are visible only to the task creator; collaborator task views redact them because they can reveal subscription tier.
 
-A zero multiplier is a valid free generation: both balance gates are bypassed, no zero-value ledger transaction is created, and the task records `billing.reason = "discounted_free"`. Present but invalid pricing configuration fails before provider execution instead of silently charging full price.
+A zero multiplier is a valid free generation: both balance gates are bypassed, no zero-value ledger transaction is created, and the task records `billing.reason = "discounted_free"`. Invalid benefit discount metadata fails admission instead of silently charging full price.
 
 Usage type comes only from the declaration's `category` (`image`, `video`, `audio`, `3d`, `decision`), so the API gate, worker gate, and post-success charge always agree; an uncategorized model bills as generic `generation` and the declaration loaders log a warning naming it. Every video model must declare `category: video` to get the video balance gate. Ledger rows written before `generation.audio` keep the legacy `generation.music` type. Missing/non-positive provider `cost` skips charging and stores `billing.status = "skipped"` with reason `missing_cost` (task still succeeds — cost gaps are platform issues and must not break the user path; they are logged for ops follow-up). Transient billing write failures still complete the generation task, then enqueue an idempotent `generation.billing_retry` job (`operationId = generation:${taskRunId}`, up to 8 attempts with exponential backoff). Retries preserve the original official cost, multiplier, and effective amount.
 
@@ -82,24 +83,19 @@ Completed tasks may include:
 billing?: {
   officialCostUsd?: number;
   amountUsd: number;
-  discountMultiplier?: number;
+  discountMultiplier?: number; // after quota coverage
+  quota?: { tokenType: string; requested: number; covered: number } | null;
   usageType: string;
   status: "recorded" | "overage" | "skipped";
   reason?: string | null;
 } | null
 ```
 
-`GenerationTaskResult.cost` and usage statistics continue to report the official provider cost. `billing.amountUsd` is the effective charge amount after the plan discount; `billing.status` indicates whether that amount was recorded, treated as overage, or skipped.
+`GenerationTaskResult.cost` and usage statistics continue to report the official provider cost. `billing.amountUsd` is the effective charge amount; `billing.status` indicates whether that amount was recorded, treated as overage, or skipped.
 
-### Discount rollout safety
+### Pricing rollout safety
 
-API and worker deployments roll independently. Release discount support in three phases:
-
-1. Deploy the task-response privacy filters first and wait for the API rollout to complete. This prevents collaborator-visible task endpoints from exposing pricing when the worker starts applying discounts.
-2. Deploy the backward-compatible worker and shared billing/protocol changes. It resolves discounts for legacy API payloads that do not contain a snapshot. Wait for both user and system worker rollouts to complete.
-3. Deploy the generation API route that snapshots pricing and bypasses the balance gate for free models.
-
-Do not deploy the API activation before all workers understand discount snapshots: an older worker would ignore the new field and charge official cost. To roll back, revert the API activation first and let accepted generation jobs drain; keeping the privacy filters and backward-compatible worker is safe.
+API and worker deployments roll independently. Deploy the worker (and shared billing/protocol packages) before the API: the worker reads both the new `pricing` snapshot and the legacy `modelDiscount` field, while an older worker would ignore `pricing` and charge without quota coverage. To roll back, revert the API first and let accepted generation jobs drain.
 
 ## Usage stats
 

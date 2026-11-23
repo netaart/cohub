@@ -1,0 +1,32 @@
+schema: cohub.billing.pricing.v1
+rules:
+  # A time-boxed campaign for every payer. Set `enabled: false` (or delete the rule) to return to list price.
+  - key: video-launch
+    announce: true
+    when:
+      usageTypes: [generation.video]
+      models: [example-video-model]
+      startsAt: 2026-12-01T00:00:00+00:00
+      endsAt: 2026-12-04T00:00:00+00:00
+    effect:
+      multiplier: 0.5
+
+  # A subscriber discount on chat models; benefit rules never price Space wallet charges.
+  - key: subscriber-llm
+    when:
+      usageTypes: [generation.llm, generation.llm.raw]
+      benefits: [pro_plan, max_plan]
+    effect:
+      multiplier: 0.8
+
+  # Subscribers spend a daily seconds quota before money. The billing service grants and expires
+  # `video_second`; one unit covers one second of the request's `duration` parameter.
+  - key: subscriber-daily-video
+    when:
+      usageTypes: [generation.video]
+      models: [example-video-model]
+      benefits: [pro_plan, max_plan]
+    effect:
+      quota:
+        tokenType: video_second
+        parameter: duration

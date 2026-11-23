@@ -139,6 +139,10 @@
     "./generation-billing": {
       "types": "./dist/generation-billing/index.d.ts",
       "default": "./dist/generation-billing/index.js"
+    },
+    "./usage-pricing": {
+      "types": "./dist/usage-pricing/index.d.ts",
+      "default": "./dist/usage-pricing/index.js"
     }
   },
   "types": "./dist/index.d.ts",

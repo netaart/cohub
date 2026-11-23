@@ -13,4 +13,3 @@ const loader = createGenerationDeclarationLoader({
 
 export const loadGenerationDeclarations = loader.loadGenerationDeclarations;
 export const loadGenerationDeclaration = loader.loadGenerationDeclaration;
-export const loadPublicGenerationModels = loader.loadPublicGenerationModels;

@@ -91,8 +91,8 @@ export function sanitizeTaskRunPricingForViewer<T extends TaskRunView>(
     const data = { ...payload.data };
     let changed = false;
     for (const key of isBillingRetry
-      ? ["modelDiscount", "officialCostUsd", "amountUsd"]
-      : ["modelDiscount", "reserveHold"]) {
+      ? ["modelDiscount", "officialCostUsd", "amountUsd", "reason", "quota"]
+      : ["modelDiscount", "pricing", "reserveHold"]) {
       if (Object.hasOwn(data, key)) {
         delete data[key];
         changed = true;
@@ -109,7 +109,7 @@ export function sanitizeTaskRunPricingForViewer<T extends TaskRunView>(
   } else if (isBillingRetry && isRecord(result)) {
     const nextResult = { ...result };
     let changed = false;
-    for (const key of ["officialCostUsd", "amountUsd", "discountMultiplier"]) {
+    for (const key of ["officialCostUsd", "amountUsd", "discountMultiplier", "quota"]) {
       if (Object.hasOwn(nextResult, key)) {
         delete nextResult[key];
         changed = true;

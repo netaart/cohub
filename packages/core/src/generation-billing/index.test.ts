@@ -47,6 +47,7 @@ const request = (n: number, spaceId: string | null = "space") => ({
   model: "seedance-2-0",
   usageType: "generation.video",
   amountUsd: 15,
+  walletAmountUsd: 15,
 });
 
 test("holds must fit on top of live holds, Space wallet first", async () => {

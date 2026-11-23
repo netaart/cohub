@@ -26,10 +26,80 @@ export const quotedName = (reason: string | null) =>
 
 const SUBJECT =
 	/^(?:LLM usage|Raw LLM completion|Decision call) [^/\s]+\/(.+)$|^Generation (.+)$/;
+/** The pricing facts the server appends to a discounted usage reason: ` [list=5;x=0.5;quota=6/10]`. */
+const PRICING_SUFFIX = / \[list=([\d.]+)((?:;[a-z]+=[^;\]]+)*)\]$/;
+
+export type UsagePricing = {
+	/** Null for usage a quota fully covered: no money moved and the list price is not recorded. */
+	listUsd: number | null;
+	multiplier: number | null;
+	quota: { covered: number; requested: number } | null;
+};
+
+function plainReason(description: string | null): string | null {
+	return description?.replace(PRICING_SUFFIX, "") ?? null;
+}
+
+export function usagePricing(
+	item: Pick<BillingBalanceActivity, "description" | "quota">,
+): UsagePricing | null {
+	if (item.quota)
+		return {
+			listUsd: null,
+			multiplier: null,
+			quota: { covered: item.quota.units, requested: item.quota.units },
+		};
+	const match = item.description?.match(PRICING_SUFFIX);
+	if (!match) return null;
+	const fields = new Map(
+		(match[2] ?? "")
+			.split(";")
+			.filter(Boolean)
+			.map((pair) => pair.split("=") as [string, string]),
+	);
+	const multiplier = Number(fields.get("x"));
+	const [covered, requested] = (fields.get("quota") ?? "")
+		.split("/")
+		.map(Number);
+	return {
+		listUsd: Number(match[1]),
+		multiplier: Number.isFinite(multiplier) ? multiplier : null,
+		quota:
+			covered !== undefined &&
+			requested !== undefined &&
+			covered > 0 &&
+			requested > 0
+				? { covered, requested }
+				: null,
+	};
+}
 
 export function usageSubject(item: BillingBalanceActivity): string | null {
-	const match = item.description?.match(SUBJECT);
+	const match = plainReason(item.description)?.match(SUBJECT);
 	return match ? (match[1] ?? match[2] ?? null) : null;
+}
+
+/** Pricing shared by every item of a run; the list total only when each item carries one. */
+export function runPricing(items: readonly BillingBalanceActivity[]) {
+	const priced = items.map(usagePricing);
+	if (priced.some((pricing) => !pricing)) return null;
+	const first = priced[0];
+	if (!first) return null;
+	return {
+		listUsd: priced.some((pricing) => pricing?.listUsd === null)
+			? null
+			: -Number(
+					priced
+						.reduce((sum, pricing) => sum + (pricing?.listUsd ?? 0), 0)
+						.toFixed(8),
+				),
+		multiplier: priced.every(
+			(pricing) => pricing?.multiplier === first.multiplier,
+		)
+			? first.multiplier
+			: null,
+		quota: priced.length === 1 ? first.quota : null,
+	};
 }
 
 function dayKey(date: Date) {
@@ -38,7 +108,7 @@ function dayKey(date: Date) {
 
 function runKey(item: BillingBalanceActivity) {
 	if (item.kind !== "usage" || transferActivityKind(item)) return null;
-	return `${item.usageType}|${item.description}|${item.status === "covered" ? "" : "overage"}`;
+	return `${item.usageType}|${plainReason(item.description)}|${item.status === "covered" ? "" : "overage"}|${item.quota ? "quota" : ""}`;
 }
 
 function mergedStatus(

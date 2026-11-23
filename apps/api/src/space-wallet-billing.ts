@@ -1,5 +1,6 @@
 import { billingOperations, spaceWalletBillingOperations } from "@cohub/billing";
 import { createSpaceWalletBilling, createSpaceWalletTransfers, spaceWalletCustomerId, walletCreditsUsable } from "@cohub/core/space-wallet";
+import { isFreeLlmUsage } from "@cohub/core/usage-pricing";
 import { COHUB_SYSTEM_QUEUE, createBullmqQueue, defaultJobRetention } from "@cohub/infra/bullmq";
 import { createLogger } from "@cohub/infra/logging";
 import { injectTrace } from "@cohub/infra/tracing/propagator";
@@ -8,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { redisCommandClient } from "./redis.js";
 import { dispatchSpaceDomainEvent } from "./space-events.js";
+import { usagePricing } from "./usage-pricing.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 const warn = (message: string, context: Record<string, unknown>) => logger.warn(message, context);
@@ -16,6 +18,7 @@ export const spaceWalletBilling = createSpaceWalletBilling({
   billing: billingOperations,
   walletBilling: spaceWalletBillingOperations,
   warn,
+  isFreeUsage: isFreeLlmUsage(usagePricing),
 });
 
 const recoveryQueue = createBullmqQueue<SpaceWalletTransferRecoverJobData>(COHUB_SYSTEM_QUEUE, {

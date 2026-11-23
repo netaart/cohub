@@ -14,7 +14,8 @@ const {
 	onclick,
 }: {
 	label: string;
-	meta?: string[];
+	/** Trailing facts; `brand` marks a price offer. */
+	meta?: Array<string | { text: string; brand?: boolean }>;
 	keepMetaVisible?: boolean;
 	ariaLabel?: string;
 	disabled?: boolean;
@@ -42,9 +43,11 @@ const effectiveAriaLabel = $derived(
 		{label}
 	</span>
 	{#each meta as item}
-		<span class={`flex min-w-0 max-w-[6.5rem] ${keepMetaVisible ? "shrink-0" : "shrink-[3]"} items-baseline gap-0.5 text-[10px] leading-none text-text-placeholder/80 transition-colors group-hover:text-text-placeholder`} aria-hidden="true">
+		{@const text = typeof item === "string" ? item : item.text}
+		{@const brand = typeof item !== "string" && item.brand}
+		<span class={`flex min-w-0 max-w-[6.5rem] ${keepMetaVisible || brand ? "shrink-0" : "shrink-[3]"} items-baseline gap-0.5 text-[10px] leading-none text-text-placeholder/80 transition-colors group-hover:text-text-placeholder`} aria-hidden="true">
 			<span class="shrink-0 opacity-40">·</span>
-			<span class="min-w-0 truncate tabular-nums">{item}</span>
+			<span class={`min-w-0 truncate tabular-nums ${brand ? "text-brand" : ""}`}>{text}</span>
 		</span>
 	{/each}
 	<ChevronDown class="h-3 w-3 shrink-0 opacity-40 transition-opacity group-hover:opacity-65" />
