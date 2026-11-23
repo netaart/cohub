@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { HarnessKind } from "@cohub/protocol/runtime";
 import { Monitor } from "lucide-svelte";
+import antigravity from "#lib/assets/harness-icons/antigravity.svg?url";
 import claude from "#lib/assets/harness-icons/claude.svg?url";
 import codex from "#lib/assets/harness-icons/codex.svg?url";
 import cursor from "#lib/assets/harness-icons/cursor.svg?url";
@@ -15,6 +16,7 @@ const icons: Partial<Record<HarnessKind, { url: string; mono?: boolean }>> = {
 	claude: { url: claude },
 	workbuddy: { url: workbuddy },
 	cursor: { url: cursor, mono: true },
+	antigravity: { url: antigravity },
 };
 const { harness, size = 16 }: { harness: HarnessKind; size?: number } =
 	$props();

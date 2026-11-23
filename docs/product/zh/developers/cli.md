@@ -270,7 +270,7 @@ cohub runtime up --display xvfb:1920x1080
 `-d` 返回 Space 链接、进程 ID 和日志位置后在后台运行；30 秒内尚未就绪时返回退出码 2，进程继续连接。
 `--yes` 用于非交互执行授权。`down` 保留所有数据，存在未确认执行时需加 `--yes`。
 断网会自动重连，但不会自动重跑模型或工具；断连不代表任务已经停止。
-本地 Harness 包括 Pi、Codex、Claude Code（`claude`）、WorkBuddy（`codebuddy`）和 Cursor（`cursor-agent`）。未指定 `--harness` 时
+本地 Harness 包括 Pi、Codex、Claude Code（`claude`）、WorkBuddy（`codebuddy`）、Cursor（`cursor-agent`）和 Antigravity（`agy`）。未指定 `--harness` 时
 会尝试所有已安装的 Harness，无法启动的会告警并跳过。
 `cohub spaces prompt --harness codex --approval-mode read_only` 为该 Turn 选择 `inherit`、`auto`、`full_access` 或 `read_only`（Codex 与 Claude Code），
 `--service-tier priority` 以 Codex Fast 运行。两者都需要已连接且支持该能力的 Runtime。

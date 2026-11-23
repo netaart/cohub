@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { promisify, stripVTControlCharacters } from "node:util";
 import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
@@ -14,7 +14,7 @@ import { projectChainedSession, projectionToolId } from "./chained-projection.js
 import {
   acceptsCursorDirectory, acceptsCursorTranscript, cursorChatsRoot, cursorConfigDirectory, cursorProjectsRoot, cursorSessionHeader, cursorTranscriptPath, readCursorTranscript,
 } from "./cursor-transcript.js";
-import { array, harnessCommand, harnessExecutableCandidates, inlineImage, missing, text, turnEnvironment, watchHost } from "./process.js";
+import { array, harnessCommand, harnessExecutableCandidates, localStateDirectory, missing, text, turnEnvironment, watchHost, writeImage } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn, LocalHarnessAdapter } from "./types.js";
 
 const BINARY = "cursor-agent";
@@ -34,7 +34,6 @@ const ABORT_ESCALATION_MS = 5_000;
 const FLUSH_TIMEOUT_MS = 10_000;
 /** The prompt is an argument: Linux caps one at 128 KiB, Windows a whole command line at 32K characters. */
 const MAX_PROMPT_BYTES = process.platform === "win32" ? 30_000 : 120_000;
-const IMAGE_EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 const HISTORY_KINDS = ["user", "assistant", "tool"];
 
 const VERSION_DIRECTORY = /^(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-\d{2}-\d{2}-\d{2})?-[a-f0-9]+$/;
@@ -94,7 +93,7 @@ export function cursorModels(output: string): HarnessModel[] {
 }
 
 /** Shared by every Runtime process on this machine, one per Cursor config file. */
-const preferenceRecord = (config: string) => join(process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state"), "cohub", `cursor-model-${createHash("sha256").update(config).digest("hex").slice(0, 16)}.json`);
+const preferenceRecord = (config: string) => join(localStateDirectory(), `cursor-model-${createHash("sha256").update(config).digest("hex").slice(0, 16)}.json`);
 type PreferenceHold = { id: string; pid: number };
 type PreferenceRecord = { config: string; baseline: JsonRecord | null; requested: string[]; holders: PreferenceHold[] };
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; } };
@@ -358,11 +357,8 @@ export function cursorTranslator(emit: (event: RuntimeExecutionEvent) => void, i
 async function prompt(input: RuntimeTurnInput, directory: string): Promise<{ text: string; images: string[] }> {
   const parts: string[] = [], images: string[] = [];
   for (const block of input.messages.flatMap((message) => message.content)) {
-    if (block.type !== "image") { parts.push(block.type === "text" ? block.text : JSON.stringify(block)); continue; }
-    const image = await inlineImage(block);
-    const path = join(directory, `image-${images.length + 1}.${IMAGE_EXTENSIONS[image.mimeType] ?? "png"}`);
-    await writeFile(path, Buffer.from(image.data, "base64"), { mode: 0o600 });
-    images.push(path);
+    if (block.type === "image") images.push(await writeImage(block, directory, `image-${images.length + 1}`));
+    else parts.push(block.type === "text" ? block.text : JSON.stringify(block));
   }
   const value = parts.join("\n\n").trim() || (images.length ? "See the attached image." : "");
   if (Buffer.byteLength(value) > MAX_PROMPT_BYTES) throw new Error("Prompt is too long for the Cursor CLI command line; shorten the message");
