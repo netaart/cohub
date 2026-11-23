@@ -1930,10 +1930,17 @@ export class SpaceCommerceApi {
     );
   }
 
-  listOrders(input?: { page?: number; limit?: number }) {
+  listReportShops() {
+    return this.transport.request<{ shops: { id: string; name: string }[] }>(
+      `/api/spaces/${this.spaceId}/commerce/report-shops`,
+    );
+  }
+
+  listOrders(input?: { page?: number; limit?: number; shopSpaceId?: string }) {
     const params = new URLSearchParams();
     if (input?.page) params.set("page", String(input.page));
     if (input?.limit) params.set("limit", String(input.limit));
+    if (input?.shopSpaceId !== undefined) params.set("shopSpaceId", input.shopSpaceId);
     return this.transport.request<{ orders: import("../types.js").SpaceCommerceOrder[]; pagination: { hasMore: boolean; nextPage: number | null }; businessKey: string }>(
       `/api/spaces/${this.spaceId}/commerce/orders${params.toString() ? `?${params.toString()}` : ""}`,
     );

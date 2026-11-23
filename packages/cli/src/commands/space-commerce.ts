@@ -73,6 +73,7 @@ type UnbindOptions = BindOptions & {
 };
 
 type OrdersListOptions = JsonOption & {
+  shop?: string;
   page?: string;
   limit?: string;
 };
@@ -543,8 +544,24 @@ Examples:
     .description("Manage orders");
 
   ordersCmd
+    .command("shops")
+    .description("List shops included in this Space's internal order report")
+    .option("--json", "Output as JSON")
+    .action(async (opts: JsonOption) => {
+      const { commerce } = await commerceClient(spacesCmd);
+      try {
+        const result = await commerce.listReportShops();
+        if (jsonRequested(opts)) return outJson(result);
+        table(result.shops, [{ key: "name", label: "Shop" }, { key: "id", label: "Space ID" }]);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  ordersCmd
     .command("list")
     .description("List recent orders")
+    .option("--shop <space-id>", "Read a shop in this Space's internal order report")
     .option("--page <page>", "Page number")
     .option("--limit <limit>", "Page size, max 50")
     .option("--json", "Output as JSON")
@@ -552,6 +569,7 @@ Examples:
       const { commerce } = await commerceClient(spacesCmd);
       try {
         const result = await commerce.listOrders({
+          shopSpaceId: opts.shop,
           page: parseInteger(opts.page, "page", { fallback: 1, min: 1 }),
           limit: parseInteger(opts.limit, "limit", { fallback: 20, min: 1, max: 50 }),
         });

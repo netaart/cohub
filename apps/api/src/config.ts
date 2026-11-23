@@ -1,3 +1,4 @@
+import * as z from "zod";
 import { resolveLogtoEndpoint } from "@cohub/identity";
 import {
   APP_DOMAIN_DEFAULT_CNAME_TARGET,
@@ -9,6 +10,7 @@ export type AppConfig = {
   logtoEndpoint: string;
   webOrigin?: string;
   redisUrl: string;
+  commerceOrderReports: ReadonlyMap<string, readonly string[]>;
   talesofaiBillingBaseUrl?: string;
   talesofaiBillingBusinessKey?: string;
   talesofaiBillingSpaceWalletBusinessKey?: string;
@@ -142,6 +144,12 @@ export const isHostAllowedBySuffix = (hostname: string, suffixes: readonly strin
   });
 };
 
+function parseCommerceOrderReports(value: string | undefined): ReadonlyMap<string, readonly string[]> {
+  if (!value?.trim()) return new Map();
+  const entries = z.record(z.uuid(), z.array(z.uuid())).parse(JSON.parse(value));
+  return new Map(Object.entries(entries).map(([spaceId, shops]) => [spaceId, [...new Set(shops)]]));
+}
+
 const parseSandboxNodeSelector = (value: string | undefined) => {
   return Object.fromEntries(
     parseCommaList(value).map((entry) => {
@@ -190,6 +198,7 @@ export const config: AppConfig = {
   workerSecret: process.env.WORKER_SECRET ?? "",
   logtoEndpoint: resolveLogtoEndpoint({ endpoint: process.env.LOGTO_ENDPOINT, env }),
   webOrigin: process.env.WEB_ORIGIN,
+  commerceOrderReports: parseCommerceOrderReports(process.env.SPACE_COMMERCE_ORDER_REPORTS),
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   talesofaiBillingBaseUrl: process.env.TALESOFAI_BILLING_BASE_URL?.replace(/\/+$/, ""),
   talesofaiBillingBusinessKey: process.env.TALESOFAI_BILLING_BUSINESS_KEY,

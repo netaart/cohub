@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { sanitizeRedirectPath } from "#lib/auth-redirect-path.ts";
 import { serveStandaloneHostRequest } from "#lib/server/standalone-host-request.ts";
 
 const API_ORIGIN = "https://api.cohub.live";
@@ -77,6 +78,10 @@ describe("custom domain hosts", () => {
 				"Set-Cookie",
 				"sid=1; Domain=example.com; Path=/; HttpOnly",
 			);
+			headers.append(
+				"Set-Cookie",
+				"__Host-cohub-app-session=upstream; Path=/; Secure",
+			);
 			return new Response(null, { status: 302, headers });
 		};
 		const response = await serve(host, "/login?next=%2F", fetcher, {
@@ -87,7 +92,8 @@ describe("custom domain hosts", () => {
 				"X-Forwarded-For": "1.1.1.1",
 				"X-Real-IP": "1.1.1.1",
 				"X-Cohub-Client-IP": "1.1.1.1",
-				Cookie: "sid=old",
+				Cookie:
+					"sid=old; __Host-cohub-app-session=private; __Host-cohub-app-proof-abc=proof",
 			},
 		});
 		assert.ok(forwarded);
@@ -211,4 +217,84 @@ describe("custom domain hosts", () => {
 		assert.equal(received, 25 * MiB);
 		assert.equal((await upload(31))?.status, 413);
 	});
+});
+
+it("preserves the validated broker return through the Cohub OAuth callback", () => {
+	const broker =
+		"/app-auth?app=11111111-1111-4111-8111-111111111111&origin=https%3A%2F%2Fshop.example";
+	assert.equal(sanitizeRedirectPath(broker), broker);
+	for (const invalid of [
+		"/callback?redirect_path=/shop",
+		"//shop.example/path",
+		"/app-auth",
+		broker.replace("https%3A", "file%3A"),
+	]) {
+		assert.equal(sanitizeRedirectPath(invalid), "/");
+	}
+});
+
+it("keeps a first-party session across storefront requests and returns to the original hash route", async () => {
+	const host = nextHost();
+	const origin = "https://" + host;
+	const id = "11111111-1111-4111-8111-111111111111";
+	const base = "/.well-known/cohub/app-session/";
+	const handle = "s".repeat(43);
+	let exchanges = 0;
+	const fetcher: typeof fetch = async (url, init) => {
+		const body = JSON.parse(String(init?.body));
+		assert.equal(body.origin, origin);
+		if (String(url).endsWith("/exchange")) {
+			exchanges++;
+			return Response.json({
+				session: handle,
+				returnTo: "/shop?sort=date#/items",
+			});
+		}
+		assert.equal(body.session, handle);
+		return Response.json({
+			token: "short-lived",
+			viewer: { userUuid: "buyer" },
+		});
+	};
+	const post = (action: string, cookie = "", caller = origin) =>
+		serve(host, base + action + "?app=" + id, fetcher, {
+			method: "POST",
+			headers: { Origin: caller, Cookie: cookie },
+		});
+	const start = await post("start");
+	assert.ok(start);
+	const { challenge } = await start.json();
+	const proof = start.headers.getSetCookie()[0];
+	assert.match(proof, /Secure; HttpOnly; SameSite=Lax/);
+	const path =
+		base + `callback?app=${id}&challenge=${challenge}&code=${"c".repeat(43)}`;
+	assert.equal((await serve(host, path, fetcher))?.status, 401);
+	const callback = await serve(host, path, fetcher, {
+		headers: { Cookie: proof.split(";")[0] },
+	});
+	assert.equal(callback?.status, 303);
+	assert.equal(
+		callback.headers.get("Location"),
+		origin + "/shop?sort=date#/items",
+	);
+	assert.equal(callback.headers.get("Referrer-Policy"), "no-referrer");
+	const session = callback.headers
+		.getSetCookie()
+		.find((value) => value.startsWith("__Host-cohub-app-session="));
+	assert.ok(session);
+	assert.match(session, /HttpOnly/);
+	assert.equal(
+		(await post("token", session.split(";")[0], "https://other.example"))
+			?.status,
+		403,
+	);
+	for (let page = 0; page < 2; page++) {
+		const response = await post("token", session.split(";")[0]);
+		assert.deepEqual(await response?.json(), {
+			token: "short-lived",
+			viewer: { userUuid: "buyer" },
+		});
+		assert.equal(response?.headers.get("Cache-Control"), "no-store");
+	}
+	assert.equal(exchanges, 1);
 });

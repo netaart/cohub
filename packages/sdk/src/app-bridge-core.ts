@@ -1391,6 +1391,15 @@ export function createAppBridgeCore(
 				}, true);
 				await resumeAuthorization();
 			}
+			if (data.type === "cohub.app.sign-in") {
+				if (!(await getAccessToken())) {
+					await config.requestSignIn(typeof location === "undefined" ? "/" : location.pathname + location.search + location.hash);
+				}
+				replyForRequest(data.requestId, { type: "cohub.app.sign-in.result", handled: true }, true);
+			}
+			if (data.type === "cohub.app.sign-out") {
+				replyForRequest(data.requestId, { type: "cohub.app.sign-out.result", handled: false }, true);
+			}
 			if (data.type === "cohub.app.token" || data.type === "cohub.work.token") {
 				const token = await ensureBaseToken(Boolean(data.forceRefresh));
 				replyForRequest(data.requestId, { type: "cohub.app.token.result", token }, true);

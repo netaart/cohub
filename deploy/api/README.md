@@ -159,3 +159,17 @@ cp values.example.yaml values.yaml
 
 Do not commit real `values.yaml` or `secrets.yaml`.
 
+### Internal shop order reports
+
+Set the optional API environment variable `SPACE_COMMERCE_ORDER_REPORTS` to a JSON object mapping an operations Space UUID to the shop Space UUIDs it may report on. Supply it through the API deployment environment and roll the API when changing the list. An unset value enables no reports.
+
+```json
+{"11111111-1111-4111-8111-111111111111":["22222222-2222-4222-8222-222222222222"]}
+```
+
+Operations Space hosts can open **Settings → Commerce** or use the commands below. Each shop has independent order pagination. Sales come directly from the shop's billing business, including historical orders. The mapping grants read access to orders only.
+
+```sh
+cohub -s <operations-space-id> spaces commerce orders shops
+cohub -s <operations-space-id> spaces commerce orders list --shop <shop-space-id> --page 1 --json
+```

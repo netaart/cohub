@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { createAppBrowserSessionRouter } from "./app-browser-session.route.js";
 import { bodyLimit } from "hono/body-limit";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { spaces, apps, appPromotions, appPromotionStatsHourly, appVersions, appViewerGrants, appViewStatsHourly, userProfiles } from "@cohub/db";
@@ -634,9 +635,7 @@ const publicVersionSummary = (
   createdAt: version.createdAt?.toISOString() ?? null,
 });
 
-router.get("/by-origin", async (c) => {
-  const requestedOrigin = c.req.query("origin")?.trim() || c.req.header("origin")?.trim();
-  const recordView = c.req.query("view") === "1";
+async function resolveBoundApp(requestedOrigin: string | undefined, fresh: boolean, expectedId?: string) {
   const hostTemplate = config.appStandaloneHostTemplate;
   const templateAppId = hostTemplate
     ? resolveCohubAppOrigin(requestedOrigin, hostTemplate)
@@ -646,22 +645,38 @@ router.get("/by-origin", async (c) => {
   const customDomain = templateAppId ? null : parseHttpsOriginHostname(requestedOrigin);
   // `fresh=1` (the auth broker) decides authorization, so it never trusts a cached answer.
   const binding = customDomain
-    ? await resolveCustomDomainBinding(customDomain, { fresh: c.req.query("fresh") === "1" })
+    ? await resolveCustomDomainBinding(customDomain, { fresh })
     : null;
   // A bound origin that cannot be served right now is still that App's origin;
   // the distinct code keeps the auth broker from treating it as unbound.
-  const unavailable = () => c.json({ message: "app origin is bound but unavailable", code: "app_origin_unavailable" }, 404);
-  if (binding && !binding.active) return unavailable();
-  const appId = templateAppId ?? binding?.appId ?? null;
-  if (!appId) return c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
+  if (binding && !binding.active) return { error: "app_origin_unavailable" } as const;
+  const appId = templateAppId ?? binding?.appId;
+  const error = binding ? "app_origin_unavailable" : "app_origin_not_found";
+  if (!appId || (expectedId && expectedId !== appId)) return { error } as const;
   const app = await getAppById(appId);
-  if (app?.status !== "published" || requiresSpaceAppAccess(app)) {
-    return binding ? unavailable() : c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
-  }
+  if (app?.status !== "published" || requiresSpaceAppAccess(app)) return { error } as const;
+  return { app, binding, customDomain, error: null } as const;
+}
+
+router.route("/", createAppBrowserSessionRouter(async (origin, id) => {
+  const resolved = await resolveBoundApp(origin, true, id);
+  if (!resolved.app) return null;
+  const content = await getPublishedAppContent(resolved.app);
+  return content?.kind === "web" || (resolved.binding && content?.kind === "port") ? resolved.app : null;
+}));
+
+router.get("/by-origin", async (c) => {
+  const requestedOrigin = c.req.query("origin")?.trim() || c.req.header("origin")?.trim();
+  const recordView = c.req.query("view") === "1";
+  const resolved = await resolveBoundApp(requestedOrigin, c.req.query("fresh") === "1");
+  const unavailable = (code: "app_origin_not_found" | "app_origin_unavailable") =>
+    c.json({ message: code === "app_origin_unavailable" ? "app origin is bound but unavailable" : "app origin not found", code }, 404);
+  if (resolved.error) return unavailable(resolved.error);
+  const { app, binding, customDomain } = resolved;
   const detail = await getStandaloneAppDetail(app);
   const contentKind = detail?.content?.kind;
   if (contentKind !== "web" && !(binding && contentKind === "port")) {
-    return binding ? unavailable() : c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
+    return unavailable(binding ? "app_origin_unavailable" : "app_origin_not_found");
   }
   if (recordView) recordResolvedAppView(c, app, "web");
   c.header("Cache-Control", recordView || customDomain ? "no-store" : PUBLIC_APP_HTTP_CACHE);

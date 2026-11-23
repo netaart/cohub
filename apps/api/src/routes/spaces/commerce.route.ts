@@ -1,6 +1,11 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { spaces } from "@cohub/db";
+import { inArray } from "drizzle-orm";
+import { config } from "../../config.js";
+import { db } from "../../db/index.js";
+import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
 import { isBillingApiError } from "../../lib/billing-api-error.js";
-import { authzDenied, requireValidId, useAuth } from "../../lib/middleware.js";
+import { authzDenied, getAppSessionPrincipal, getExecutionPrincipal, requireValidId, useAuth, type AuthUser } from "../../lib/middleware.js";
 import {
   handleSpaceCommerceRouteError,
   requireSpaceCommerceEntitlement,
@@ -862,16 +867,50 @@ router.delete("/:id/commerce/product-benefits", async (c) => {
   }
 });
 
+async function authorizedReportShops(c: Context, spaceId: string, user: AuthUser) {
+  const configured = config.commerceOrderReports.get(spaceId) ?? [];
+  if (!configured.length) return [];
+  const execution = getExecutionPrincipal(c);
+  const appSession = getAppSessionPrincipal(c);
+  if (appSession && appSession.spaceId !== spaceId) return [];
+  if (execution) {
+    if (execution.spaceId !== spaceId || !execution.scopes.includes("space.commerce.view")) return [];
+    // An Action runs as its publisher. Its actual visitor must also be a report reader.
+    if (execution.source === APP_ACTION_EXECUTION_SOURCE &&
+      (!execution.viewerUserId || !(await hasPermission({ uuid: execution.viewerUserId }, "space.commerce.view", { spaceId })))) return [];
+  }
+  const reader = execution ? { uuid: user.uuid } : user;
+  return await hasPermission(reader, "space.commerce.view", { spaceId }) ? configured : [];
+}
+
+router.get("/:id/commerce/report-shops", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const spaceId = c.req.param("id");
+  if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
+  c.header("Cache-Control", "private, no-store");
+  const ids = await authorizedReportShops(c, spaceId, user);
+  const shops = ids.length
+    ? await db.select({ id: spaces.id, name: spaces.name }).from(spaces)
+        .where(inArray(spaces.id, [...ids])).orderBy(spaces.name, spaces.id)
+    : [];
+  return c.json({ shops });
+});
+
 router.get("/:id/commerce/orders", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   const spaceId = c.req.param("id");
   if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
-  if (!(await hasPermission(user, "space.commerce.view", { spaceId }))) return authzDenied(c);
+  const shopId = c.req.query("shopSpaceId");
+  if (shopId !== undefined) {
+    c.header("Cache-Control", "private, no-store");
+    if (!requireValidId(shopId) || !(await authorizedReportShops(c, spaceId, user)).includes(shopId)) return authzDenied(c);
+  } else if (!(await hasPermission(user, "space.commerce.view", { spaceId }))) return authzDenied(c);
   const page = Math.max(1, Number.parseInt(c.req.query("page") ?? "1", 10) || 1);
   const limit = Math.min(50, Math.max(1, Number.parseInt(c.req.query("limit") ?? "20", 10) || 20));
   try {
-    const mapping = await requireSpaceCommerceBusiness(spaceId);
+    const mapping = await requireSpaceCommerceBusiness(shopId ?? spaceId);
     const sdk = await createSpaceCommerceSdk();
     const result = await sdk.admin.orders.list({
       business_key: mapping.billingBusinessKey,

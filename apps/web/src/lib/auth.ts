@@ -1,3 +1,7 @@
+import { sanitizeRedirectPath } from "./auth-redirect-path.ts";
+
+export { sanitizeRedirectPath } from "./auth-redirect-path.ts";
+
 import LogtoClient, { type IdTokenClaims } from "@logto/browser";
 import {
 	type AuthSessionSnapshot,
@@ -163,42 +167,6 @@ export function clearAuthJustCompleted() {
 		sessionStorage.removeItem(AUTH_JUST_COMPLETED_KEY);
 	} catch {
 		// ignore
-	}
-}
-
-const isAuthEndpointPath = (pathname: string) =>
-	pathname === "/callback" ||
-	pathname.startsWith("/callback/") ||
-	pathname === "/app-auth" ||
-	pathname.startsWith("/app-auth/");
-
-/**
- * Keep post-login destinations same-app and off auth endpoints.
- * Accepts relative paths (`/foo?x=1#h`) or same-origin absolute URLs.
- * Rejects protocol-relative (`//…`), backslashes, and open redirects.
- */
-export function sanitizeRedirectPath(path?: string | null): string {
-	if (!path) return "/";
-	const trimmed = path.trim();
-	if (!trimmed) return "/";
-
-	try {
-		// Relative app path: "/spaces/new?x=1#section"
-		if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
-			if (trimmed.includes("\\")) return "/";
-			const url = new URL(trimmed, "http://local.invalid");
-			if (isAuthEndpointPath(url.pathname)) return "/";
-			return `${url.pathname}${url.search}${url.hash}` || "/";
-		}
-
-		// Absolute URL — only same-origin when running in the browser.
-		if (typeof window === "undefined") return "/";
-		const url = new URL(trimmed, window.location.origin);
-		if (url.origin !== window.location.origin) return "/";
-		if (isAuthEndpointPath(url.pathname)) return "/";
-		return `${url.pathname}${url.search}${url.hash}` || "/";
-	} catch {
-		return "/";
 	}
 }
 
@@ -593,7 +561,7 @@ export const completeSignInCallback = async (
 	});
 
 const createRedirectState = (redirectPath?: string) => {
-	const searchParams = new URLSearchParams();
+	const searchParams = new URLSearchParams({ nonce: crypto.randomUUID() });
 	if (redirectPath) {
 		searchParams.set("redirect_path", sanitizeRedirectPath(redirectPath));
 	}

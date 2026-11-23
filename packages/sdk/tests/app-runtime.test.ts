@@ -1732,3 +1732,45 @@ test("CohubClientOptions.work keeps configuring broker mode (legacy key)", async
 	const contextAppKey = await clientWithAppKey.context();
 	assert.equal(contextAppKey?.app.id, "app-2", "the canonical `app` key wins when both are set");
 });
+
+test("standalone sign-in preserves the return route and restores only the active storefront viewer", async (t) => {
+	const id = "11111111-1111-4111-8111-111111111111";
+	const origin = "https://shop.example";
+	let destination = "";
+	let viewer = "buyer-a";
+	let exchanges = 0;
+	const challenge = "a".repeat(43);
+	let cookie = "";
+	globalThis.document = { get cookie() { return cookie; } } as Document;
+	globalThis.window = {
+		location: { origin, href: origin + "/shop#/item", assign: (value: string) => { destination = value; } },
+		open: () => { throw new Error("Unexpected popup"); },
+	} as unknown as Window & typeof globalThis;
+	t.mock.method(globalThis, "fetch", async (input: string) => {
+		if (input.includes("/start?")) return Response.json({ challenge });
+		if (input.includes("/logout?")) {
+			cookie = "";
+			return new Response(null, { status: 204 });
+		}
+		exchanges++;
+		return Response.json({ token: viewer + "-token", viewer: { userUuid: viewer } });
+	});
+	const openTab = () => createAppRuntime(new PopupBrokerTransport({ brokerOrigin: "https://cohub.live", appId: id }));
+	const first = openTab();
+	await first.signIn();
+	const url = new URL(destination);
+	assert.equal(url.origin, "https://cohub.live");
+	assert.equal(url.searchParams.get("returnTo"), "/shop#/item");
+	await assert.rejects(first.signIn({ returnTo: "https://other.example/" }));
+	cookie = `__Host-cohub-app-active=${id}.${challenge}`;
+	const second = openTab();
+	assert.equal((await first.context())?.viewer?.userUuid, viewer);
+	assert.equal(await first.getAccessToken(), "buyer-a-token");
+	assert.equal(await second.getAccessToken(), "buyer-a-token");
+	assert.equal(exchanges, 2);
+	viewer = "buyer-b";
+	cookie = `__Host-cohub-app-active=${id}.${"b".repeat(43)}`;
+	assert.equal(await first.getAccessToken(), "buyer-b-token");
+	await second.signOut();
+	assert.equal((await first.context())?.viewer, null);
+});

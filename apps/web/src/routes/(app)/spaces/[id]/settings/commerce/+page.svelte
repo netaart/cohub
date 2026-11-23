@@ -16,15 +16,17 @@ import {
 } from "lucide-svelte";
 import CenteredLoading from "#lib/components/CenteredLoading.svelte";
 import CommerceBenefitEditor from "#lib/components/commerce/CommerceBenefitEditor.svelte";
+import CommerceOrderReport from "#lib/components/commerce/CommerceOrderReport.svelte";
+import CommerceOrderRows from "#lib/components/commerce/CommerceOrderRows.svelte";
 import CommerceProductEditor from "#lib/components/commerce/CommerceProductEditor.svelte";
 import Dialog from "#lib/components/Dialog.svelte";
 import Spinner from "#lib/components/Spinner.svelte";
-import UserAvatar from "#lib/components/UserAvatar.svelte";
-import { formatCurrency, formatDateTime } from "#lib/i18n/format.ts";
+import { formatCurrency } from "#lib/i18n/format.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { sdk } from "#lib/sdk.ts";
 import { buildSpaceSettingsRoute } from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import { goto } from "$app/navigation";
 
 const locale = $derived(getLocale());
@@ -500,30 +502,6 @@ function metadataEntries(
 	}));
 }
 
-function orderAmount(order: SpaceCommerceOrder): string {
-	const amount =
-		order.paidAmountSnapshot > 0
-			? order.paidAmountSnapshot
-			: order.amountSnapshot;
-	return formatCurrency(amount / 100, "USD", {
-		locale,
-		minimumFractionDigits: 2,
-		maximumFractionDigits: 2,
-	});
-}
-
-function formatDate(value: string): string {
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return value;
-	return formatDateTime(date, locale, {
-		year: undefined,
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-	});
-}
-
 $effect(() => {
 	const targetSpaceId = spaceId;
 	void loadInitial(targetSpaceId);
@@ -563,6 +541,9 @@ $effect(() => {
 
 	<main class="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5 sm:py-6">
 		<div class="mx-auto w-full max-w-4xl space-y-4 sm:space-y-5">
+			{#key spaceId + ":" + (authStore.userUuid ?? "")}
+				{#if authStore.userUuid}<CommerceOrderReport {spaceId} />{/if}
+			{/key}
 			{#if !entitlementLoading && !canManage}
 				<div class="flex items-center gap-2.5 rounded-[8px] border border-brand/30 bg-brand/5 p-3">
 					<Sparkles class="h-4 w-4 shrink-0 text-brand" />
@@ -874,36 +855,7 @@ $effect(() => {
 						{:else if orders.length === 0}
 							<div class="py-4 text-center text-[12px] text-text-tertiary">{m.commerce_no_orders({}, { locale })}</div>
 						{:else}
-							<div class="grid gap-2">
-								{#each orders as order (order.id)}
-									<div class="flex flex-wrap items-center justify-between gap-3 rounded-[7px] bg-bg-primary px-3 py-2">
-										<div class="flex min-w-0 items-center gap-2.5">
-											{#if order.buyerProfile}
-												<UserAvatar
-													name={order.buyerProfile.displayName}
-													avatarUrl={order.buyerProfile.avatarUrl}
-													size="xs"
-													class="border-0"
-												/>
-											{/if}
-											<div class="min-w-0">
-												<div class="truncate text-[12px] font-medium text-text-primary">{order.productNameSnapshot}</div>
-												<div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-text-tertiary">
-													{#if order.buyerProfile}
-														<span class="truncate text-text-secondary">{order.buyerProfile.displayName}</span>
-													{/if}
-													<span class="truncate font-mono text-text-placeholder">{order.productKeySnapshot}</span>
-													<span>{formatDate(order.createdAt)}</span>
-												</div>
-											</div>
-										</div>
-										<div class="text-right">
-											<div class="font-mono text-[12px] text-text-primary">{orderAmount(order)}</div>
-											<div class="text-[10px] uppercase tracking-wide text-text-tertiary">{order.status}</div>
-										</div>
-									</div>
-								{/each}
-							</div>
+							<CommerceOrderRows {orders} />
 							{#if ordersHasMore}
 								<div class="mt-3 flex justify-center">
 									<button type="button" class="secondary-key min-h-9 gap-1.5 px-3 py-2 text-[12px]" onclick={() => void loadMoreOrders()} disabled={ordersLoadingMore}>
