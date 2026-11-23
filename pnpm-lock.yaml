@@ -401,8 +401,8 @@ importers:
         specifier: ^2.0.2
         version: 2.0.2(bare-buffer@3.7.3)(supports-color@10.2.2)
       '@neta-art/generation':
-        specifier: 0.2.15
-        version: 0.2.15
+        specifier: 0.2.16
+        version: 0.2.16
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -810,8 +810,8 @@ importers:
         specifier: ^2.0.2
         version: 2.0.2(bare-buffer@3.7.3)(supports-color@10.2.2)
       '@neta-art/generation':
-        specifier: 0.2.15
-        version: 0.2.15
+        specifier: 0.2.16
+        version: 0.2.16
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -1222,8 +1222,8 @@ importers:
         specifier: ^2.1.0
         version: 2.1.0(@opentelemetry/api@1.9.1)(drizzle-orm@0.45.4(@cloudflare/workers-types@5.20261120.1)(@electric-sql/pglite@0.5.17)(@opentelemetry/api@1.9.1)(kysely@0.28.20)(postgres@4.1.1))
       '@neta-art/generation':
-        specifier: 0.2.15
-        version: 0.2.15
+        specifier: 0.2.16
+        version: 0.2.16
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -1309,8 +1309,8 @@ importers:
   packages/protocol:
     dependencies:
       '@neta-art/generation':
-        specifier: 0.2.15
-        version: 0.2.15
+        specifier: 0.2.16
+        version: 0.2.16
       es-module-lexer:
         specifier: 3.0.5
         version: 3.0.5
@@ -3220,8 +3220,8 @@ packages:
       '@emnapi/core': ^1.7.1 || 2.0.0-beta.2 || 2.0.0-beta.3
       '@emnapi/runtime': ^1.7.1 || 2.0.0-beta.2 || 2.0.0-beta.3
 
-  '@neta-art/generation@0.2.15':
-    resolution: {integrity: sha512-5U4y7ntVCPZTCPtHIE7qinD1zZnQmnNvMhxc8WXZsgCoY2RZcKGsZn2glk2kkK+FN33ZmbwN6rQF4nlTiWQ6Ew==}
+  '@neta-art/generation@0.2.16':
+    resolution: {integrity: sha512-wgpFEPwu2tERH3V3lUtSHkjtlLnMW4zXEu05F64HQRl1MuRqUYnJe7oxWv0lNFcxaSwfyz2Nor4PIHmPGUZJ0A==}
     engines: {node: '>=20.0.0'}
     hasBin: true
 
@@ -8836,7 +8836,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.5
     optional: true
 
-  '@neta-art/generation@0.2.15':
+  '@neta-art/generation@0.2.16':
     dependencies:
       '@openrouter/sdk': 1.4.25
       '@typesafe-ai/sdk': 0.6.0
