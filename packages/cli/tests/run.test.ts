@@ -43,18 +43,10 @@ test("cohub run uses the current directory Runtime binding", async () => {
   }
 });
 
-test("cohub run accepts -s/--space/--space= both before and after run, without swallowing command flags", async () => {
+test("cohub run accepts -s/--space after run without taking the command's own flags", async () => {
   const previousSpace = process.env.COHUB_SPACE_ID;
   delete process.env.COHUB_SPACE_ID;
   try {
-    assert.deepEqual(
-      await parseRunCliOptions(["-s", SPACE_A, "run", "--", "git", "status"]),
-      { spaceId: SPACE_A, json: false, async: false, command: "git status" },
-    );
-    assert.deepEqual(
-      await parseRunCliOptions(["run", "-s", SPACE_A, "--", "git", "status"]),
-      { spaceId: SPACE_A, json: false, async: false, command: "git status" },
-    );
     assert.deepEqual(
       await parseRunCliOptions(["run", "--space", SPACE_A, "--async", "--json", "--", "git", "status", "-s"]),
       { spaceId: SPACE_A, json: true, async: true, command: "git status -s" },

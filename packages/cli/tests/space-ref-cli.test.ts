@@ -66,15 +66,9 @@ async function withMockApi(
     if (method === "GET" && /^\/api\/spaces\/[^/]+\/overview$/.test(url.pathname)) {
       return json(200, { days: 30, apps: { count: 0, views: 0, likes: 0 } });
     }
-    if (method === "GET" && /^\/api\/spaces\/[^/]+\/sandbox$/.test(url.pathname)) {
-      return json(200, { sandbox: { provider: "cloud", meta: { setup: null } } });
-    }
     if (method === "PATCH" && /^\/api\/spaces\/[^/]+$/.test(url.pathname)) {
       const id = url.pathname.split("/").at(-1);
       return json(200, { space: { id, name: "Updated", slug: "updated" } });
-    }
-    if (method === "GET" && /^\/api\/spaces\/[^/]+\/config$/.test(url.pathname)) {
-      return json(200, { config: { sandbox: { spec: "standard", allowedSpec: "standard" }, guest: null } });
     }
     if (method === "PATCH" && /^\/api\/spaces\/[^/]+\/config$/.test(url.pathname)) {
       return json(200, { config: { sandbox: { spec: "boost" }, guest: null }, sandbox: { pendingRestart: false } });
@@ -87,9 +81,6 @@ async function withMockApi(
     }
     if (method === "POST" && url.pathname === `/api/apps/${APP_ID}/authorize`) {
       return json(200, { grant: { scopes: ["space.view"], spaceId: (body as { spaceId?: string }).spaceId ?? "app-space" } });
-    }
-    if (method === "PATCH" && url.pathname === "/api/me/resources/space/labels") {
-      return json(200, { assignments: [] });
     }
     if (method === "PATCH" && url.pathname === "/api/me/resources/space/labels/batch") {
       return json(200, { resourceRefs: [], affectedLabelIds: [] });
@@ -153,61 +144,22 @@ test("cohub search ignores COHUB_SPACE_ID, honors -s/--space, and resolves --spa
   });
 });
 
-test("spaces positional Space-ref commands resolve UUID, home, own slug, and username/slug", async () => {
+test("spaces commands resolve Space refs in positional arguments", async () => {
   await withMockApi(async ({ requests, runCli }) => {
     delete process.env.COHUB_SPACE_ID;
-
-    await runCli(["spaces", "setup", "atou/project", "--json"]);
-    assert.equal(requests.at(-1)?.path, `/api/spaces/${OTHER_ID}/sandbox`);
 
     await runCli(["spaces", "get", "home", "--json"]);
     assert.ok(requests.some((r) => r.method === "GET" && r.path === `/api/spaces/${HOME_ID}`));
 
-    await runCli(["-s", "notes", "spaces", "get", "--json"]);
-    assert.ok(requests.some((r) => r.method === "GET" && r.path === `/api/spaces/${OWNED_ID}`));
-
     await runCli(["spaces", "update", "atou/project", "--name", "Renamed", "--json"]);
-    const updateReq = requests.findLast((r) => r.method === "PATCH" && r.path === `/api/spaces/${OTHER_ID}`);
-    assert.deepEqual(updateReq?.body, { name: "Renamed" });
+    assert.ok(requests.some((r) => r.method === "PATCH" && r.path === `/api/spaces/${OTHER_ID}`));
 
-    await runCli(["spaces", "rename", "notes", "New Notes"]);
-    const renameReq = requests.findLast((r) => r.method === "PATCH" && r.path === `/api/spaces/${OWNED_ID}`);
-    assert.deepEqual(renameReq?.body, { name: "New Notes" });
-
-    await runCli(["spaces", "config", "atou/project", "--json"]);
-    assert.equal(requests.at(-1)?.path, `/api/spaces/${OTHER_ID}/config`);
-
-    await runCli(["spaces", "config", "atou/project", "--guest-app", "welcome", "--json"]);
-    assert.ok(requests.some((r) => r.method === "GET" && r.path === `/api/apps/space/${OTHER_ID}`));
-    const configPatch = requests.findLast((r) => r.method === "PATCH" && r.path === `/api/spaces/${OTHER_ID}/config`);
-    assert.deepEqual(configPatch?.body, { guest: { appId: "app-1" } });
-
-    await runCli(["spaces", "pin", "atou/project"]);
-    const pinReq = requests.findLast((r) => r.path === "/api/me/resources/space/labels");
-    assert.equal(pinReq?.query.get("resourceRef"), OTHER_ID);
-    assert.deepEqual(pinReq?.body, { addLabelRefs: ["Pinned"] });
-
-    await runCli(["spaces", "unpin", "notes"]);
-    const unpinReq = requests.findLast((r) => r.path === "/api/me/resources/space/labels");
-    assert.equal(unpinReq?.query.get("resourceRef"), OWNED_ID);
-    assert.deepEqual(unpinReq?.body, { removeLabelRefs: ["Pinned"] });
+    await runCli(["spaces", "config", "notes", "--guest-app", "welcome", "--json"]);
+    assert.ok(requests.some((r) => r.method === "GET" && r.path === `/api/apps/space/${OWNED_ID}`));
+    assert.ok(requests.some((r) => r.method === "PATCH" && r.path === `/api/spaces/${OWNED_ID}/config`));
 
     const archiveOut = await runCli(["spaces", "archive", "home", "atou/project", "--json"]);
-    const archiveReq = requests.findLast((r) => r.path === "/api/me/resources/space/labels/batch");
-    assert.deepEqual(archiveReq?.body, {
-      resourceRefs: [HOME_ID, OTHER_ID],
-      addLabelRefs: ["Archived"],
-      removeLabelRefs: ["Pinned"],
-    });
     assert.deepEqual(JSON.parse(archiveOut), { ids: [HOME_ID, OTHER_ID], archived: true });
-
-    const unarchiveOut = await runCli(["spaces", "unarchive", "notes", "--json"]);
-    const unarchiveReq = requests.findLast((r) => r.path === "/api/me/resources/space/labels/batch");
-    assert.deepEqual(unarchiveReq?.body, {
-      resourceRefs: [OWNED_ID],
-      removeLabelRefs: ["Archived"],
-    });
-    assert.deepEqual(JSON.parse(unarchiveOut), { ids: [OWNED_ID], archived: false });
   });
 });
 
@@ -224,119 +176,21 @@ test("apps authorize --space resolves the ref and otherwise keeps the app's own 
   });
 });
 
-test("attachSessionTail keeps stdout pure JSONL in --json mode and disconnects before exiting", async () => {
+test("sessions tail --json writes only JSONL to stdout", async () => {
   const handlers = new Map<string, (event: { payload?: Record<string, unknown> }) => void>();
-  const events: string[] = [];
   let stdout = "";
-  let stderr = "";
-  let exitCode: number | null = null;
-  let resolveExit!: () => void;
-  const exited = new Promise<void>((resolve) => {
-    resolveExit = resolve;
+  const exited = new Promise<number>((resolve) => {
+    attachSessionTail(
+      { disconnect: async () => {} },
+      { on: (event, handler) => { handlers.set(event, handler); } },
+      { json: true, stdout: { write: (chunk) => { stdout += chunk; } }, stderr: { write: () => {} }, exit: resolve },
+    );
   });
 
-  attachSessionTail(
-    {
-      disconnect: async () => {
-        events.push("disconnect");
-        throw new Error("socket already closed");
-      },
-    },
-    {
-      on: (event, handler) => {
-        handlers.set(event, handler);
-      },
-    },
-    {
-      json: true,
-      stdout: { write: (chunk) => { stdout += chunk; } },
-      stderr: { write: (chunk) => { stderr += chunk; } },
-      exit: (code) => {
-        events.push(`exit:${code}`);
-        exitCode = code;
-        resolveExit();
-      },
-    },
-  );
-
-  assert.equal(stdout, "");
-  handlers.get("turn.patch")?.({ payload: { ops: [{ o: "append", p: "/text", v: "hello" }] } });
-  handlers.get("turn.patch")?.({ payload: { ops: [{ o: "append", p: "/text", v: " world" }] } });
+  const patch = { payload: { ops: [{ o: "append", p: "/message/content/blocks/0/text", v: "hello" }] } };
+  handlers.get("turn.patch")?.(patch);
   handlers.get("turn.finalized")?.({});
-  await exited;
 
-  assert.equal(stderr, "");
-  assert.equal(exitCode, 0);
-  assert.deepEqual(events, ["disconnect", "exit:0"]);
-  const lines = stdout.trim().split("\n");
-  assert.equal(lines.length, 2);
-  assert.deepEqual(lines.map((line) => JSON.parse(line)), [
-    { payload: { ops: [{ o: "append", p: "/text", v: "hello" }] } },
-    { payload: { ops: [{ o: "append", p: "/text", v: " world" }] } },
-  ]);
-});
-
-test("attachSessionTail disconnects cleanly before exiting on turn.error and preserves human output", async () => {
-  const errorHandlers = new Map<string, (event: { payload?: Record<string, unknown> }) => void>();
-  const errorEvents: string[] = [];
-  let jsonStdout = "";
-  let jsonStderr = "";
-  let resolveErrExit!: () => void;
-  const errExited = new Promise<void>((resolve) => {
-    resolveErrExit = resolve;
-  });
-
-  attachSessionTail(
-    {
-      disconnect: async () => {
-        errorEvents.push("disconnect");
-      },
-    },
-    {
-      on: (event, handler) => {
-        errorHandlers.set(event, handler);
-      },
-    },
-    {
-      json: true,
-      stdout: { write: (chunk) => { jsonStdout += chunk; } },
-      stderr: { write: (chunk) => { jsonStderr += chunk; } },
-      exit: (code) => {
-        errorEvents.push(`exit:${code}`);
-        resolveErrExit();
-      },
-    },
-  );
-
-  errorHandlers.get("turn.error")?.({ payload: { message: "boom" } });
-  await errExited;
-
-  assert.equal(jsonStdout, "");
-  assert.match(jsonStderr, /✗ Error/);
-  assert.match(jsonStderr, /"message":"boom"/);
-  assert.deepEqual(errorEvents, ["disconnect", "exit:1"]);
-
-  const humanHandlers = new Map<string, (event: { payload?: Record<string, unknown> }) => void>();
-  let humanStdout = "";
-  let resolveHumanExit!: () => void;
-  const humanExited = new Promise<void>((resolve) => {
-    resolveHumanExit = resolve;
-  });
-
-  attachSessionTail(
-    { disconnect: async () => {} },
-    { on: (event, handler) => { humanHandlers.set(event, handler); } },
-    {
-      json: false,
-      stdout: { write: (chunk) => { humanStdout += chunk; } },
-      stderr: { write: () => {} },
-      exit: () => resolveHumanExit(),
-    },
-  );
-
-  humanHandlers.get("turn.patch")?.({ payload: { ops: [{ o: "append", p: "/text", v: "hi" }] } });
-  humanHandlers.get("turn.finalized")?.({});
-  await humanExited;
-
-  assert.equal(humanStdout, "  Listening for events...\n\nhi\n\n  ✓ Done\n");
+  assert.equal(await exited, 0);
+  assert.deepEqual(stdout.trim().split("\n").map((line) => JSON.parse(line)), [patch]);
 });

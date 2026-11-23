@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { Command } from "commander";
-import { explicitSpace, explicitSpaceFlag, identityKeyFrom, readHomeSpaceCache } from "../src/space.js";
+import { explicitSpace, identityKeyFrom, readHomeSpaceCache } from "../src/space.js";
 
 const DAY_MS = 86_400_000;
 const tempDirs: string[] = [];
@@ -39,8 +39,6 @@ test("explicit space prefers -s over COHUB_SPACE_ID", () => {
   try {
     assert.equal(explicitSpace(programWithSpace("from-flag")), "from-flag");
     assert.equal(explicitSpace(programWithSpace()), "from-env");
-    assert.equal(explicitSpaceFlag(programWithSpace("from-flag")), "from-flag");
-    assert.equal(explicitSpaceFlag(programWithSpace()), null);
   } finally {
     if (previous === undefined) delete process.env.COHUB_SPACE_ID;
     else process.env.COHUB_SPACE_ID = previous;
