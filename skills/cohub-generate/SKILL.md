@@ -76,40 +76,14 @@ cohub generate "lip-sync to this spoken take" \
   --audio reference_audio=https://example.com/speech.mp3
 ```
 
-Roles include `first_frame`, `last_frame`, `reference_image`, `reference_video`, `reference_audio`, and `motion` (3D). Check `models show` for what a model accepts. Do not mix first/last frame roles with reference roles. Seedance 2 reference audio needs an image or video in the same request. Meshy follow-ups such as `animation` take the previous step's output URL from your last 3 days (for example `--3d <rigging-output-url>`), not a downloaded file.
+Roles include `first_frame`, `last_frame`, `reference_image`, `reference_video`, `reference_audio`, and `motion` (3D). `models show` lists the roles a model accepts and its rules for combining them. To chain steps, such as rigging then animating a 3D model, pass the previous output's URL rather than a downloaded file.
 
 ## Text roles
 
-Some multimodal models declare roles for their text inputs. Inspect them with:
+Some models take several text inputs by role; `models show` lists them. Pass each as its own `--text <role>=<text>`; values may contain `=` and newlines. A positional prompt is sent first, without a role.
 
 ```bash
-cohub models show <model> --json
-```
-
-Pass each role as its own repeatable `--text <role>=<text>`. The value may contain `=` and newlines; quote multi-line values. The positional prompt is optional with `--text`, but when both are present the prompt is sent first without a role.
-
-`song2` uses `prompt` (style), `lyrics`, and `abc` (score). The first call makes a song and, with `return_abc=true`, also returns the score it used as a text block with `meta.role` `abc` (the song's own output stays in `first-song.json`); the second sings the same lyrics from that score in another style:
-
-```bash
-LYRICS='[Verse]
-Neon on the water, morning in the wires
-We carry the quiet through the city lights
-[Chorus]
-Sing it back to sunrise, sing it back to me
-Every little spark becomes a melody'
-
-cohub generate -m song2 \
-  --text "prompt=uplifting synthwave with warm analog pads and a clear chorus" \
-  --text "lyrics=$LYRICS" \
-  --param seed=42 \
-  --param return_abc=true \
-  --json > first-song.json
-ABC=$(jq -r '.output[] | select(.type == "text" and .meta.role == "abc") | .text' first-song.json)
-
-cohub generate -m song2 \
-  --text "prompt=mellow acoustic folk, soft female vocal" \
-  --text "lyrics=$LYRICS" \
-  --text "abc=$ABC"
+cohub generate -m song2 --text "prompt=uplifting synthwave" --text "lyrics=$LYRICS"
 ```
 
 Pass generation parameters with `--param key=value` (repeatable; JSON, number, or boolean values) or `--parameters '<json>'`:
@@ -167,10 +141,10 @@ cohub generate "Welcome to Cohub. This voice follows the reference recording." \
 When `cohub models show "$TTS_MODEL"` lists an `instructions` parameter, it directs how the whole text is spoken. Pass it with `--parameters` so the value stays a string:
 
 ```bash
-cohub generate "今天的风有点凉，我们去河边走一走，顺便买些热饮回来吧。" \
+cohub generate "The wind is cool today. Let's walk by the river and get something warm to drink." \
   --model "$TTS_MODEL" \
   --audio "$REFERENCE_AUDIO_URL" \
-  --parameters '{"instructions":"请用非常缓慢的语速说话，每个字都慢慢说。"}'
+  --parameters '{"instructions":"Speak very slowly, word by word."}'
 ```
 
 ## Workflows
@@ -200,4 +174,3 @@ cohub generate "<edit instruction>" \
 ```
 
 For less common options, use `cohub generate -h`.
-

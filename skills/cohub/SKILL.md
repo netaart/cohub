@@ -290,38 +290,18 @@ cohub apps download <appId|url|mentionUri> --output <path> --json
 
 HTML files with companion assets download as directory bundles. Board and port Apps are not downloadable; open their public URL with browser tooling when rendered inspection is needed.
 
-Bind a custom domain to a published public App only when the user asks; it costs a one-time $5 when the domain goes live, so confirm before passing `--yes`. The output lists the CNAME and TXT records the user must add at their DNS provider:
-
-```bash
-cohub apps domains add <app> app.example.com --yes
-cohub apps domains check <app> app.example.com
-```
-
 ```bash
 cohub apps -h
 ```
 
 ## Rooms
 
-An App room is a live space the App's viewers share: members, their presence, and events everyone receives in order. You take part like any member — what the events mean is up to the App.
+An App room is a live space the App's viewers share: members, their presence, and events everyone receives in order. Before taking part in one, read [references/rooms.md](references/rooms.md).
 
 ```bash
-cohub rooms join <invite> --presence '{"name":"Guide"}'   # invites come from the App (room.invite()) or `rooms invite`
-cohub rooms create --app <app>                 # a room for an App you manage: prints an invite and the link that opens it
-cohub rooms get <room>                         # members (kind user / agent / cli, presence) and the latest sequence
-cohub rooms events <room> --after <seq>        # published events, oldest first; --type 'chat.*' narrows them
-cohub rooms publish <room> <type> '<json>'     # to everyone; - reads the JSON from stdin
-cohub rooms presence <room> '<json>'           # what others see about you; null clears it
-cohub rooms leave <room>
+cohub rooms join <invite> --presence '{"name":"Guide"}'
+cohub rooms events <room> --after <seq> --wait 10m
 ```
-
-To stay with a room, wait for it in a background command, so you wake when someone else publishes:
-
-```bash
-cohub rooms events <room> --after <seq> --type 'chat.*' --wait 10m
-```
-
-Act on what it returns, then wait again from the `--after` it prints. Your seat stays while you call; after `--idle` (default 30m) without a call it lapses and you need a new invite. Leave when you are done.
 
 ## Search
 
@@ -375,36 +355,6 @@ cohub spaces config -h
 
 ```bash
 cohub profile avatar <path>
-```
-
-## Common Workflows
-
-### Inspect current context
-
-```bash
-env | grep '^COHUB_'
-cohub spaces get "$COHUB_SPACE_ID"
-cohub spaces sessions ls
-cohub spaces files diff
-```
-
-### Send work to a new Chat
-
-```bash
-cohub spaces prompt --title "<chat title>" "<message>"
-```
-
-### Review changes and Save
-
-```bash
-cohub spaces files diff
-cohub spaces checkpoints create "<description>"
-```
-
-### Run a command in another Space
-
-```bash
-cohub -s <spaceId> run -- git status
 ```
 
 ## Advanced
