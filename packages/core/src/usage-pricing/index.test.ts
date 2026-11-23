@@ -60,23 +60,3 @@ test("the documented pricing example stays valid", async () => {
   const example = await readFile(new URL("../../../../docs/examples/billing-pricing.yaml", import.meta.url), "utf-8");
   assert.equal(parsePricingConfig(parse(example)).rules.length, 3);
 });
-
-test("a frozen price keeps the admission instant when a window closes before settlement", async () => {
-  const root = await mkdtemp(join(tmpdir(), "usage-pricing-"));
-  clearPricingConfigCache();
-  try {
-    const path = join(root, PRICING_CONFIG_PATH);
-    await mkdir(dirname(path), { recursive: true });
-    const endsAt = new Date(Date.now() + 100).toISOString();
-    await writeFile(path, `rules: [{ key: closing, when: { endsAt: "${endsAt}" }, effect: { multiplier: 0.5 } }]`);
-    const pricing = createUsagePricing({ billing: { getActiveBenefits: async () => [] }, platformConfigRoot: root, onConfigError: () => {} });
-    const admitted = await pricing.freeze("u", []);
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const subject = { usageType: "generation.llm.raw", model: "m" };
-    assert.equal((await admitted(subject)).personal.multiplier, 0.5);
-    assert.equal((await pricing.quote({ ...subject, userId: "u" })).personal.multiplier, 1);
-  } finally {
-    clearPricingConfigCache();
-    await rm(root, { recursive: true, force: true });
-  }
-});

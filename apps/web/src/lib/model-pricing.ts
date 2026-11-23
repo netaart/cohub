@@ -61,7 +61,6 @@ export function liveOffer(
 	return offer;
 }
 
-/** `-50%`, or "Free" for a zero multiplier. */
 export function multiplierLabel(multiplier: number, locale: Locale): string {
 	return multiplier === 0
 		? m.pricing_offer_free({}, { locale })

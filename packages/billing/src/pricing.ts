@@ -240,7 +240,6 @@ function needsBenefits(subject: PricingSubject, candidates: readonly PricingRule
   return subject.modelDiscounts === true || candidates.some((rule) => rule.when.benefits);
 }
 
-/** Whether pricing this usage would read the user's benefits. */
 export function pricingNeedsBenefits(config: PricingConfig, subject: PricingSubject): boolean {
   return needsBenefits(subject, candidatesFor(config, subject, subject.at ?? new Date()));
 }
@@ -345,7 +344,6 @@ function wholeUnits(value: unknown) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-/** Validates a snapshot read back from a queued task payload. */
 export function parsePricingSnapshot(value: unknown, where = "pricing"): PricingSnapshot {
   if (!isRecord(value)) throw new Error(`${where} is required`);
   if (typeof value.resolvedAt !== "string" || !Number.isFinite(Date.parse(value.resolvedAt))) {

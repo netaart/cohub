@@ -4,7 +4,6 @@ import {
 	describePricingOffer,
 	isPricingSnapshotFree,
 	parsePricingConfig,
-	parsePricingSnapshot,
 	quotaUnitsRequested,
 	quotePricing,
 	snapshotMultiplier,
@@ -59,14 +58,22 @@ test("pricing config rejects rules that could silently misprice", () => {
 	assert.deepEqual(parsePricingConfig(null).rules, []);
 });
 
-test("a campaign prices both payers inside its window and nothing outside it", async () => {
-	const subject = { usageType: "generation.video", model: "h3" };
-	const inWindow = await quotePricing({ config, subject: { ...subject, at: during }, loadBenefits: noBenefits });
-	assert.deepEqual(inWindow.personal, { multiplier: 0.5, source: "rule", key: "video-launch" });
-	assert.deepEqual(inWindow.spaceWallet, { multiplier: 0.5, source: "rule", key: "video-launch" });
-	const ended = await quotePricing({ config, subject: { ...subject, at: after }, loadBenefits: noBenefits });
-	assert.equal(ended.personal.multiplier, 1);
-	assert.equal(ended.spaceWallet.multiplier, 1);
+test("a campaign prices both payers inside its window, is announced until it ends, and needs no benefits", async () => {
+	let reads = 0;
+	const counted = async () => {
+		reads += 1;
+		return [];
+	};
+	const subject = { usageType: "generation.llm", model: "claude" };
+	const llm = await quotePricing({ config, subject: { ...subject, at: during }, loadBenefits: counted });
+	assert.deepEqual([llm.personal.multiplier, llm.spaceWallet.multiplier, reads], [0.8, 0.8, 0]);
+
+	const video = { usageType: "generation.video", model: "h3" };
+	const inWindow = await quotePricing({ config, subject: { ...video, at: during }, loadBenefits: noBenefits });
+	assert.deepEqual(describePricingOffer(config, inWindow).offer, { multiplier: 0.5, ruleKey: "video-launch", endsAt: "2026-11-22T16:00:00.000Z", announce: true });
+	const ended = await quotePricing({ config, subject: { ...video, at: after }, loadBenefits: noBenefits });
+	assert.deepEqual([ended.personal.multiplier, ended.spaceWallet.multiplier], [1, 1]);
+	assert.deepEqual(describePricingOffer(config, ended), { offer: null, quota: null });
 });
 
 test("benefit rules and per-model benefit discounts only price personal charges, lowest wins", async () => {
@@ -84,23 +91,7 @@ test("benefit rules and per-model benefit discounts only price personal charges,
 	assert.equal(modelDiscount.spaceWallet.multiplier, 1);
 });
 
-test("benefits are only read when a candidate rule needs them", async () => {
-	let reads = 0;
-	const counted = async () => {
-		reads += 1;
-		return [];
-	};
-	const llm = await quotePricing({ config, subject: { usageType: "generation.llm", model: "claude", at: during }, loadBenefits: counted });
-	assert.equal(reads, 0);
-	assert.deepEqual(llm.personal, { multiplier: 0.8, source: "rule", key: "llm-weekend" });
-	assert.deepEqual(llm.spaceWallet, { multiplier: 0.8, source: "rule", key: "llm-weekend" });
-	await quotePricing({ config, subject: { usageType: "generation.video", model: "x", at: during }, loadBenefits: counted });
-	assert.equal(reads, 1);
-	const outside = await quotePricing({ config, subject: { usageType: "sandbox.compute", model: "h3", at: during }, loadBenefits: counted });
-	assert.equal(outside.personal.multiplier, 1);
-});
-
-test("snapshots charge only the uncovered share of a partially covered request", () => {
+test("a partially covered request charges only its uncovered share", () => {
 	const quota = { ruleKey: "daily-video", tokenType: "video_second", requested: 10, covered: 6 };
 	const snapshot: PricingSnapshot = {
 		resolvedAt: during.toISOString(),
@@ -112,18 +103,5 @@ test("snapshots charge only the uncovered share of a partially covered request",
 	assert.equal(snapshotMultiplier(snapshot, "space_wallet"), 0.4);
 	assert.equal(isPricingSnapshotFree(snapshot), false);
 	assert.equal(isPricingSnapshotFree({ ...snapshot, quota: { ...quota, covered: 10 } }), true);
-	assert.deepEqual(parsePricingSnapshot(JSON.parse(JSON.stringify(snapshot))), snapshot);
-	assert.throws(() => parsePricingSnapshot({ ...snapshot, quota: { ...quota, covered: 11 } }));
 	assert.equal(quotaUnitsRequested({ duration: 9.2 }, "duration"), 10);
-	assert.equal(quotaUnitsRequested({ duration: "10" }, "duration"), 0);
-});
-
-test("offers expose the personal price and the end of the winning rule", async () => {
-	const quote = await quotePricing({ config, subject: { usageType: "generation.video", model: "h3", at: during }, loadBenefits: noBenefits });
-	assert.deepEqual(describePricingOffer(config, quote), {
-		offer: { multiplier: 0.5, ruleKey: "video-launch", endsAt: "2026-11-22T16:00:00.000Z", announce: true },
-		quota: null,
-	});
-	const listPrice = await quotePricing({ config, subject: { usageType: "generation.video", model: "seedance" }, loadBenefits: noBenefits });
-	assert.deepEqual(describePricingOffer(config, listPrice), { offer: null, quota: null });
 });

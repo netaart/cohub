@@ -57,17 +57,14 @@ test("a concurrent spend between the balance read and the draw is cancelled as o
   assert.deepEqual(raced.calls, ["consume generation-quota:t1 6", "reverse generation-quota:t1:overage 4"]);
 });
 
-test("a failed overage cancellation voids the whole draw before failing admission", async () => {
-  const fixture = ledger(6, { raceSpend: 4, failOverageReversal: true });
-  await assert.rejects(draw(fixture, 10), /billing down/);
-  assert.equal(fixture.available, 2);
-  assert.ok(fixture.calls.includes("reverse generation-quota:t1:void 6"));
-});
+test("a draw that fails admission is voided first", async () => {
+  const overage = ledger(6, { raceSpend: 4, failOverageReversal: true });
+  await assert.rejects(draw(overage, 10), /billing down/);
+  assert.equal(overage.available, 2);
 
-test("a consume whose response is lost is voided before failing admission", async () => {
-  const fixture = ledger(6, { loseConsumeResponse: true });
-  await assert.rejects(draw(fixture, 10), /socket hang up/);
-  assert.equal(fixture.available, 6);
+  const lost = ledger(6, { loseConsumeResponse: true });
+  await assert.rejects(draw(lost, 10), /socket hang up/);
+  assert.equal(lost.available, 6);
 });
 
 test("refund returns only the covered units under a stable operation id", async () => {

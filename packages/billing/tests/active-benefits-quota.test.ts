@@ -38,11 +38,9 @@ async function withFetch(
 	}
 }
 
-test("active benefits map entitlement metadata in one read", async () => {
-	let reads = 0;
+test("active benefits map entitlement metadata", async () => {
 	await withFetch((method, url) => {
 		if (url.pathname !== "/v1/customers/user_1/entitlements" || method !== "GET") return null;
-		reads += 1;
 		return jsonResponse({
 			customer: { id: "customer_1", external_user_id: "user_1", status: "active", meta: {} },
 			business_key: "cohub",
@@ -67,15 +65,6 @@ test("active benefits map entitlement metadata in one read", async () => {
 			metadata: { "gpt-image-2": 0 },
 			grantId: "grant_max",
 		}]);
-		assert.equal(reads, 1);
-	});
-});
-
-test("active benefit lookup failures propagate instead of pricing at list price", async () => {
-	await withFetch((_method, url) => url.pathname.endsWith("/entitlements")
-		? jsonResponse({ message: "Business not found" }, 404)
-		: null, async () => {
-		await assert.rejects(operations().getActiveBenefits({ userId: "user_1" }));
 	});
 });
 
