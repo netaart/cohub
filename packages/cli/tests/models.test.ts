@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Command } from "commander";
 import type { PublicGenerationDeclaration } from "@neta-art/cohub";
-import { filterHiddenLlmModels, formatGenerationPrice, formatLlmModelCost, registerModels, toMultimodalModelSummary } from "../src/commands/models.js";
+import { filterHiddenLlmModels, formatGenerationPrice, formatLlmModelCost, formatModelOffer, registerModels, toMultimodalModelSummary } from "../src/commands/models.js";
+
+test("formatModelOffer renders the personal discount and when it ends", () => {
+	assert.equal(formatModelOffer({ multiplier: 0.5, ruleKey: "launch", endsAt: "2026-11-22T16:00:00.000Z", announce: false }), "-50% until 2026-11-22 16:00 UTC");
+	assert.equal(formatModelOffer({ multiplier: 0, ruleKey: null, endsAt: null, announce: false }), "free");
+	assert.equal(formatModelOffer(null), "");
+});
 
 test("formatGenerationPrice renders a flat unit price", () => {
 	assert.equal(formatGenerationPrice({ unit: "image", amount: 0.04 }), "$0.04 / image");

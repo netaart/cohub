@@ -10,6 +10,7 @@ import type {
   BillingRedemptionResult,
   BillingSubscriptionHistoryList,
   BillingSubscriptionHistoryStatus,
+  ListBillingQuotasResponse,
 } from "../types.js";
 import type { HttpTransport } from "../transport.js";
 
@@ -24,6 +25,11 @@ export class BillingApi {
     return this.transport.request<BillingCreditStatus>(
       `/api/billing/credits${query ? `?${query}` : ""}`,
     );
+  }
+
+  /** Quota balances (raw units such as seconds) that pricing rules can draw on for the caller. */
+  async getQuotas() {
+    return this.transport.request<ListBillingQuotasResponse>("/api/billing/quotas");
   }
 
   async getBalanceActivities(input?: {

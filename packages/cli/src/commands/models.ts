@@ -13,7 +13,7 @@ import { createClient } from "../client.js";
 import { explicitSpace, failSpaceTarget, resolveSpaceRef } from "../space.js";
 import { table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
 
-type MultimodalModelSummary = Pick<PublicGenerationDeclaration, "model" | "category" | "title" | "description" | "pricing">;
+type MultimodalModelSummary = Pick<PublicGenerationDeclaration, "model" | "category" | "title" | "description" | "pricing" | "offer" | "quota">;
 
 export function toMultimodalModelSummary(model: PublicGenerationDeclaration): MultimodalModelSummary {
   return {
@@ -23,7 +23,20 @@ export function toMultimodalModelSummary(model: PublicGenerationDeclaration): Mu
     ...(model.description ? { description: model.description } : {}),
     // Keep pricing structured for `--json`; the human table formats it separately.
     ...(model.pricing ? { pricing: model.pricing } : {}),
+    ...(model.offer ? { offer: model.offer } : {}),
+    ...(model.quota ? { quota: model.quota } : {}),
   };
+}
+
+type ModelOffer = NonNullable<PublicGenerationDeclaration["offer"]>;
+
+/** `-50% until 2026-11-22 16:00 UTC`, or `free`; the caller's personal price, not a quote for every payer. */
+export function formatModelOffer(offer: ModelOffer | null | undefined): string {
+  if (!offer) return "";
+  const label = offer.multiplier === 0 ? "free" : `-${Math.round((1 - offer.multiplier) * 100)}%`;
+  if (!offer.endsAt) return label;
+  const endsAt = new Date(offer.endsAt).toISOString().slice(0, 16).replace("T", " ");
+  return `${label} until ${endsAt} UTC`;
 }
 
 function printSection(title: string, lines: string[]): void {
@@ -163,6 +176,8 @@ function printMultimodalModel(model: PublicGenerationDeclaration): void {
   printSection("Category", [generationModelCategory(model) ?? "other"]);
   if (model.description) printSection("Description", [model.description]);
   if (model.pricing) printSection("Pricing", [formatGenerationPrice(model.pricing)]);
+  if (model.offer) printSection("Offer", [formatModelOffer(model.offer)]);
+  if (model.quota) printSection("Quota", [`${model.quota.tokenType}, 1 unit per ${model.quota.parameter}`]);
 
   printSection("Input", model.content.input.map(formatContentSpec));
 
@@ -247,6 +262,9 @@ Examples:
               label: "Price",
               format: (value) => (value ? formatGenerationPrice(value as GenerationModelPricing) : ""),
             },
+            ...(models.some((model) => model.offer)
+              ? [{ key: "offer", label: "Offer", format: (value: unknown) => formatModelOffer(value as ModelOffer | undefined) }]
+              : []),
             { key: "description", label: "Description" },
           ]);
           return;
@@ -266,16 +284,19 @@ Examples:
         for (const [provider, entries] of Object.entries(visibleCatalog)) {
           console.log(`\n  ${provider}`);
           console.log(`  ${"─".repeat(provider.length)}`);
+          const hasOffer = entries.some((entry) => entry.offer);
           table(entries.map((entry) => ({
             id: entry.id,
             provider: entry.provider,
             context: formatModelContext(entry.model),
             cost: formatLlmModelCost(entry.model),
+            offer: formatModelOffer(entry.offer),
           })), [
             { key: "id", label: "ID" },
             { key: "provider", label: "Provider" },
             { key: "context", label: "Context" },
             { key: "cost", label: "Cost" },
+            ...(hasOffer ? [{ key: "offer", label: "Offer" }] : []),
           ]);
         }
       } catch (e: unknown) {

@@ -112,15 +112,36 @@ export type BillingUserRef = {
   userId: string;
 };
 
-export type GenerationModelDiscount = {
-  multiplier: number;
-  benefitKey: string | null;
-  grantId: string | null;
-  resolvedAt: string;
+export type BillingActiveBenefit = {
+  benefitKey: string;
+  enabled: boolean;
+  metadata: Record<string, string | number | boolean>;
+  grantId?: string | null;
 };
 
-export type GenerationModelDiscountInput = BillingUserRef & {
-  model: string;
+/** A quota token balance in raw units (e.g. seconds), net of open overage. */
+export type BillingQuotaStatus = {
+  tokenType: string;
+  balance: number;
+  grants: Array<{ benefitName: string | null; remaining: number; original: number | null; expiresAt: string | null }>;
+};
+
+export type BillingQuotaConsumeInput = BillingUserRef & {
+  tokenType: string;
+  /** Positive whole raw units. */
+  amount: number;
+  usageType: CohubBillingUsageType;
+  sourceId: string;
+  operationId: string;
+  reason?: string;
+};
+
+export type BillingQuotaReversalInput = BillingUserRef & {
+  tokenType: string;
+  originalOperationId: string;
+  operationId: string;
+  amount: number;
+  reason: string;
 };
 
 export type BillingReferralRewardInput = BillingUserRef & {
@@ -647,7 +668,11 @@ export interface BillingOperations {
   readonly status: BillingPluginStatus;
   ensureCustomer(input: BillingUserRef): Promise<BillingUserRef>;
   getState(input: BillingUserRef): Promise<BillingAccountState>;
-  getGenerationModelDiscount(input: GenerationModelDiscountInput): Promise<GenerationModelDiscount>;
+  getActiveBenefits(input: BillingUserRef): Promise<BillingActiveBenefit[]>;
+  getQuotaStatus(input: BillingUserRef & { tokenType: string; grants?: boolean }): Promise<BillingQuotaStatus>;
+  /** Raw-unit consume; `overage` is the part the balance did not cover. */
+  consumeQuota(input: BillingQuotaConsumeInput): Promise<{ amount: number; overage: number }>;
+  reverseQuota(input: BillingQuotaReversalInput): Promise<{ amount: number; overageCancelled: number }>;
   getCreditStatus(input: BillingUserRef & { tokenType?: CohubBillingTokenType; createCustomer?: boolean; grants?: BillingCreditGrantScope; grantKind?: "purchased" }): Promise<BillingCreditStatus>;
   getCatalog(input?: BillingUserRef): Promise<BillingCatalog>;
   previewPromotionCode(input: BillingPromotionCodePreviewInput): Promise<BillingPromotionCodePreview>;

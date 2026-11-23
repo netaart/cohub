@@ -11,7 +11,7 @@ import { failGenerationSession } from "./generation-session.js";
 import { settleTurnSpeechTask } from "./turn-speech.js";
 import { parseGenerationReserveHold } from "@cohub/core/generation-billing";
 import { isGenerationTaskType } from "@cohub/protocol/generation";
-import { generationReserveHolds } from "../generation-billing.js";
+import { forgetGenerationDelivery, generationReserveHolds, refundFailedGenerationQuota } from "../generation-billing.js";
 
 
 const logger = createLogger({ serviceName: "cohub-worker" });
@@ -135,6 +135,7 @@ export const registerTask = (type: string, handler: TaskHandler) => {
 
     try {
       const result = await handler(job, { taskRunId });
+      if (isGenerationTaskType(job.name)) forgetGenerationDelivery(taskRunId);
 
       const [taskRun] = await db
         .update(taskRuns)
@@ -158,6 +159,7 @@ export const registerTask = (type: string, handler: TaskHandler) => {
       if (isGenerationTaskType(job.name)) {
         const hold = parseGenerationReserveHold(payload.data?.reserveHold);
         if (hold) await generationReserveHolds.release(taskRunId, hold.payer, "task_failed");
+        await refundFailedGenerationQuota({ taskRunId, userId: payload.userId, pricing: payload.data?.pricing });
         await failGenerationSession({ taskRunId, payload, error }).catch((sessionError) => {
           logger.warn("[GenerationSession] failed to persist failure", sessionError);
         });

@@ -155,6 +155,8 @@ type Props = {
 	thinkingLevelLabel?: string | null;
 	/** Compact generation-policy suffix; null/empty hides (Auto). */
 	generationPolicyLabel?: string | null;
+	/** Offer and quota facts for the selected model, shown on the model trigger. */
+	pricingMeta?: Array<{ text: string; brand?: boolean }>;
 	/** Quick prompt action chips rendered above the composer surface. */
 	quickActions?: PromptQuickAction[];
 	onquickaction?: (action: PromptQuickAction) => void;
@@ -204,6 +206,7 @@ let {
 	onapprovalmodechange,
 	thinkingLevelLabel = null,
 	generationPolicyLabel = null,
+	pricingMeta = [],
 	quickActions = [],
 	onquickaction,
 	promptTemplates = [],
@@ -344,6 +347,7 @@ const modelControlLabel = $derived(
 const modelControlAriaLabel = $derived(
 	[
 		m.composer_model_label({ model: modelControlLabel }, { locale }),
+		...pricingMeta.map((item) => item.text),
 		thinkingLevelLabel
 			? m.composer_thinking_label({ level: thinkingLevelLabel }, { locale })
 			: null,
@@ -1754,9 +1758,12 @@ $effect(() => {
 							{#if onModelSelect}
 								<ComposerModelTrigger
 									label={modelControlLabel}
-									meta={[thinkingLevelLabel, generationPolicyLabel].filter(
-										(value): value is string => Boolean(value),
-									)}
+									meta={[
+										...pricingMeta,
+										...[thinkingLevelLabel, generationPolicyLabel].filter(
+											(value): value is string => Boolean(value),
+										),
+									]}
 									ariaLabel={modelControlAriaLabel}
 									disabled={disabled || sending}
 									onclick={() => onModelSelect?.()}

@@ -1,0 +1,116 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { createTalesofaiBillingOperations } from "../src/client.js";
+
+const jsonResponse = (body: unknown, status = 200) =>
+	new Response(JSON.stringify(body), {
+		status,
+		headers: { "content-type": "application/json" },
+	});
+
+const operations = () =>
+	createTalesofaiBillingOperations({
+		baseUrl: "https://billing.example.test/v1",
+		businessKey: "cohub",
+		adminApiKey: "test-key",
+	});
+
+async function withFetch(
+	handler: (method: string, url: URL, body: Record<string, unknown> | null) => Response | null,
+	run: () => Promise<void>,
+) {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input, init) => {
+		const url = new URL(String(input));
+		const method = init?.method ?? "GET";
+		if (url.pathname === "/v1/customers" && method === "POST") {
+			return jsonResponse({ customer: { external_user_id: "user_1" } });
+		}
+		const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+		const response = handler(method, url, body);
+		if (!response) throw new Error(`Unexpected request: ${method} ${url}`);
+		return response;
+	};
+	try {
+		await run();
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+}
+
+test("active benefits map entitlement metadata in one read", async () => {
+	let reads = 0;
+	await withFetch((method, url) => {
+		if (url.pathname !== "/v1/customers/user_1/entitlements" || method !== "GET") return null;
+		reads += 1;
+		return jsonResponse({
+			customer: { id: "customer_1", external_user_id: "user_1", status: "active", meta: {} },
+			business_key: "cohub",
+			active_benefits: [{
+				grant_id: "grant_max",
+				benefit_id: "id:max",
+				benefit_key: "max_model_discount_v1",
+				benefit_name: "Max",
+				benefit_type: "feature",
+				config: { metadata: { "gpt-image-2": 0 } },
+				source_type: "subscription_paid_period",
+				source_id: "period_1",
+				granted_at: "2026-07-01T00:00:00.000Z",
+				effective_at: "2026-07-01T00:00:00.000Z",
+				expires_at: "2026-08-01T00:00:00.000Z",
+			}],
+		});
+	}, async () => {
+		assert.deepEqual(await operations().getActiveBenefits({ userId: "user_1" }), [{
+			benefitKey: "max_model_discount_v1",
+			enabled: true,
+			metadata: { "gpt-image-2": 0 },
+			grantId: "grant_max",
+		}]);
+		assert.equal(reads, 1);
+	});
+});
+
+test("active benefit lookup failures propagate instead of pricing at list price", async () => {
+	await withFetch((_method, url) => url.pathname.endsWith("/entitlements")
+		? jsonResponse({ message: "Business not found" }, 404)
+		: null, async () => {
+		await assert.rejects(operations().getActiveBenefits({ userId: "user_1" }));
+	});
+});
+
+test("quota consume reports the uncovered part and reversal reports cancelled debt in raw units", async () => {
+	const sent: Array<Record<string, unknown>> = [];
+	await withFetch((method, url, body) => {
+		if (method !== "POST" || !body) return null;
+		sent.push(body);
+		if (url.pathname === "/v1/credits/consume") {
+			return jsonResponse({ transactions: [], overage: { id: "overage_1", original_amount: 4, remaining_amount: 4 } });
+		}
+		if (url.pathname === "/v1/credits/consume/reverse") {
+			return jsonResponse({ amount: 4, open_overage_cancelled_amount: 4 });
+		}
+		return null;
+	}, async () => {
+		const billing = operations();
+		assert.deepEqual(await billing.consumeQuota({
+			userId: "user_1",
+			tokenType: "video_second",
+			amount: 10,
+			usageType: "generation.video",
+			sourceId: "task_1",
+			operationId: "generation-quota:task_1",
+		}), { amount: 10, overage: 4 });
+		assert.deepEqual(await billing.reverseQuota({
+			userId: "user_1",
+			tokenType: "video_second",
+			originalOperationId: "generation-quota:task_1",
+			operationId: "generation-quota:task_1:overage",
+			amount: 4,
+			reason: "quota overage",
+		}), { amount: 4, overageCancelled: 4 });
+	});
+	assert.equal(sent[0]?.amount, 10);
+	assert.equal(sent[0]?.token_type, "video_second");
+	assert.equal(sent[1]?.amount, 4);
+});

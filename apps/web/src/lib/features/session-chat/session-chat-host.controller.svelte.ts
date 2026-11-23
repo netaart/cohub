@@ -32,6 +32,7 @@ import type { SessionListForkRecord } from "#lib/cache/db.ts";
 import { getCacheUserKey } from "#lib/cache/keys.ts";
 import { sessionTurnsRepo } from "#lib/cache/repositories/session-turns-repo.ts";
 import { shouldRefreshAgentCatalogs } from "#lib/cache/space-fs-invalidation.ts";
+import { minuteClock } from "#lib/clock.svelte.ts";
 import { noteViewerActivity } from "#lib/command-palette/palette-overview.ts";
 import {
 	buildComposerTextContentBlock,
@@ -62,6 +63,11 @@ import {
 	type ModelThinkingLevel,
 	resolveLocalModel,
 } from "#lib/model-catalog.ts";
+import {
+	formatQuotaAmount,
+	liveOffer,
+	offerLabel,
+} from "#lib/model-pricing.ts";
 import { m } from "#lib/paraglide/messages.js";
 import {
 	uploadChatAttachmentFile,
@@ -94,6 +100,7 @@ import {
 	billingConversion,
 	isBillingAccessBlockedCode,
 } from "#lib/stores/billing-conversion.svelte.ts";
+import { billingQuotasStore } from "#lib/stores/billing-quotas.svelte.ts";
 import {
 	readCreateModelPreference,
 	saveCreateModelPreference,
@@ -494,6 +501,41 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				}
 			: null;
 	});
+	// Offer and quota facts for the model the composer will submit to; the server decides the charge.
+	const composerPricingMeta = $derived.by(() => {
+		const now = minuteClock.now;
+		const items: Array<{ text: string; brand?: boolean }> = [];
+		const create =
+			composerMode === "create" ? activeCreateModelDeclaration : null;
+		const llm =
+			composerMode === "agent" &&
+			composerHarness === "cohub" &&
+			activeSessionModel
+				? modelsCatalog?.find(
+						(item) =>
+							item.provider === activeSessionModel.provider &&
+							item.id === activeSessionModel.id,
+					)
+				: null;
+		const offer = liveOffer(create ? create.offer : llm?.offer, now);
+		if (offer)
+			items.push({ text: offerLabel(offer, getLocale()), brand: true });
+		const balance = billingQuotasStore.balance(create?.quota?.tokenType);
+		if (create?.quota && balance)
+			items.push({
+				text: m.pricing_quota_left(
+					{
+						amount: formatQuotaAmount(
+							balance,
+							create.quota.parameter,
+							getLocale(),
+						),
+					},
+					{ locale: getLocale() },
+				),
+			});
+		return items;
+	});
 	const generationPolicyMode = $derived(generationPolicy.mode);
 	const selectedGenerationModels = $derived(generationPolicy.selectedModels);
 	const generationPolicyLabel = $derived(
@@ -552,6 +594,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		untrack(() => {
 			if (shouldLoad && authIdentity) void loadGenerationModelsCatalog();
 		});
+	});
+	$effect(() => {
+		if (composerMode === "create" && activeCreateModelDeclaration?.quota)
+			untrack(() => billingQuotasStore.refresh());
 	});
 	$effect(() => {
 		const sessionKey = activeSessionId ?? "new";
@@ -3070,6 +3116,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	async function handleSend(): Promise<boolean> {
 		if (composerMode === "create") {
 			await handleDirectGenerationSend();
+			// Admission may have drawn quota; refresh the hint from the server.
+			if (activeCreateModelDeclaration?.quota)
+				billingQuotasStore.refresh({ force: true });
 			return false;
 		}
 		if (
@@ -4719,6 +4768,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		get generationPolicyLabel() {
 			return generationPolicyLabel;
+		},
+		get composerPricingMeta() {
+			return composerPricingMeta;
 		},
 		get composerMode() {
 			return composerMode;

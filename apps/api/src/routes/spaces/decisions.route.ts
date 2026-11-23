@@ -27,6 +27,8 @@ import { callDecisionUpstream } from "../../decisions/client.js";
 import { countStateImages, prepareDecisionState } from "../../decisions/state.js";
 import { loadDecisionModels } from "../../decisions/models.js";
 import { spaceWalletBilling } from "../../space-wallet-billing.js";
+import { usagePricing } from "../../usage-pricing.js";
+import { priceUsage } from "@cohub/core/usage-pricing";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
@@ -87,10 +89,11 @@ async function recordDecisionBilling(input: {
   provider: string;
   model: string;
   costUsd: number | null;
+  startedAt: Date;
 }) {
   // Unlike completions, the charge comes from the cost the upstream reports.
-  const amountUsd = normalizePositiveUsd(input.costUsd);
-  if (amountUsd <= 0) {
+  const officialUsd = normalizePositiveUsd(input.costUsd);
+  if (officialUsd <= 0) {
     logger.warn("[Decision] upstream returned no cost; skipping billing", {
       decisionId: input.decisionId,
       provider: input.provider,
@@ -100,16 +103,23 @@ async function recordDecisionBilling(input: {
     return;
   }
   if (!billingOperations.status.configured) return;
+  let amountUsd = officialUsd;
   try {
+    const usageType = COHUB_BILLING_USAGE_TYPES.generationDecision;
+    const quote = await usagePricing.quoteCharge(
+      { userId: input.userId, usageType, model: input.model, provider: input.provider, at: input.startedAt },
+      (message, context) => logger.warn(message, context),
+    );
+    const priced = priceUsage(quote, officialUsd, `Decision call ${input.provider}/${input.model}`);
+    amountUsd = priced.amountUsd;
     const result = await spaceWalletBilling.recordUsage({
       spaceId: input.spaceId,
       userId: input.userId,
-      amountUsd,
+      ...priced,
       tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-      usageType: COHUB_BILLING_USAGE_TYPES.generationDecision,
+      usageType,
       sourceId: input.decisionId,
       operationId: `decision:${input.decisionId}`,
-      reason: `Decision call ${input.provider}/${input.model}`,
     });
     if (result.status === "overage") {
       logger.warn("[Billing] decision usage recorded as overage", {
@@ -252,6 +262,7 @@ router.post("/", decisionRequestBodyLimit, async (c) => {
     provider: model.provider,
     model: model.id,
     costUsd,
+    startedAt,
   });
 
   const result: SpaceDecisionResult = {

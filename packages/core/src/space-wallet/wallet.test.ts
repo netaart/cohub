@@ -89,3 +89,17 @@ test("a pinned payer is charged without routing, and its debit failures stay ret
   await assert.rejects(personal.service.recordUsage({ ...request, payer: "personal" }), /Debit response lost/);
   assert.equal(personal.debits[0]?.userId, "user");
 });
+
+test("a wallet pays its own price and reason; a personally free charge never reaches the wallet", async () => {
+  const charge = { amountUsd: 0.5, reason: "LLM usage p/m [list=0.5;x=1]" };
+  const wallet = setup(10);
+  const result = await wallet.service.recordUsage({ ...request, amountUsd: 0.3, reason: "LLM usage p/m [list=0.5;x=0.6]", spaceWalletCharge: charge });
+  assert.equal(result.payer, "space_wallet");
+  assert.equal(wallet.debits[0]?.amountUsd, 0.5);
+  assert.equal(wallet.debits[0]?.reason, `actor_user_id=user; ${charge.reason}`);
+
+  const free = setup(10);
+  const freeResult = await free.service.recordUsage({ ...request, amountUsd: 0, spaceWalletCharge: charge });
+  assert.equal(freeResult.payer, "personal");
+  assert.deepEqual(free.queries, []);
+});

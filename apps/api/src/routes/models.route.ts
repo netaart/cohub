@@ -17,7 +17,10 @@ import {
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
 import { loadSpaceModModelLayers } from "@cohub/core/space-mods";
+import { COHUB_BILLING_USAGE_TYPES, resolveGenerationUsageType } from "@cohub/billing";
+import type { ModelOffer } from "@cohub/protocol";
 import { loadPublicGenerationModels } from "../generations/declarations.js";
+import { priceModelListing } from "../model-offers.js";
 import { db } from "../db/index.js";
 import { config } from "../config.js";
 import { useAuth, authzDenied } from "../lib/middleware.js";
@@ -134,15 +137,28 @@ router.get("/", async (c) => {
   try {
     const modelType = c.req.query("modelType");
     if (modelType === MULTIMODAL_MODEL_TYPE) {
-      return c.json(await loadPublicGenerationModels(user.uuid));
+      const { models } = await loadPublicGenerationModels(user.uuid);
+      const offers = await priceModelListing(user.uuid, models, (model) => ({
+        usageType: resolveGenerationUsageType(model.category),
+        model: model.model,
+        modelDiscounts: true,
+      }));
+      return c.json({ models: models.map((model, index) => ({ ...model, ...offers[index] })) });
     }
 
     const spaceId = c.req.query("spaceId")?.trim() || null;
     if (spaceId && !(await hasPermission(user, "space.view", { spaceId }))) return authzDenied(c);
 
     const catalog = await fetchModelsCatalog(user.uuid, spaceId);
-    const grouped: Record<string, ModelCatalogEntry[]> = {};
-    for (const entry of catalog) {
+    const offers = await priceModelListing(user.uuid, catalog, (entry) => ({
+      usageType: COHUB_BILLING_USAGE_TYPES.generationLlm,
+      model: entry.id,
+      provider: entry.provider,
+    }));
+    const grouped: Record<string, Array<ModelCatalogEntry & { offer?: ModelOffer }>> = {};
+    for (const [index, item] of catalog.entries()) {
+      const offer = offers[index]?.offer;
+      const entry = offer ? { ...item, offer } : item;
       let list = grouped[entry.provider];
       if (!list) {
         list = [];

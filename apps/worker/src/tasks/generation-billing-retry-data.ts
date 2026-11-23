@@ -1,4 +1,4 @@
-import { applyGenerationModelDiscount, normalizePositiveUsd } from "@cohub/billing";
+import { applyPricingMultiplier, normalizePositiveUsd } from "@cohub/billing";
 import type {
   GenerationBillingRetryTaskDataV2,
   GenerationModelDiscountSnapshot,
@@ -58,6 +58,7 @@ export function parseGenerationBillingRetryData(data: unknown): GenerationBillin
     model: data.model,
     adapterType: typeof data.adapterType === "string" ? data.adapterType : null,
     ...(payer ? { payer } : {}),
+    ...(typeof data.reason === "string" && data.reason.trim() ? { reason: data.reason.slice(0, 1024) } : {}),
   };
   if (data.schemaVersion === undefined || data.schemaVersion === 1) {
     return {
@@ -81,7 +82,7 @@ export function parseGenerationBillingRetryData(data: unknown): GenerationBillin
     throw new Error("Invalid generation billing retry payload: officialCostUsd must be a positive number");
   }
   const modelDiscount = parseModelDiscountSnapshot(data.modelDiscount);
-  const expectedAmountUsd = applyGenerationModelDiscount(data.officialCostUsd, modelDiscount);
+  const expectedAmountUsd = applyPricingMultiplier(data.officialCostUsd, modelDiscount.multiplier);
   if (expectedAmountUsd !== common.amountUsd) {
     throw new Error("Invalid generation billing retry payload: amountUsd does not match the pricing snapshot");
   }

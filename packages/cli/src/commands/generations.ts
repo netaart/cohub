@@ -499,6 +499,9 @@ Examples:
             result.billing?.discountMultiplier !== undefined
               ? `multiplier: ${result.billing.discountMultiplier}`
               : null,
+            result.billing?.quota?.covered
+              ? `quota: ${result.billing.quota.covered}/${result.billing.quota.requested} ${result.billing.quota.tokenType}`
+              : null,
             result.billing?.reason ? `billing reason: ${result.billing.reason}` : null,
           ].filter(Boolean).join(", ");
           if (details) process.stderr.write(`  ${details}\n`);

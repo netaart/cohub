@@ -1,16 +1,21 @@
 import {
   BillingAccessBlockedError,
   billingOperations,
-  calculateGenerationUsageCharge,
+  calculateUsageCharge,
   COHUB_BILLING_TOKEN_TYPES,
   generationUsageKind,
-  isGenerationModelDiscountFree,
-  reconcileGenerationModelDiscountSnapshot,
+  isPricingSnapshotFree,
+  legacyPricingSnapshot,
+  parsePricingSnapshot,
+  pricingDiscountFor,
   resolveGenerationUsageType,
+  snapshotMultiplier,
+  type PricingPayer,
 } from "@cohub/billing";
 import type { Job } from "bullmq";
 import { parseGenerationReserveHold } from "@cohub/core/generation-billing";
-import { generationReserveHolds } from "../generation-billing.js";
+import { pricedReason } from "@cohub/core/usage-pricing";
+import { generationReserveHolds, markGenerationDelivered } from "../generation-billing.js";
 import { createGenerationClient, GenerationConfigError } from "@neta-art/generation";
 import { createGenerationDeclarationLoader } from "@cohub/infra/config-runtime/generation-declarations";
 import {
@@ -19,6 +24,7 @@ import {
   TURN_SPEECH_TASK_TYPE,
   type GenerationBillingRetryTaskData,
   type GenerationModelDiscountSnapshot,
+  type GenerationPricingSnapshot,
   type GenerationTaskData,
   type GenerationTaskResult,
   type GenerationUsageBilling,
@@ -47,30 +53,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function parseModelDiscountSnapshot(value: unknown): GenerationModelDiscountSnapshot {
-  if (!isRecord(value)) throw new Error("Invalid generation task payload: modelDiscount is required");
-  if (
-    typeof value.multiplier !== "number" ||
-    !Number.isFinite(value.multiplier) ||
-    value.multiplier < 0 ||
-    value.multiplier > 1
-  ) {
+/** Tasks queued before pricing rules carried one multiplier for every payer. */
+function parseLegacyModelDiscount(value: unknown): GenerationPricingSnapshot {
+  if (!isRecord(value)) throw new Error("Invalid generation task payload: modelDiscount is invalid");
+  const { multiplier, resolvedAt } = value;
+  if (typeof multiplier !== "number" || !Number.isFinite(multiplier) || multiplier < 0 || multiplier > 1) {
     throw new Error("Invalid generation task payload: modelDiscount.multiplier must be between 0 and 1");
   }
-  if (
-    typeof value.resolvedAt !== "string" ||
-    !value.resolvedAt.trim() ||
-    !Number.isFinite(Date.parse(value.resolvedAt))
-  ) {
+  if (typeof resolvedAt !== "string" || !Number.isFinite(Date.parse(resolvedAt))) {
     throw new Error("Invalid generation task payload: modelDiscount.resolvedAt must be an ISO date-time");
   }
-  return {
-    multiplier: value.multiplier,
-    resolvedAt: value.resolvedAt,
-  };
+  return legacyPricingSnapshot(multiplier, resolvedAt);
 }
 
-function parseGenerationTaskData(data: unknown): GenerationTaskData {
+function parsePricing(data: Record<string, unknown>): GenerationPricingSnapshot {
+  if (data.pricing !== undefined) return parsePricingSnapshot(data.pricing, "Invalid generation task payload: pricing");
+  if (data.modelDiscount !== undefined) return parseLegacyModelDiscount(data.modelDiscount);
+  return legacyPricingSnapshot(1, new Date(0).toISOString());
+}
+
+function parseGenerationTaskData(data: unknown): GenerationTaskData & { pricing: GenerationPricingSnapshot } {
   if (!isRecord(data)) throw new Error("Invalid generation task payload: data is required");
   if (typeof data.model !== "string" || !data.model.trim()) {
     throw new Error("Invalid generation task payload: model is required");
@@ -89,9 +91,7 @@ function parseGenerationTaskData(data: unknown): GenerationTaskData {
     content: data.content as GenerationTaskData["content"],
     parameters: data.parameters,
     meta: data.meta,
-    ...(data.modelDiscount === undefined
-      ? {}
-      : { modelDiscount: parseModelDiscountSnapshot(data.modelDiscount) }),
+    pricing: parsePricing(data),
     reserveHold: parseGenerationReserveHold(data.reserveHold),
   };
 }
@@ -150,6 +150,7 @@ async function enqueueGenerationBillingRetry(input: {
   spaceId: string;
   sessionId?: string | null;
   payer: GenerationBillingRetryTaskData["payer"];
+  reason: string;
 }) {
   const data: GenerationBillingRetryTaskData = {
     schemaVersion: 2,
@@ -162,6 +163,7 @@ async function enqueueGenerationBillingRetry(input: {
     model: input.model,
     adapterType: input.adapterType ?? null,
     payer: input.payer ?? null,
+    reason: input.reason,
   };
   // Credit consumption remains idempotent via operationId `generation:${taskRunId}`.
   await enqueueTask({
@@ -179,6 +181,15 @@ async function enqueueGenerationBillingRetry(input: {
   });
 }
 
+/** The charge one payer would owe for this generation, with the reason the balance ledger renders. */
+function chargeFor(pricing: GenerationPricingSnapshot, payer: PricingPayer, officialCostUsd: number, model: string) {
+  const multiplier = snapshotMultiplier(pricing, payer);
+  return {
+    ...calculateUsageCharge(officialCostUsd, multiplier),
+    reason: pricedReason(`Generation ${model}`, { officialUsd: officialCostUsd, discount: pricingDiscountFor(pricing, payer), quota: pricing.quota }),
+  };
+}
+
 async function recordGenerationUsageBilling(input: {
   retryOnly: boolean;
   userId: string;
@@ -186,27 +197,37 @@ async function recordGenerationUsageBilling(input: {
   model: string;
   adapterType: string | null | undefined;
   officialCostUsd: number;
-  modelDiscount: GenerationModelDiscountSnapshot;
+  pricing: GenerationPricingSnapshot;
   usageType: ReturnType<typeof resolveGenerationUsageType>;
   spaceId: string;
   sessionId?: string | null;
   payer: GenerationBillingRetryTaskData["payer"];
 }): Promise<GenerationUsageBilling> {
-  const pricing = calculateGenerationUsageCharge(input.officialCostUsd, input.modelDiscount);
-  const { officialCostUsd, amountUsd } = pricing;
+  // An unpinned charge is priced for the user; the wallet router swaps in the wallet price if it pays.
+  const charge = chargeFor(input.pricing, input.payer ?? "personal", input.officialCostUsd, input.model);
+  const walletCharge = input.payer ? null : chargeFor(input.pricing, "space_wallet", input.officialCostUsd, input.model);
+  const { officialCostUsd, amountUsd } = charge;
+  const quota = input.pricing.quota
+    ? { tokenType: input.pricing.quota.tokenType, requested: input.pricing.quota.requested, covered: input.pricing.quota.covered }
+    : null;
   const billingPricing = {
     officialCostUsd,
     amountUsd,
-    discountMultiplier: pricing.discountMultiplier,
+    discountMultiplier: charge.discountMultiplier,
     usageType: input.usageType,
+    ...(quota ? { quota } : {}),
   };
-  if (pricing.skipReason) {
-    return {
-      ...billingPricing,
-      status: "skipped",
-      reason: pricing.skipReason,
-    };
-  }
+  const context = {
+    userId: input.userId,
+    taskRunId: input.taskRunId,
+    officialCostUsd,
+    amountUsd,
+    discountMultiplier: charge.discountMultiplier,
+    model: input.model,
+    usageType: input.usageType,
+    adapterType: input.adapterType ?? null,
+  };
+  if (charge.skipReason) return { ...billingPricing, status: "skipped", reason: charge.skipReason };
   if (!billingOperations.status.configured) {
     return { ...billingPricing, status: "skipped", reason: "billing_not_configured" };
   }
@@ -221,67 +242,43 @@ async function recordGenerationUsageBilling(input: {
       spaceId: input.spaceId,
       userId: input.userId,
       amountUsd,
+      reason: charge.reason,
+      ...(walletCharge ? { spaceWalletCharge: { amountUsd: walletCharge.amountUsd, reason: walletCharge.reason } } : {}),
       tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
       usageType: input.usageType,
       sourceId: input.taskRunId,
       operationId: `generation:${input.taskRunId}`,
-      reason: `Generation ${input.model}`,
     });
-    if (result.status === "overage") {
-      console.warn("[Billing] generation usage recorded as overage", {
-        userId: input.userId,
-        taskRunId: input.taskRunId,
-        officialCostUsd,
-        amountUsd,
-        discountMultiplier: input.modelDiscount.multiplier,
-        model: input.model,
-        usageType: input.usageType,
-        adapterType: input.adapterType ?? null,
-      });
-    }
+    const charged = result.payer === "space_wallet" && walletCharge
+      ? { amountUsd: walletCharge.amountUsd, discountMultiplier: walletCharge.discountMultiplier }
+      : {};
+    if (result.status === "overage") console.warn("[Billing] generation usage recorded as overage", { ...context, ...charged, payer: result.payer });
     if (result.status === "disabled" || result.status === "skipped") {
       return {
         ...billingPricing,
+        ...charged,
         status: "skipped",
         reason: result.status === "disabled" ? "billing_disabled" : "record_failed",
       };
     }
-    return {
-      ...billingPricing,
-      status: result.status === "overage" ? "overage" : "recorded",
-    };
+    return { ...billingPricing, ...charged, status: result.status === "overage" ? "overage" : "recorded" };
   } catch (error) {
-    console.warn("[Billing] failed to record generation usage; enqueueing retry", {
-      userId: input.userId,
-      taskRunId: input.taskRunId,
-      officialCostUsd,
-      amountUsd,
-      discountMultiplier: input.modelDiscount.multiplier,
-      model: input.model,
-      usageType: input.usageType,
-      adapterType: input.adapterType ?? null,
-      error,
-    });
+    console.warn("[Billing] failed to record generation usage; enqueueing retry", { ...context, error });
     await enqueueGenerationBillingRetry({
       userId: input.userId,
       taskRunId: input.taskRunId,
       amountUsd,
       officialCostUsd,
-      modelDiscount: input.modelDiscount,
+      modelDiscount: { multiplier: charge.discountMultiplier, resolvedAt: input.pricing.resolvedAt },
       usageType: input.usageType,
       model: input.model,
       adapterType: input.adapterType ?? null,
       spaceId: input.spaceId,
       sessionId: input.sessionId,
       payer: input.payer,
+      reason: charge.reason,
     }).catch((enqueueError) => {
-      console.warn("[Billing] failed to enqueue generation billing retry", {
-        userId: input.userId,
-        taskRunId: input.taskRunId,
-        officialCostUsd,
-        amountUsd,
-        error: enqueueError,
-      });
+      console.warn("[Billing] failed to enqueue generation billing retry", { ...context, error: enqueueError });
     });
     return { ...billingPricing, status: "skipped", reason: "record_failed" };
   }
@@ -306,36 +303,16 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
     const declaration = await loader.loadGenerationDeclaration(userId, data.model);
     if (!declaration) throw new Error(`Generation model is unavailable: ${data.model}`);
 
-    // Re-read authoritative entitlements before trusting a queued snapshot. This
-    // binds discounts to the task user/model and keeps old API payloads safe.
-    const resolvedDiscount = await billingOperations.getGenerationModelDiscount({
-      userId,
-      model: data.model,
-    });
-    const modelDiscount = reconcileGenerationModelDiscountSnapshot({
-      model: data.model,
-      snapshot: data.modelDiscount,
-      resolved: resolvedDiscount,
-    });
-    if (resolvedDiscount.benefitKey) {
-      console.info("[Billing] worker verified generation model discount", {
-        userId,
-        spaceId,
-        model: data.model,
-        multiplier: resolvedDiscount.multiplier,
-        benefitKey: resolvedDiscount.benefitKey,
-        resolvedAt: resolvedDiscount.resolvedAt,
-        acceptedAt: modelDiscount.resolvedAt,
-      });
-    }
-
+    const { pricing } = data;
     const usageType = resolveGenerationUsageType(declaration.category);
-    // A held task fails closed: a turn that was cancelled, finished, or cannot be read must not be charged.
-    if (data.reserveHold && runnable !== true) {
+    // Held or quota-covered tasks fail closed: a turn that was cancelled, finished, or cannot be read
+    // must not be charged, and its quota has already gone back to the user.
+    const drewQuota = (pricing.quota?.covered ?? 0) > 0;
+    if ((data.reserveHold || drewQuota) && runnable !== true) {
       throw new Error(runnable === false ? "Generation turn is no longer runnable." : "Generation turn state could not be verified.");
     }
     // The submission hold already proved the balance; the gate would re-check a balance the hold reserved.
-    const billingDecision = data.reserveHold || isGenerationModelDiscountFree(modelDiscount)
+    const billingDecision = data.reserveHold || isPricingSnapshotFree(pricing)
       ? { status: "allowed" as const, balanceState: "zero" as const, netUsd: 0 }
       : await billingUsageGate.evaluate({
           userId,
@@ -376,6 +353,8 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
       },
     );
 
+    markGenerationDelivered(taskRunId);
+
     const billing = await recordGenerationUsageBilling({
       retryOnly: job.attemptsMade > 0 || job.attemptsStarted > 1,
       userId,
@@ -383,7 +362,7 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
       model: data.model,
       adapterType: declaration.adapter?.type,
       officialCostUsd: result.cost ?? 0,
-      modelDiscount,
+      pricing,
       usageType,
       spaceId,
       sessionId,

@@ -1,6 +1,7 @@
 import {
 	clampThinkingLevel as clampModelThinkingLevel,
 	isModelThinkingLevel,
+	type ModelOffer,
 	type ModelThinkingLevel,
 	STANDARD_SERVICE_TIER,
 	supportedThinkingLevels,
@@ -13,6 +14,7 @@ export type ModelCatalogItem = {
 	provider: string;
 	id: string;
 	model: Record<string, unknown> & { hidden?: boolean };
+	offer?: ModelOffer | null;
 };
 
 export type LocalModelSelection = {

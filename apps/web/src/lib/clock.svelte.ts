@@ -17,3 +17,16 @@ export const clock = {
 		return Date.now();
 	},
 };
+
+const subscribeMinute = createSubscriber((update) => {
+	const timer = setInterval(update, 60_000);
+	return () => clearInterval(timer);
+});
+
+/** A minute tick for countdowns that only need minute precision, such as offer deadlines. */
+export const minuteClock = {
+	get now() {
+		subscribeMinute();
+		return Date.now();
+	},
+};

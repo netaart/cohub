@@ -3,8 +3,10 @@ import type { BillingCreditStatus } from "@neta-art/cohub";
 import { ChevronRight, Loader2 } from "lucide-svelte";
 import { formatDate } from "#lib/i18n/format.ts";
 import type { Locale } from "#lib/i18n/locale.ts";
+import { formatQuotaAmount } from "#lib/model-pricing.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { sdk } from "#lib/sdk.ts";
+import { billingQuotasStore } from "#lib/stores/billing-quotas.svelte.ts";
 import { formatBalance } from "./format.ts";
 
 const { credit, locale }: { credit: BillingCreditStatus; locale: Locale } =
@@ -59,9 +61,29 @@ function sources(groups: Group[]): Source[] {
 }
 
 const available = $derived(sources(credit.groups));
-const total = $derived(
-	credit.groups.reduce((sum, group) => sum + group.grants.length, 0),
+/** Quota grants (e.g. daily seconds) sit beside money credits but never mix into their totals. */
+const quotaRows = $derived(
+	billingQuotasStore.quotas.flatMap((quota) =>
+		quota.grants.map((grant, index) => ({
+			key: `${quota.tokenType}:${index}`,
+			name: grant.benefitName ?? quota.tokenType,
+			remaining: formatQuotaAmount(grant.remaining, quota.parameter, locale),
+			original:
+				grant.original === null
+					? null
+					: formatQuotaAmount(grant.original, quota.parameter, locale),
+			expiresAt: grant.expiresAt,
+		})),
+	),
 );
+const total = $derived(
+	credit.groups.reduce((sum, group) => sum + group.grants.length, 0) +
+		quotaRows.length,
+);
+
+$effect(() => {
+	billingQuotasStore.refresh();
+});
 
 function expiry(source: Source) {
 	if (source.group === "expired") return m.billing_expired({}, { locale });
@@ -115,10 +137,21 @@ async function showExhausted() {
 	</button>
 	{#if open}
 		<div class="pb-3 pl-5.5">
-			{#if available.length === 0}
+			{#if available.length === 0 && quotaRows.length === 0}
 				<p class="py-2 text-[12px] text-text-tertiary">{m.billing_no_balance_sources({}, { locale })}</p>
 			{:else}
 				<ul class="divide-y divide-border-subtle">
+					{#each quotaRows as quota (quota.key)}
+						<li class="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0.5 py-2 text-[12px] sm:grid-cols-[minmax(0,1fr)_12rem_9rem]">
+							<span class="min-w-0 truncate text-text-primary">{quota.name}</span>
+							<span class="order-last col-span-2 truncate text-[11px] text-text-tertiary sm:order-none sm:col-span-1">
+								{quota.expiresAt ? m.billing_expires_on({ date: formatDate(quota.expiresAt, locale, { hour: "2-digit", minute: "2-digit" }) }, { locale }) : m.billing_no_expiration({}, { locale })}
+							</span>
+							<span class="text-right font-mono tabular-nums text-text-secondary">
+								{quota.remaining}{#if quota.original}<span class="text-text-placeholder"> / {quota.original}</span>{/if}
+							</span>
+						</li>
+					{/each}
 					{#each available as source (source.key)}{@render row(source, false)}{/each}
 				</ul>
 			{/if}

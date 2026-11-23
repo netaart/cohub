@@ -40,11 +40,26 @@ export function getGenerationCostPresentation(
 	const providerDetail = providerCost
 		? m.cost_provider({ cost: providerCost }, { locale })
 		: "";
+	const quota = asRecord(billing?.quota);
+	const covered = typeof quota?.covered === "number" ? quota.covered : 0;
+	const requested = typeof quota?.requested === "number" ? quota.requested : 0;
+	const quotaDetail =
+		covered > 0 ? m.cost_quota_covered({ covered, requested }, { locale }) : "";
+	if (status === "skipped" && reason === "discounted_free" && covered > 0) {
+		return {
+			label: m.cost_covered_by_quota({}, { locale }),
+			detail: [quotaDetail, providerDetail].filter(Boolean).join("  ·  "),
+		};
+	}
 
 	if ((status === "recorded" || status === "overage") && charged) {
 		return {
 			label: charged,
-			detail: [m.cost_charged({ cost: charged }, { locale }), providerDetail]
+			detail: [
+				m.cost_charged({ cost: charged }, { locale }),
+				quotaDetail,
+				providerDetail,
+			]
 				.filter(Boolean)
 				.join("  ·  "),
 		};

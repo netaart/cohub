@@ -8,12 +8,14 @@ import * as account from "#lib/features/settings/account-data.ts";
 import { settingsPageActive } from "#lib/features/settings/page-context.svelte.ts";
 import { formatDate, formatDateTime } from "#lib/i18n/format.ts";
 import type { Locale } from "#lib/i18n/locale.ts";
+import { multiplierLabel } from "#lib/model-pricing.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { formatBalance } from "./format.ts";
 import {
 	type LedgerRun,
 	ledgerDays,
 	quotedName,
+	runPricing,
 	transferActivityKind,
 	usageSubject,
 } from "./ledger.ts";
@@ -113,6 +115,20 @@ function toggle(id: string) {
 	expanded = next;
 }
 
+function pricingSummary(pricing: NonNullable<ReturnType<typeof runPricing>>) {
+	return [
+		pricing.quota ? m.billing_pricing_quota(pricing.quota, { locale }) : "",
+		pricing.multiplier !== null && pricing.multiplier < 1
+			? m.billing_pricing_offer(
+					{ label: multiplierLabel(pricing.multiplier, locale) },
+					{ locale },
+				)
+			: "",
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
 function statusLabel(status: BillingBalanceActivity["status"]) {
 	if (status === "overage") return m.billing_status_overage({}, { locale });
 	if (status === "partial") return m.billing_status_partial({}, { locale });
@@ -138,19 +154,27 @@ $effect(() => onBillingChange(() => void feed.refresh()));
 
 {#snippet runRow(run: LedgerRun, open: boolean)}
 	{@const sub = detail(run.first)}
+	{@const pricing = run.first.kind === "usage" ? runPricing(run.items) : null}
+	{@const pricingText = pricing ? pricingSummary(pricing) : ""}
 	<span class="flex w-3.5 shrink-0 justify-center text-text-tertiary">
 		{#if run.items.length > 1}<ChevronRight class="h-3 w-3 transition-transform duration-150 {open ? 'rotate-90' : ''}" />{/if}
 	</span>
 	<span class="min-w-0 flex-1">
 		<span class="flex min-w-0 items-baseline gap-1.5 text-[12px]">
 			<span class="shrink-0 font-medium text-text-primary">{title(run.first)}</span>
-			{#if sub}<span class="min-w-0 truncate text-text-tertiary">{sub}</span>{/if}
+			{#if sub || pricingText}<span class="min-w-0 truncate text-text-tertiary">{[sub, pricingText].filter(Boolean).join(" · ")}</span>{/if}
 			{#if run.items.length > 1}<span class="shrink-0 font-mono text-[11px] text-text-tertiary">×{run.items.length}</span>{/if}
 			{#if statusLabel(run.status)}<span class="tag shrink-0">{statusLabel(run.status)}</span>{/if}
 		</span>
 		<span class="mt-0.5 block font-mono text-[11px] tabular-nums text-text-placeholder">{timeRange(run)}</span>
 	</span>
-	{@render amount(run.amountUsd, run.status)}
+	<span class="flex shrink-0 flex-col items-end">
+		{@render amount(run.amountUsd, run.status)}
+		{#if pricing}
+			{@const list = formatBalance(pricing.listUsd, locale)}
+			<s class="font-mono text-[11px] tabular-nums text-text-placeholder" aria-label={m.pricing_original_price({ price: list }, { locale })}>{list}</s>
+		{/if}
+	</span>
 {/snippet}
 
 <section aria-labelledby="billing-activity-heading" class="pt-5">

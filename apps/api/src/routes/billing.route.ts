@@ -12,6 +12,7 @@ import {
 import { config } from "../config.js";
 import { jsonError } from "../lib/json-error.js";
 import { getOptionalAuth, useAuth } from "../lib/middleware.js";
+import { usagePricing } from "../usage-pricing.js";
 
 const router = new Hono();
 const BILLING_PAGE_SIZE = 10;
@@ -155,6 +156,23 @@ router.get("/credits", async (c) => {
     grants: c.req.query("include") === "exhausted" ? "all" : "available",
   });
   return c.json(credit);
+});
+
+/** Balances of every quota token the pricing rules can draw on; empty quotas are omitted. */
+router.get("/quotas", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  if (!billingOperations.status.configured) return c.json({ quotas: [] });
+  const { rules } = await usagePricing.loadConfig();
+  const parameters = new Map<string, string>();
+  for (const rule of rules) {
+    if (rule.enabled && rule.effect.type === "quota" && !parameters.has(rule.effect.tokenType)) parameters.set(rule.effect.tokenType, rule.effect.parameter);
+  }
+  const quotas = await Promise.all([...parameters].map(async ([tokenType, parameter]) => ({
+    ...await billingOperations.getQuotaStatus({ userId: user.uuid, tokenType, grants: true }),
+    parameter,
+  })));
+  return c.json({ quotas: quotas.filter((quota) => quota.balance > 0 || quota.grants.length > 0) });
 });
 
 const ACTIVITY_LIMIT = 100;

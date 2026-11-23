@@ -16,6 +16,8 @@ import { db } from "../../../db.js";
 import { registerSystemJob } from "../../registry.js";
 import { resolveLlmRequestStats } from "./request-stats.js";
 import { spaceWalletBilling } from "../../../space-wallet-billing.js";
+import { usagePricing } from "../../../usage-pricing.js";
+import { priceUsage } from "@cohub/core/usage-pricing";
 import { redisCommandClient } from "../../../redis.js";
 import { stopTurnsOnBillingBlock } from "./billing-stop.js";
 
@@ -50,23 +52,29 @@ const recordBillingUsage = async (input: {
   operationId: string;
   provider: string;
   model: string;
+  at: Date;
 }) => {
   if (!input.userId) return false;
   const amount = input.usage?.cost?.total;
-  const amountUsd = typeof amount === "number" && Number.isFinite(amount) && amount > 0
+  const officialUsd = typeof amount === "number" && Number.isFinite(amount) && amount > 0
     ? Number(amount.toFixed(8))
     : 0;
-  if (amountUsd <= 0 || !billingOperations.status.configured) return false;
+  if (officialUsd <= 0 || !billingOperations.status.configured) return false;
+  const usageType = COHUB_BILLING_USAGE_TYPES.generationLlm;
+  // Priced at the message's own time so retries and late processing keep the price the user saw.
+  const quote = await usagePricing.quoteCharge(
+    { userId: input.userId, usageType, model: input.model, provider: input.provider, at: input.at },
+    (messageText, context) => logger.warn(messageText, context),
+  );
   const result = await spaceWalletBilling.recordUsage({
     spaceId: input.spaceId,
     retryOnly: input.retryOnly,
     userId: input.userId,
-    amountUsd,
+    ...priceUsage(quote, officialUsd, `LLM usage ${input.provider}/${input.model}`),
     tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-    usageType: COHUB_BILLING_USAGE_TYPES.generationLlm,
+    usageType,
     sourceId: input.sourceId,
     operationId: input.operationId,
-    reason: `LLM usage ${input.provider}/${input.model}`,
   });
   return result.status === "overage";
 };
@@ -84,6 +92,7 @@ const recordBilling = async (spaceId: string | undefined, retryOnly: boolean, me
       operationId: `llm:${message.id}`,
       provider: message.provider ?? "unknown",
       model: message.model ?? "unknown",
+      at: message.createdAt ?? new Date(),
     });
   }
   const auxiliary = await Promise.all(readImageToTextCalls(message.meta).map((call) => call.status === "succeeded"
@@ -96,6 +105,7 @@ const recordBilling = async (spaceId: string | undefined, retryOnly: boolean, me
         operationId: `llm:image-to-text:${message.id}:${call.sourceKey}`,
         provider: call.provider,
         model: call.model,
+        at: message.createdAt ?? new Date(),
       })
     : false));
   return overdrawn || auxiliary.includes(true);

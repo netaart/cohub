@@ -20,6 +20,9 @@ import CenteredLoading from "#lib/components/CenteredLoading.svelte";
 import ChatTimeline from "#lib/components/ChatTimeline.svelte";
 import CreateModelSelectorDialog from "#lib/components/CreateModelSelectorDialog.svelte";
 import NewChatBackground from "#lib/components/NewChatBackground.svelte";
+import PricingNotice, {
+	type AnnouncedModel,
+} from "#lib/components/pricing/PricingNotice.svelte";
 import SessionComposer from "#lib/components/SessionComposer.svelte";
 import TurnBottomSheet from "#lib/components/TurnBottomSheet.svelte";
 import TurnRail from "#lib/components/TurnRail.svelte";
@@ -145,6 +148,32 @@ const generationBooleanConstraints = $derived(
 	host.generationBooleanConstraints,
 );
 const activeSessionModel = $derived(host.activeSessionModel);
+const announcedModels = $derived<AnnouncedModel[]>(
+	host.isNewSessionRoute
+		? [
+				...(generationModelsCatalog ?? []).map((model) => ({
+					key: `generation:${model.model}`,
+					title: model.title?.trim() || model.model,
+					offer: model.offer,
+					select: () => host.handleCreateModelSelect(model.model),
+				})),
+				...(host.modelsCatalog ?? []).map((item) => ({
+					key: `llm:${item.provider}/${item.id}`,
+					title:
+						typeof item.model.name === "string" ? item.model.name : item.id,
+					offer: item.offer,
+					select: () => {
+						host.setComposerMode("agent");
+						host.handleModelSelect({ provider: item.provider, id: item.id });
+					},
+				})),
+			]
+		: [],
+);
+$effect(() => {
+	if (host.isNewSessionRoute)
+		untrack(() => void host.loadGenerationModelsCatalog());
+});
 const hasCustomPage = $derived(
 	shouldShowNewChatProfile || shouldShowNewChatBackground,
 );
@@ -534,6 +563,7 @@ async function handleDraftDrop(event: DragEvent) {
 					</div>
 				{/if}
 				{#if !archivedSession}
+					<PricingNotice models={announcedModels} />
 					<SessionCacheNotice
 						coldResend={host.coldResend}
 						compactFirst={host.compactFirst}
@@ -570,6 +600,7 @@ async function handleDraftDrop(event: DragEvent) {
 					onapprovalmodechange={host.setApprovalMode}
 					thinkingLevelLabel={host.composerMode === "agent" ? host.activeSessionThinkingLevelLabel : null}
 					generationPolicyLabel={host.composerMode === "agent" ? host.generationPolicyLabel : null}
+					pricingMeta={host.composerPricingMeta}
 					quickActions={host.composerMode === "note" ? [] : host.quickPromptActions}
 					onquickaction={(action) => {
 						host.handleQuickPromptAction(action);

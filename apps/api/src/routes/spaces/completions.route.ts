@@ -42,6 +42,8 @@ import {
   type RunCompletionOutcome,
 } from "../../llm/stream-completion.js";
 import { spaceWalletBilling } from "../../space-wallet-billing.js";
+import { usagePricing } from "../../usage-pricing.js";
+import { priceUsage } from "@cohub/core/usage-pricing";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
@@ -210,22 +212,30 @@ async function recordCompletionBilling(input: {
   usage: RunCompletionOutcome["usage"];
   aborted: boolean;
   error: RunCompletionOutcome["error"];
+  startedAt: Date;
 }) {
   if (!billingOperations.status.configured) return;
   if (input.aborted || input.error) return;
-  const amountUsd = normalizePositiveUsd(input.usage?.cost?.total);
-  if (amountUsd <= 0) return;
+  const officialUsd = normalizePositiveUsd(input.usage?.cost?.total);
+  if (officialUsd <= 0) return;
+  let amountUsd = officialUsd;
 
   try {
+    const usageType = COHUB_BILLING_USAGE_TYPES.generationLlmRaw;
+    const quote = await usagePricing.quoteCharge(
+      { userId: input.userId, usageType, model: input.model, provider: input.provider, at: input.startedAt },
+      (message, context) => logger.warn(message, context),
+    );
+    const priced = priceUsage(quote, officialUsd, `Raw LLM completion ${input.provider}/${input.model}`);
+    amountUsd = priced.amountUsd;
     const result = await spaceWalletBilling.recordUsage({
       spaceId: input.spaceId,
       userId: input.userId,
-      amountUsd,
+      ...priced,
       tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-      usageType: COHUB_BILLING_USAGE_TYPES.generationLlmRaw,
+      usageType,
       sourceId: input.completionId,
       operationId: `raw_completion:${input.completionId}`,
-      reason: `Raw LLM completion ${input.provider}/${input.model}`,
     });
     if (result.status === "overage") {
       logger.warn("[Billing] raw completion usage recorded as overage", {
@@ -405,6 +415,7 @@ router.post("/", async (c) => {
       usage: outcome.usage,
       aborted: outcome.aborted,
       error: outcome.error,
+      startedAt,
     });
     await Promise.all(outcome.imageToTextCalls.map((call, index) => call.status === "succeeded"
       ? recordCompletionBilling({
@@ -416,6 +427,7 @@ router.post("/", async (c) => {
           usage: call.usage,
           aborted: false,
           error: null,
+          startedAt,
         })
       : Promise.resolve()));
     archiveCompletionBestEffort({

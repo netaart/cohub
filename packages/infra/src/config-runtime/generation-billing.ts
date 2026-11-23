@@ -1,6 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { createPlatformConfigFile } from "./platform-config-file.js";
 
 const CONFIG_PATH = join("platform", ".cohub", "billing", "generation-reserves.yaml");
 
@@ -9,14 +9,7 @@ export type GenerationBillingConfig = {
   reserves: ReadonlyMap<string, number>;
 };
 
-type CachedConfig = {
-  mtimeMs: number;
-  size: number;
-  config: GenerationBillingConfig;
-};
-
 const EMPTY_CONFIG: GenerationBillingConfig = { reserves: new Map() };
-const cache = new Map<string, CachedConfig>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -56,33 +49,11 @@ export function resolveGenerationBillingReserve(
   return config.reserves.get(model.trim()) ?? null;
 }
 
+const file = createPlatformConfigFile({ path: CONFIG_PATH, parse: parseGenerationBillingConfig, empty: EMPTY_CONFIG });
+
 /**
  * Never throws: a broken config must not block non-whitelisted models. On error it reports and keeps the
  * last valid config, or no whitelist (the original post-success charge path) if none was loaded yet.
  */
-export async function loadGenerationBillingConfig(
-  platformConfigRoot: string,
-  onError: (error: unknown) => void,
-): Promise<GenerationBillingConfig> {
-  const path = join(platformConfigRoot, CONFIG_PATH);
-  try {
-    const info = await stat(path);
-    const cached = cache.get(platformConfigRoot);
-    if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.config;
-    const config = parseGenerationBillingConfig(await readFile(path, "utf-8"));
-    cache.set(platformConfigRoot, { mtimeMs: info.mtimeMs, size: info.size, config });
-    return config;
-  } catch (error) {
-    if ((error as { code?: unknown }).code === "ENOENT") {
-      cache.delete(platformConfigRoot);
-      return EMPTY_CONFIG;
-    }
-    onError(error);
-    // Re-read: a concurrent load may have cached a newer valid config during this one's I/O.
-    return cache.get(platformConfigRoot)?.config ?? EMPTY_CONFIG;
-  }
-}
-
-export function clearGenerationBillingConfigCache(): void {
-  cache.clear();
-}
+export const loadGenerationBillingConfig = file.load;
+export const clearGenerationBillingConfigCache = file.clear;

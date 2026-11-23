@@ -1,5 +1,5 @@
 import type { GenerationContentBlock, GenerationModelDeclaration } from "@neta-art/generation";
-import type { BillingPayload } from "../billing.js";
+import type { BillingPayload, ModelOffer, ModelQuotaOffer } from "../billing.js";
 import type { RequestSource } from "../provenance.js";
 import type { TurnSpeechTarget } from "../speech.js";
 export * from "./catalog.js";
@@ -53,6 +53,8 @@ export type GenerationTaskData = {
   /** Server-derived request provenance. Never forwarded to the generation provider. */
   requestSource?: RequestSource | null;
   /** Server-resolved pricing snapshot. This field is never accepted from the public request. */
+  pricing?: GenerationPricingSnapshot;
+  /** Pre-pricing-rules snapshot, still read from tasks queued before the upgrade. */
   modelDiscount?: GenerationModelDiscountSnapshot;
   /** Submission-time balance hold for whitelisted models; released when the task ends. */
   reserveHold?: GenerationReserveHold | null;
@@ -70,6 +72,27 @@ export type GenerationModelDiscountSnapshot = {
   resolvedAt: string;
 };
 
+export type GenerationPricingDiscount = {
+  multiplier: number;
+  source: "rule" | "benefit" | null;
+  key: string | null;
+};
+
+/** Prices for both payers plus quota units drawn at admission; the worker charges from this. */
+export type GenerationPricingSnapshot = {
+  resolvedAt: string;
+  personal: GenerationPricingDiscount;
+  spaceWallet: GenerationPricingDiscount;
+  quota: GenerationQuotaUse | null;
+};
+
+export type GenerationQuotaUse = {
+  ruleKey: string;
+  tokenType: string;
+  requested: number;
+  covered: number;
+};
+
 type GenerationBillingRetryTaskDataBase = {
   taskRunId: string;
   userId: string;
@@ -79,6 +102,8 @@ type GenerationBillingRetryTaskDataBase = {
   adapterType?: string | null;
   /** Payer pinned by a reserve hold; absent means the wallet router chooses. */
   payer?: GenerationReserveHold["payer"]["type"] | null;
+  /** Ledger reason, carrying the pricing facts of the original charge attempt. */
+  reason?: string;
 };
 
 /** Legacy payloads already queued before model-discount snapshots were introduced. */
@@ -111,8 +136,10 @@ export type GenerationUsageBilling = {
   officialCostUsd?: number;
   /** Effective charge amount after plan discount; inspect status to confirm recording. */
   amountUsd: number;
-  /** Server-resolved multiplier applied to officialCostUsd. */
+  /** Server-resolved multiplier applied to officialCostUsd, after quota coverage. */
   discountMultiplier?: number;
+  /** Quota units that covered part of this request before any money was charged. */
+  quota?: { tokenType: string; requested: number; covered: number } | null;
   usageType: string;
   status: "recorded" | "overage" | "skipped";
   reason?: string | null;
@@ -131,7 +158,10 @@ export type GenerationTaskResult = {
 
 export type GenerationExampleRequest = Omit<CreateGenerationTaskRequest, "spaceId">;
 export type GenerationDeclaration = GenerationModelDeclaration;
-export type PublicGenerationDeclaration = Omit<GenerationModelDeclaration, "adapter">;
+export type PublicGenerationDeclaration = Omit<GenerationModelDeclaration, "adapter"> & {
+  offer?: ModelOffer | null;
+  quota?: ModelQuotaOffer | null;
+};
 
 export type ListGenerationModelsResponse = {
   models: PublicGenerationDeclaration[];

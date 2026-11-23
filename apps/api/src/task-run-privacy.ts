@@ -91,8 +91,8 @@ export function sanitizeTaskRunPricingForViewer<T extends TaskRunView>(
     const data = { ...payload.data };
     let changed = false;
     for (const key of isBillingRetry
-      ? ["modelDiscount", "officialCostUsd", "amountUsd"]
-      : ["modelDiscount", "reserveHold"]) {
+      ? ["modelDiscount", "officialCostUsd", "amountUsd", "reason"]
+      : ["modelDiscount", "pricing", "reserveHold"]) {
       if (Object.hasOwn(data, key)) {
         delete data[key];
         changed = true;

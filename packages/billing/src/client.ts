@@ -30,7 +30,6 @@ import {
   type BusinessBillingOperations,
   type BusinessCreditConsumeResult,
 } from "./interfaces.js";
-import { resolveGenerationModelDiscount } from "./generation-usage.js";
 import { checkoutLockRedisRef } from "./runtime.js";
 
 export type { BillingClientConfig, BillingRuntimeConfig } from "./types.js";
@@ -241,11 +240,20 @@ export function createDisabledBillingOperations(
       return { userId: input.userId, credits: [], entitlements: [] };
     },
 
-    async getGenerationModelDiscount(input) {
-      return resolveGenerationModelDiscount({
-        model: input.model,
-        entitlements: [],
-      });
+    async getActiveBenefits() {
+      return [];
+    },
+
+    async getQuotaStatus(input) {
+      return { tokenType: input.tokenType, balance: 0, grants: [] };
+    },
+
+    async consumeQuota(): Promise<{ amount: number; overage: number }> {
+      throw new BillingConfigurationError(status.reason);
+    },
+
+    async reverseQuota(): Promise<{ amount: number; overageCancelled: number }> {
+      throw new BillingConfigurationError(status.reason);
     },
 
     async getCreditStatus(): Promise<BillingCreditStatus> {

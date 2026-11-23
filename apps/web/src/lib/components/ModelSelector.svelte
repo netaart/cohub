@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { ModelOffer } from "@cohub/protocol";
 import type {
 	GenerationModelPricing,
 	PublicGenerationDeclaration,
@@ -10,12 +11,12 @@ import GenerationCategoryIcon from "#lib/components/generation/GenerationCategor
 import GenerationCategoryTabs from "#lib/components/generation/GenerationCategoryTabs.svelte";
 import GenerationModelGroups from "#lib/components/generation/GenerationModelGroups.svelte";
 import { generationCategoryLabel } from "#lib/components/generation/generation-labels.ts";
+import OfferBadge from "#lib/components/pricing/OfferBadge.svelte";
 import {
 	browseGenerationModels,
 	type GenerationCategoryFilter,
 	generationCategoryKey,
 } from "#lib/generation-model-catalog.ts";
-import { formatCurrency } from "#lib/i18n/format.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import type { Locale } from "#lib/i18n/locale.ts";
 import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
@@ -34,12 +35,19 @@ import {
 	type ModelThinkingLevel,
 	supportsFastServiceTier,
 } from "#lib/model-catalog.ts";
+import {
+	formatGenerationPrice,
+	formatPriceValue,
+	liveOffer,
+	offerDeadline,
+} from "#lib/model-pricing.ts";
 import { m } from "#lib/paraglide/messages.js";
 
 type ModelItem = {
 	provider: string;
 	id: string;
 	model: Record<string, unknown> & { hidden?: boolean };
+	offer?: ModelOffer | null;
 };
 
 type NumericGenerationConstraint = {
@@ -322,37 +330,11 @@ function getModelCost(item: ModelItem): ModelCost | null {
 	return cost && typeof cost === "object" ? (cost as ModelCost) : null;
 }
 
-function formatModelCostValue(value: unknown, locale: Locale): string | null {
-	if (typeof value !== "number" || !Number.isFinite(value) || value === 0)
-		return null;
-	const magnitude = Math.abs(value);
-	if (magnitude < 0.01)
-		return formatCurrency(value, "USD", {
-			locale,
-			minimumFractionDigits: 4,
-			maximumFractionDigits: 4,
-		});
-	if (magnitude < 1)
-		return formatCurrency(value, "USD", {
-			locale,
-			minimumFractionDigits: 2,
-			maximumFractionDigits: 2,
-		});
-	// Whole-dollar values drop fractional digits; otherwise keep 2 decimals.
-	if (value === Math.floor(value))
-		return formatCurrency(value, "USD", {
-			locale,
-			minimumFractionDigits: 0,
-			maximumFractionDigits: 0,
-		});
-	return formatCurrency(value, "USD", {
-		locale,
-		minimumFractionDigits: 2,
-		maximumFractionDigits: 2,
-	});
-}
-
-function formatModelCost(item: ModelItem, locale: Locale): string {
+function formatModelCost(
+	item: ModelItem,
+	locale: Locale,
+	multiplier = 1,
+): string {
 	const cost = getModelCost(item);
 	if (!cost) return "";
 
@@ -362,7 +344,10 @@ function formatModelCost(item: ModelItem, locale: Locale): string {
 		[cost.cacheRead, m.model_cost_cache_read({}, { locale })],
 		[cost.cacheWrite, m.model_cost_cache_write({}, { locale })],
 	].flatMap(([value, label]) => {
-		const formatted = formatModelCostValue(value, locale);
+		const formatted =
+			typeof value === "number"
+				? formatPriceValue(value * multiplier, locale)
+				: null;
 		return formatted ? [`${formatted}/M ${label}`] : [];
 	});
 
@@ -376,34 +361,15 @@ function getGenerationPricing(
 	return pricing && typeof pricing === "object" ? pricing : null;
 }
 
-function formatGenerationPrice(
+function formatGenerationPriceText(
 	model: PublicGenerationDeclaration,
 	locale: Locale,
+	multiplier = 1,
 ): string {
 	const pricing = getGenerationPricing(model);
-	if (!pricing) return "";
-
-	const unit = {
-		image: m.model_price_unit_image({}, { locale }),
-		second: m.model_price_unit_second({}, { locale }),
-		request: m.model_price_unit_request({}, { locale }),
-		"1m_tokens": m.model_price_unit_1m_tokens({}, { locale }),
-	}[pricing.unit];
-
-	const format = (value: number | undefined) =>
-		value === undefined ? null : formatModelCostValue(value, locale);
-
-	const amount = format(pricing.amount);
-	let text = amount ? `${amount} / ${unit}` : "";
-	if (!text) {
-		const min = format(pricing.min);
-		const max = format(pricing.max);
-		if (min && max) text = `${min}\u2013${max} / ${unit}`;
-		else if (min ?? max)
-			text = `${m.model_price_from({}, { locale })} ${min ?? max} / ${unit}`;
-	}
+	const text = formatGenerationPrice(pricing, locale, multiplier);
 	if (!text) return "";
-	return pricing.note ? `${text} \u00b7 ${pricing.note}` : text;
+	return pricing?.note ? `${text} \u00b7 ${pricing.note}` : text;
 }
 
 function getGenerationModelTitle(model: PublicGenerationDeclaration): string {
@@ -1045,7 +1011,9 @@ const hoverCardPos = $derived.by(() => {
 				</div>
 			{:else}
 				{#each filteredModels as item, index (item.provider + "/" + item.id)}
-					{@const costText = formatModelCost(item, locale)}
+					{@const offer = liveOffer(item.offer)}
+					{@const costText = formatModelCost(item, locale, offer?.multiplier ?? 1)}
+					{@const deadline = offer ? offerDeadline(offer, locale) : ""}
 					{@const tLevels = thinkingLevels(item)}
 					{@const showThinking = tLevels.length > 1}
 					{@const tMenuKey = thinkingMenuKey(item)}
@@ -1080,6 +1048,7 @@ const hoverCardPos = $derived.by(() => {
 									<span class="truncate text-[13px] font-medium text-text-primary">
 										{getDisplayName(item)}
 									</span>
+									{#if offer}<OfferBadge {offer} />{/if}
 									{#if hasVision(item)}
 										<Image class="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
 									{/if}
@@ -1087,9 +1056,9 @@ const hoverCardPos = $derived.by(() => {
 										{@render availabilityDot(item.id)}
 									{/if}
 								</div>
-								{#if costText}
+								{#if costText || deadline}
 									<div class="mt-0.5 truncate text-[11px] tabular-nums text-text-tertiary/75">
-										{costText}
+										{[costText, deadline].filter(Boolean).join(" \u00b7 ")}
 									</div>
 								{/if}
 							</button>
@@ -1261,7 +1230,8 @@ const hoverCardPos = $derived.by(() => {
 							/>
 						{/snippet}
 						{#snippet row(model)}
-							{@const priceText = formatGenerationPrice(model, locale)}
+							{@const offer = liveOffer(model.offer)}
+						{@const priceText = formatGenerationPriceText(model, locale, offer?.multiplier ?? 1)}
 							<div class="px-3 py-2 transition-colors duration-100 hover:bg-bg-hover/60">
 								<div class="flex items-start gap-2.5">
 									<input
@@ -1282,6 +1252,7 @@ const hoverCardPos = $derived.by(() => {
 												<div class="flex items-center gap-1.5">
 													<ChevronDown class={`h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationModelExpanded(model.model) ? "rotate-0" : "-rotate-90"}`} />
 													<span class="truncate text-[13px] font-medium text-text-primary">{getGenerationModelTitle(model)}</span>
+												{#if offer}<OfferBadge {offer} />{/if}
 													{#if generationSearchQuery.trim()}<GenerationCategoryIcon category={generationCategoryKey(model)} class="h-3 w-3 shrink-0 text-text-tertiary/80" />{/if}
 													{@render availabilityDot(model.model)}
 												</div>

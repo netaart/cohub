@@ -14,6 +14,12 @@ function generationRun() {
       data: {
         model: "gpt-image-2",
         modelDiscount: { multiplier: 0, resolvedAt: "2026-07-13T00:00:00.000Z" },
+        pricing: {
+          resolvedAt: "2026-07-13T00:00:00.000Z",
+          personal: { multiplier: 0, source: "benefit", key: "max_model_discount_v1" },
+          spaceWallet: { multiplier: 1, source: null, key: null },
+          quota: { ruleKey: "daily-video", tokenType: "video_second", requested: 10, covered: 6 },
+        },
         reserveHold: { payer: { type: "personal", id: "creator_1" }, amountUsd: 5.7 },
       },
     },

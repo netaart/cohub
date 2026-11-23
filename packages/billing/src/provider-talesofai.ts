@@ -85,7 +85,6 @@ import {
   type BillingUsageRecordResult,
   type BillingUserRef,
 } from "./interfaces.js";
-import { resolveGenerationModelDiscount } from "./generation-usage.js";
 import type { BillingClientConfig } from "./types.js";
 import { checkoutLockRedisRef } from "./runtime.js";
 
@@ -2745,21 +2744,71 @@ export function createTalesofaiBillingOperations(
       return getStateAfterEnsure(input.userId);
     },
 
-    async getGenerationModelDiscount(input) {
+    async getActiveBenefits(input) {
       await ensureCustomer({ userId: input.userId });
       const response = await sdk.admin.customers.getEntitlements({
         external_user_id: input.userId,
         business_key: businessKey,
       });
-      return resolveGenerationModelDiscount({
-        model: input.model,
-        entitlements: response.active_benefits.map((benefit) => ({
-          benefitKey: benefit.benefit_key,
-          enabled: benefit.config.metadata.enabled !== false,
-          metadata: benefit.config.metadata,
-          grantId: benefit.grant_id,
-        })),
-      });
+      return response.active_benefits.map((benefit) => ({
+        benefitKey: benefit.benefit_key,
+        enabled: benefit.config.metadata.enabled !== false,
+        metadata: benefit.config.metadata,
+        grantId: benefit.grant_id,
+      }));
+    },
+
+    async getQuotaStatus(input) {
+      const state = await getCustomerCreditsOrEmpty({ sdk, businessKey, userId: input.userId });
+      const summary = state?.credits.find((credit) => credit.tokenType === input.tokenType);
+      const balance = Math.max(0, summary?.netBalance ?? 0);
+      if (!input.grants || !state) return { tokenType: input.tokenType, balance, grants: [] };
+      const grants = await listAllCreditGrants({ userId: input.userId, tokenType: input.tokenType, status: "active" });
+      return {
+        tokenType: input.tokenType,
+        balance,
+        grants: grants
+          .filter((grant) => grant.available_now !== false && grant.remaining_amount > 0)
+          .map((grant) => ({
+            benefitName: resolveCreditGrantBenefitName(grant),
+            remaining: grant.remaining_amount,
+            original: typeof grant.original_amount === "number" ? grant.original_amount : null,
+            expiresAt: grant.expires_at ?? null,
+          })),
+      };
+    },
+
+    async consumeQuota(input) {
+      if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new Error("Quota amount must be a positive integer");
+      await ensureCustomer({ userId: input.userId });
+      const response = await sdk.admin.credits.consume(
+        {
+          business_key: businessKey,
+          external_user_id: input.userId,
+          token_type: input.tokenType,
+          amount: input.amount,
+          source_type: "usage",
+          source_id: input.sourceId,
+          usage_type: input.usageType,
+          operation_id: input.operationId,
+          reason: input.reason,
+        },
+        { idempotencyKey: input.operationId },
+      );
+      return { amount: input.amount, overage: Math.min(input.amount, response.overage?.original_amount ?? 0) };
+    },
+
+    async reverseQuota(input) {
+      const receipt = await sdk.admin.credits.reverseConsume({
+        business_key: businessKey,
+        external_user_id: input.userId,
+        token_type: input.tokenType,
+        original_operation_id: input.originalOperationId,
+        operation_id: input.operationId,
+        amount: input.amount,
+        reason: input.reason.slice(0, 1024),
+      }, { idempotencyKey: input.operationId });
+      return { amount: receipt.amount, overageCancelled: receipt.open_overage_cancelled_amount };
     },
 
     async getCreditStatus(
