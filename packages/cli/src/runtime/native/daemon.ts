@@ -184,7 +184,7 @@ export class NativeRuntime {
   async control(action: string, message: Record<string, unknown>): Promise<unknown> {
     if (action === "reload") return await this.reload();
     if (action !== "import") throw new Error("Unknown Runtime control request");
-    if (!this.synced.length) throw new Error("Native sync is not enabled for this directory; run cohub runtime up");
+    if (!this.synced.length) throw new Error(`Native sync is not enabled for ${this.options.root}; run cohub runtime up there`);
     const filter: ImportFilter = {
       ...(Array.isArray(message.harnesses) && message.harnesses.length ? { harnesses: message.harnesses as Harness[] } : {}),
       ...(typeof message.nativeSessionId === "string" && message.nativeSessionId ? { nativeSessionId: message.nativeSessionId } : {}),

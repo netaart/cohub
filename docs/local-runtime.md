@@ -27,6 +27,8 @@ Space after prompting for a name; later starts offer reuse as the default. `-n` 
 now the boolean shorthand for `--new`, not `--name`. Naming uses `--name <name>`.
 Even with `-n`, interactive startup shows an existing binding and recommends reuse.
 An explicit `--space` or `COHUB_SPACE_ID` overrides and updates the directory binding.
+Other commands run in a subdirectory use the nearest bound directory, like Git; a nested
+binding overrides its parent. `runtime up` itself binds exactly the directory it is given.
 
 What a Runtime runs can always call `cohub`: the Runtime puts its own CLI last on `PATH` (a
 `~/.cache/cohub/cli/<hash>/cohub` launcher), so a `cohub` already there, such as a global install that

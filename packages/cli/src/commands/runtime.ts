@@ -5,7 +5,8 @@ import { createClient } from "../client.js";
 import { json as outJson, jsonRequested } from "../output.js";
 import { currentIdentityKey } from "../space.js";
 import { resolveRuntimeTarget, runtimeUp, parseRuntimeHarnesses, type RuntimeUpOptions } from "../runtime/launch.js";
-import { canonicalRuntimeRoot, findNearestRuntimeSpaceBinding } from "../runtime/space-binding.js";
+import { findNearestRuntimeSpaceBinding } from "../runtime/space-binding.js";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { RuntimeArchiveStore } from "../runtime/archive-store.js";
 import { readNativeConfig, runtimeStateRoot, writeNativeConfig } from "../runtime/native/config.js";
@@ -34,11 +35,16 @@ const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 async function boundRuntime(program: Command, dir: string | undefined, space: string | undefined) {
   const identity = currentIdentityKey();
   if (!identity) throw new Error("Sign in first");
-  const targetDir = await canonicalRuntimeRoot(dir ?? process.cwd());
+  const targetDir = dir ?? process.cwd();
+  if (dir !== undefined && !(await stat(dir)).isDirectory()) throw new Error("Workspace is not a directory");
   const spaceId = await resolveRuntimeTarget(program, space, targetDir);
   const binding = await findNearestRuntimeSpaceBinding(targetDir, identity);
   if (!binding || binding.spaceId !== spaceId) throw new Error("Bind this directory with runtime up first");
-  return { identity, root: binding.root, spaceId, directory: runtimeInstanceDirectory(identity, spaceId) };
+  const directory = runtimeInstanceDirectory(identity, spaceId);
+  // Several checkouts can be bound to one Space, but its running Runtime serves a single root.
+  const running = await requestRuntimeInstance(directory);
+  if (running && running.root !== binding.root) throw new Error(`This Space's Runtime serves ${running.root}; run this command there`);
+  return { identity, root: binding.root, spaceId, directory };
 }
 
 export function registerRuntime(program: Command) {
@@ -89,9 +95,10 @@ export function registerRuntime(program: Command) {
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { harness: string[] }) => {
       try {
-        const { identity, spaceId, directory } = await boundRuntime(program, undefined, options.space);
+        const { identity, root, spaceId, directory } = await boundRuntime(program, undefined, options.space);
         const stateRoot = runtimeStateRoot(spaceId);
         const config = await readNativeConfig(stateRoot, identity);
+        if (config && config.root !== root) throw new Error(`Native sync for this Space was set up in ${config.root}; run this command there`);
         const paused = options.harness.length ? parseRuntimeHarnesses(options.harness) : config?.harnesses ?? [...LOCAL_HARNESSES];
         const harnesses = (config?.harnesses ?? []).filter((harness) => !paused.includes(harness));
         if (config) await writeNativeConfig(stateRoot, { ...config, harnesses, codexShared: harnesses.includes("codex") && config.codexShared });
@@ -128,7 +135,7 @@ export function registerRuntime(program: Command) {
         const filter = { harnesses: options.harness.length ? parseRuntimeHarnesses(options.harness) : [], ...(options.session ? { nativeSessionId: options.session } : {}) };
         const control = async <T>(command: string, timeoutMs = 60_000) => {
           const response = await controlRuntimeInstance(directory, "import", { ...filter, command, concurrency }, timeoutMs);
-          if (!response) throw new Error("Local Runtime is not running; start it with cohub runtime up");
+          if (!response) throw new Error(`Local Runtime is not running; start it with cohub runtime up in ${root}`);
           return response.result as T;
         };
         const plan = await control<ImportPlan>("plan");

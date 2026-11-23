@@ -132,7 +132,6 @@ export function findContainingRuntimeSpaceBinding(
   for (const binding of entries) {
     if (binding.key === key) byRoot.set(binding.root, binding);
   }
-  if (byRoot.size === 0) return null;
 
   let current = normalizeRuntimeRoot(input.cwd);
   while (true) {
@@ -335,13 +334,7 @@ export async function findNearestRuntimeSpaceBinding(
   if (!nonEmptyString(key)) return null;
   const canonicalCwd = await canonicalRuntimeRoot(cwd);
   const file = await readRuntimeSpaceBindings(path);
-  const trimmedKey = key.trim();
-  return (
-    findContainingRuntimeSpaceBinding(file, { cwd: canonicalCwd, key: trimmedKey })
-    ?? (normalizeRuntimeRoot(cwd) !== canonicalCwd
-      ? findContainingRuntimeSpaceBinding(file, { cwd, key: trimmedKey })
-      : null)
-  );
+  return findContainingRuntimeSpaceBinding(file, { cwd: canonicalCwd, key });
 }
 
 /**

@@ -148,6 +148,11 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   if (!options.harness.length) harnesses = await installedHarnesses(root, executables);
   let createNew = Boolean(options.new);
   let name = resolveLocalSpaceName(root, options.name);
+  // Other commands here already resolve to the ancestor's Space, so creating a separate one must not be silent.
+  const ancestor = requested || binding || createNew ? null : await findNearestRuntimeSpaceBinding(root, identity);
+  if (ancestor) {
+    process.stderr.write(`\nParent directory ${ancestor.root} is linked to\n  ${runtimeWebUrl(ancestor.spaceId)}\nThis directory gets its own Space. To use that one, run \`cohub runtime up\` from the parent directory instead.\n`);
+  }
   if (!options.yes) {
     if (!process.stdin.isTTY) throw new Error("Use --yes to authorize local execution");
     const rl = createInterface({ input: process.stdin, output: process.stderr });

@@ -204,7 +204,8 @@ account, and environment in `~/.config/cohub/runtime-spaces.json`. The first sta
 and records a local Space after prompting; later starts recommend reuse. `-n` now means
 `--new` (boolean); use `--name <name>` for naming. An explicit `--space` or `COHUB_SPACE_ID`
 overrides and updates the directory binding. `--yes` accepts defaults and local execution;
-with explicit `--new`, it creates another Space.
+with explicit `--new`, it creates another Space. Other commands run in a subdirectory use
+the nearest bound directory, so a nested binding overrides its parent.
 
 `-d` runs the same supervisor in the background and returns the URL, PID and log location.
 Readiness requires both Harness and files. If it is still starting after 30 seconds, exit
