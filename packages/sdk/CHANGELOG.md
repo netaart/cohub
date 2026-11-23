@@ -1,5 +1,17 @@
 # @neta-art/cohub
 
+## 13.27.0
+
+### Minor Changes
+
+- 66d83ad: Add Antigravity (`agy`) as a local harness: Cohub Turns run on agy's headless stream-json mode, hand over history and continue the same conversation, and terminal and desktop Antigravity chats sync read-only. Deploy API, Gateway and Agent before the CLI.
+- 81065eb: Add pricing offers and quotas: model listings carry the caller's `offer` and generation models a `quota`, `billing.getQuotas()` returns quota balances, and generation billing reports quota coverage. `cohub models ls` shows an Offer column and `cohub generate` prints quota coverage.
+- 84c9a7f: Images and videos take `props.decoration: "card" | "none"`, and frames take a `contentDecoration` the images and videos inside inherit. Bare media draw only the picture, keeping transparency, with no card, tag, play key or placeholder, in every theme and in far views. A script's temporary images and videos are bare by default, so game scenes no longer show photo cards in the pixel themes. `BoardScene.decorated(id)` and `boardItemDecorated(lookup, id)` resolve it for hosts with their own renderers, and `boardMediaActionAt` takes it as an optional `decorated`; the editor's `selectionBare` and `setSelectionBare()` toggle it for frames, images and videos, and the web selection toolbar's "Show contents only" does the same.
+
+### Patch Changes
+
+- 895dd0f: Add `--wait`, `--stream`, `--timeout`, and `--abort-on-timeout` to `cohub prompt`, plus `cohub spaces sessions turns wait` to re-attach to a turn. The SDK no longer logs an error when `disconnect()` cancels an in-flight realtime connect.
+
 ## 13.26.0
 
 ### Minor Changes
