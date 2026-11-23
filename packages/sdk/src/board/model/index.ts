@@ -42,7 +42,6 @@ export * from "./authoring.js";
 export * from "./presets.js";
 export * from "./timeline.js";
 export * from "./media-spans.js";
-export * from "./media-presentation.js";
 export * from "./arrow-geometry.js";
 export * from "./draw-geometry.js";
 export * from "./draw-input.js";

@@ -56,6 +56,12 @@ export function farPictureTone(item: BoardSceneItem, context: BoardRenderContext
 	return (key ? context.assetTone?.(key) : null) ?? undefined;
 }
 
+export function drawFarBarePicture(graphics: Graphics, item: BoardSceneItem, context: BoardRenderContext) {
+	const key = context.assetKey(item);
+	const tone = key ? context.assetTone?.(key) : null;
+	if (key && tone != null && !context.assetCutout?.(key)) drawFarPlate(graphics, item.frame, { fill: tone });
+}
+
 export function drawFarPlate(
 	graphics: Graphics,
 	frame: BoardFrame,

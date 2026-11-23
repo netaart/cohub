@@ -76,9 +76,9 @@ Worth knowing before you build:
   viewer's theme; a fixed CSS color can vanish on one of them. Exports default to
   `--theme dark`; `--theme` takes any built-in theme, such as `light` or `neta-pixel`.
 - Images and videos show as cards of the viewer's theme (`neta-pixel` prints images on
-  photo cards); `props.presentation: "plain"` on the item or a frame draws only the
-  picture, keeping transparency, for scenery and sprites. Temporary script items are
-  plain already.
+  photo cards); `props.decoration: "none"`, or `contentDecoration: "none"` on a frame,
+  draws only the picture, keeping transparency, for scenery and sprites. Temporary
+  script items are bare already; lock scenery viewers should not pick.
 - `boards apply` fits new image and video items to their media's aspect ratio before
   writing; write `snapshot.naturalWidth` and `naturalHeight` to keep a box as authored.
 - `board` sets the background (`color`, `image` and a `dots` or `grid` pattern; omit

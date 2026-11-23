@@ -1,14 +1,13 @@
 import { getMediaResourceTitle } from "../../model/media.js";
-import { boardMediaPresentation } from "../../model/media-presentation.js";
 import type { BoardSceneItem, SceneItem } from "../../model/scene.js";
 import type { BoardVideoItem } from "@cohub/protocol";
 import { Container, Graphics } from "pixi.js";
 import { createCardTag, formatBoardDuration, syncCardTag, type CardTag, zoomCardTag } from "../card-tag.js";
-import { cardElevation, containRect, drawCardSurface, fillCardPicture } from "../surface.js";
+import { SQUARE_PICTURE, cardElevation, containRect, drawCardSurface, fillCardPicture } from "../surface.js";
 import { boardCardDetailed } from "../lod.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
-import { drawFarPlate, farPictureTone } from "./far-plate.js";
+import { drawFarBarePicture, drawFarPlate, farPictureTone } from "./far-plate.js";
 import { drawMediaPlayKey } from "./media-key.js";
 
 type VideoParts = {
@@ -36,8 +35,8 @@ function sync(container: Container, item: SceneItem<BoardVideoItem>, context: Bo
 	const title = videoTitle(item);
 	const durationMs = item.props.snapshot?.durationMs;
 	const duration = durationMs ? formatBoardDuration(durationMs) : "";
-	const plain = boardMediaPresentation(item, (id) => context.scene.get(id)) === "plain";
-	syncCardTag(parts.tag, { glyph: "video", text: plain ? "" : duration ? `${title} · ${duration}` : title, width }, context);
+	const bare = !context.scene.decorated(item.id);
+	syncCardTag(parts.tag, { glyph: "video", text: bare ? "" : duration ? `${title} · ${duration}` : title, width }, context);
 
 	const live = context.mediaTexture?.(item.id) ?? null;
 	const key = context.assetKey(item);
@@ -51,19 +50,19 @@ function sync(container: Container, item: SceneItem<BoardVideoItem>, context: Bo
 		elevation,
 		boardCardDetailed(context.zoom),
 		item.props.time === undefined,
-		plain,
+		bare,
 		context.themeKey,
 	].join("|");
 	if (sig === parts.sig) return;
 	parts.sig = sig;
 
-	const framed = !plain && context.style.media === "framed";
+	const framed = !bare && context.style.media === "framed";
 	const rect = { x: 0, y: 0, width, height };
 	const rail = framed ? Math.min(FILM_RAIL, height / 6) : 0;
 	const screen = { x: framed ? rail * 0.6 : 0, y: rail, width: width - (framed ? rail * 1.2 : 0), height: height - rail * 2 };
 
 	parts.plate.clear();
-	if (!plain) {
+	if (!bare) {
 		drawCardSurface(parts.plate, rect, context.style, {
 			fill: framed ? context.palette.text : context.palette.surface,
 			border: framed ? null : context.palette.border,
@@ -77,12 +76,12 @@ function sync(container: Container, item: SceneItem<BoardVideoItem>, context: Bo
 	if (texture) {
 		const fitted = containRect(screen.width, screen.height, texture.width, texture.height);
 		const picture = { ...fitted, x: screen.x + fitted.x, y: screen.y + fitted.y };
-		fillCardPicture(parts.picture, texture, picture, plain ? { corner: "round", radius: 0 } : framed ? { corner: "round", radius: 1 } : context.style);
+		fillCardPicture(parts.picture, texture, picture, bare ? SQUARE_PICTURE : framed ? { corner: "round", radius: 1 } : context.style);
 	}
 
 	parts.chrome.clear();
 	const detailed = boardCardDetailed(context.zoom);
-	if (detailed && !live && item.props.time === undefined) drawMediaPlayKey(parts.chrome, screen.x + screen.width / 2, screen.y + screen.height / 2, Math.min(18, Math.min(screen.width, screen.height) * 0.16), context);
+	if (detailed && !bare && !live && item.props.time === undefined) drawMediaPlayKey(parts.chrome, screen.x + screen.width / 2, screen.y + screen.height / 2, Math.min(18, Math.min(screen.width, screen.height) * 0.16), context);
 }
 
 function drawFilmRails(graphics: Graphics, width: number, height: number, rail: number, hole: number) {
@@ -123,6 +122,7 @@ export const videoCardRenderer: BoardCardRenderer = {
 	},
 	lod: { kind: "media" },
 	renderFar: (graphics, item, context) => {
+		if (!context.scene.decorated(item.id)) return drawFarBarePicture(graphics, item, context);
 		drawFarPlate(graphics, item.frame, {
 			fill: farPictureTone(item, context) ?? context.palette.surface,
 			fillAlpha: 0.96,

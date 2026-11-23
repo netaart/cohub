@@ -36,6 +36,7 @@ export type BoardScene = {
 	binders(id: string): readonly string[];
 	opacity(id: string): number;
 	shown(id: string): boolean;
+	decorated(id: string): boolean;
 };
 
 const EPSILON = 1e-6;
@@ -130,6 +131,7 @@ export function buildBoardScene(document: BoardDocument, previous?: BoardScene |
 		binders: (id) => binders.get(id) ?? [],
 		opacity: (id) => cumulativeOpacity((key) => items[key], id),
 		shown: (id) => cumulativeOpacity((key) => items[key], id, true) > 0,
+		decorated: (id) => boardItemDecorated((key) => items[key], id),
 	};
 }
 
@@ -144,6 +146,22 @@ function cumulativeOpacity(lookup: BoardItemLookup, id: string, presence = false
 		cursor = item.parent;
 	}
 	return value;
+}
+
+/** Frames and media show their theme decoration unless set to none; media inherit the nearest frame's contentDecoration. */
+export function boardItemDecorated(lookup: BoardItemLookup, id: string): boolean {
+	const item = lookup(id);
+	if (item?.type === "frame") return item.props.decoration !== "none";
+	if (item?.type !== "image" && item?.type !== "video") return true;
+	if (item.props.decoration) return item.props.decoration === "card";
+	let cursor = item.parent;
+	for (let depth = 0; cursor && depth < 64; depth += 1) {
+		const parent = lookup(cursor);
+		if (!parent) break;
+		if (parent.type === "frame" && parent.props.contentDecoration) return parent.props.contentDecoration === "card";
+		cursor = parent.parent;
+	}
+	return true;
 }
 
 export function refreshBoardScene(previous: BoardScene, lookup: BoardItemLookup, ids: Iterable<string>): BoardScene {
@@ -179,6 +197,7 @@ export function refreshBoardScene(previous: BoardScene, lookup: BoardItemLookup,
 		layout,
 		opacity: (id) => cumulativeOpacity(lookup, id),
 		shown: (id) => cumulativeOpacity(lookup, id, true) > 0,
+		decorated: (id) => boardItemDecorated(lookup, id),
 	};
 	refreshed.set(scene, { base, overrides });
 	return scene;

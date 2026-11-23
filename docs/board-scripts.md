@@ -188,9 +188,10 @@ parent and arrow references are remapped by the host. Items without `z` stack in
 declaration order. Only frames contain children. Temporary items cannot attach
 scripts, be selected by the editor, enter clipboard subtrees, or become document
 changes implicitly. Each instance is limited to 1000 temporary items and 1000 hit
-regions, and a scene to 1 MB. Temporary images and videos are drawn plain: only the
-picture, with its transparency, and nothing until it loads, in every theme. Set
-`props.presentation: "card"` on an item or a temporary frame for a gallery of works.
+regions, and a scene to 1 MB. Temporary images and videos are bare: only the picture,
+with its transparency, and nothing until it loads, in every theme. Set
+`props.decoration: "card"` on an item, or `contentDecoration: "card"` on a temporary
+frame, for a gallery of works.
 
 The world layer (the default) inherits the owner's transform. The screen layer,
 `scene(items, { space: "screen" })`, keeps screen-pixel size above every document

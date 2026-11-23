@@ -220,11 +220,6 @@ export function isBoardScriptScreenRoot(id: string): boolean {
   return id.startsWith("~script-") && id.endsWith("-~screen");
 }
 
-/** Whether an item is a script's temporary scene item or one of its layer roots. */
-export function isBoardScriptTemporary(id: string): boolean {
-  return id.startsWith("~script-");
-}
-
 export function scriptTemporaryPrefix(owner: string): string {
   let hash = 2166136261;
   for (const char of owner)
@@ -233,6 +228,7 @@ export function scriptTemporaryPrefix(owner: string): string {
 }
 
 type Layer = { root: string; items: Map<string, BoardItem> };
+const LAYER_PROPS = { decoration: "none", contentDecoration: "none", clip: false } as const;
 type PreparedOutput = {
   document: BoardDocument;
   owner: string;
@@ -379,7 +375,7 @@ export function composeBoardScriptItems(
           type: "frame",
           size: { width: 1, height: 1 },
           z: ROOT_WORLD_Z + rank,
-          props: { decoration: "none", clip: false },
+          props: LAYER_PROPS,
         }));
         for (const [id, item] of prepared.world.items) changes.set(id, item);
       } else if (owned && prepared.world.items.size) {
@@ -394,7 +390,7 @@ export function composeBoardScriptItems(
           opacity: owned.opacity,
           size: { width: Math.max(1, box.width), height: Math.max(1, box.height) },
           z: (owned.z ?? 0) + 0.001,
-          props: { decoration: "none", clip: false },
+          props: LAYER_PROPS,
         }));
         for (const [id, item] of prepared.world.items) changes.set(id, item);
       }
@@ -406,7 +402,7 @@ export function composeBoardScriptItems(
           origin: { x: 0, y: 0 },
           size: { width: 1, height: 1 },
           z: SCREEN_Z + rank,
-          props: { decoration: "none", clip: false },
+          props: LAYER_PROPS,
         }));
         for (const [id, item] of prepared.screen.items) changes.set(id, item);
         screenRoots.set(owner, prepared.screen.root);

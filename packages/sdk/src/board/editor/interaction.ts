@@ -28,7 +28,6 @@ import {
 	type WorldPoint,
 	worldPoint,
 	isBoardDepthLifted,
-	boardMediaPresentation,
 } from "../model/index.js";
 import { CONNECTION_PORT_RADIUS, type ConnectionPort, connectionPorts, connectionPortAt as portAt, portHitRadius } from "./connection-ports.js";
 import type { EditorContext } from "./context.js";
@@ -208,9 +207,7 @@ export function createInteractionModule(ctx: EditorContext) {
 
 	function opensOnTap(item: BoardSceneItem, pointerType = state.hoverPointerType) {
 		const readonly = browsing();
-		const rule = options.activation?.(item, readonly, pointerType)
-			?? (boardMediaPresentation(item, (id) => state.scene.get(id)) === "plain" ? "select" : registry.activation(item, readonly, pointerType));
-		return rule === "tap";
+		return (options.activation?.(item, readonly, pointerType) ?? registry.activation(item, readonly, pointerType)) === "tap";
 	}
 
 	function handPicks(pointerType: string): boolean {

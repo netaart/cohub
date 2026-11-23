@@ -5,6 +5,7 @@ import {
 	type BoardSceneItem,
 	boardAutoplayKind,
 	boardDepthItemOutline,
+	boardItemDecorated,
 	boardDepthRootOf,
 	isBoardDepthLifted,
 	itemBounds,
@@ -27,6 +28,10 @@ export type BoardGrabbed = ReadonlyMap<string, { item: BoardItem; parent: BoardM
 
 const NUDGE_STEP = 1;
 const NUDGE_STEP_LARGE = 10;
+
+function isDecorable(item: BoardItem): boolean {
+	return item.type === "frame" || item.type === "image" || item.type === "video";
+}
 
 export function createSelectionModule(ctx: EditorContext) {
 	const { state, registry } = ctx;
@@ -169,11 +174,11 @@ export function createSelectionModule(ctx: EditorContext) {
 		ctx.document.commitItems(placed(frames));
 	}
 
-	function edit(update: (item: BoardItem) => BoardItem | null, ids = ctx.query.unlockedIds(state.selection)) {
+	function edit(update: (item: BoardItem, id: string) => BoardItem | null, ids = ctx.query.unlockedIds(state.selection)) {
 		const changes = new Map<string, BoardItem>();
 		for (const id of ids) {
 			const item = ctx.document.displayItem(id);
-			const next = item ? update(item) : null;
+			const next = item ? update(item, id) : null;
 			if (next && next !== item) changes.set(id, next);
 		}
 		ctx.document.commitItems(changes);
@@ -203,6 +208,26 @@ export function createSelectionModule(ctx: EditorContext) {
 			const { autoplay: _autoplay, ...rest } = item;
 			return rest as BoardItem;
 		}, autoplayable().map((item) => item.id));
+	}
+
+	const decorable = () => items().filter((item) => !item.locked && isDecorable(item));
+
+	function bare(): boolean | null {
+		const eligible = decorable();
+		return eligible.length > 0 ? eligible.every((item) => !state.scene.decorated(item.id)) : null;
+	}
+
+	function setBare(on: boolean) {
+		edit((item, id) => {
+			if (!isDecorable(item)) return null;
+			const { decoration, ...props } = item.props as { decoration?: string };
+			const reset = { ...item, props } as BoardItem;
+			// Under a frame whose contentDecoration is none, showing a card takes an explicit one.
+			const fallback = !on && !boardItemDecorated((key) => (key === id ? reset : ctx.document.displayItem(key)), id) ? "card" : undefined;
+			const next = on ? "none" : fallback;
+			if (decoration === next) return null;
+			return next ? ({ ...item, props: { ...props, decoration: next } } as BoardItem) : reset;
+		}, decorable().map((item) => item.id));
 	}
 
 	function setColor(color: string) {
@@ -281,6 +306,8 @@ export function createSelectionModule(ctx: EditorContext) {
 		toggleLock,
 		autoplay,
 		setAutoplay,
+		bare,
+		setBare,
 		setColor,
 		setStyle,
 		setProps,

@@ -27,6 +27,8 @@ export function traceCardOutline(
 
 export type CardCrop = { x: number; y: number; w: number; h: number };
 
+export const SQUARE_PICTURE = { corner: "round", radius: 0 } as const;
+
 /**
  * The canvas renderer fills with a repeating pattern, so bilinear samples at the
  * edge would blend in the opposite side. Mapping the picture half a texel inside
