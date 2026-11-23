@@ -1,15 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import * as z from "zod";
-import { APP_BROWSER_SESSION_SECONDS, appReturnPath } from "@cohub/protocol";
+import { APP_BROWSER_SECRET_PATTERN, APP_BROWSER_SESSION_SECONDS, appReturnPath } from "@cohub/protocol";
 import type { Permission } from "@cohub/core/permissions";
 import { APP_SESSION_TTL_SECONDS, createAppSessionToken } from "../app-sessions.js";
 import { redisCommandClient } from "../redis.js";
 import { getExecutionPrincipal, useAccountPrincipal } from "../lib/middleware.js";
 
-const secret = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const secret = z.string().regex(APP_BROWSER_SECRET_PATTERN);
 const target = z.object({ origin: z.string().max(255) });
-const authorize = target.extend({ challenge: secret, returnTo: z.string().max(2048) });
+const authorize = target.extend({ challenge: secret, returnTo: z.string().max(2048), userUuid: z.string().max(64) });
 const exchange = target.extend({ code: secret, verifier: secret });
 const session = target.extend({ session: secret });
 const hash = (value: string) => createHash("sha256").update(value).digest("base64url");
@@ -46,7 +46,8 @@ export function createAppBrowserSessionRouter(resolveApp: (origin: string, id: s
     const id = c.req.param("id");
     const parsed = authorize.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ message: "invalid sign-in request" }, 400);
-    const { origin, challenge, returnTo } = parsed.data;
+    const { origin, challenge, returnTo, userUuid } = parsed.data;
+    if (userUuid !== user.uuid) return c.json({ message: "signed-in account changed", code: "account_changed" }, 409);
     const path = appReturnPath(returnTo, origin);
     if (!path || !(await resolveApp(origin, id))) return c.json({ message: "invalid App destination" }, 403);
     const code = randomSecret();

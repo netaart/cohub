@@ -502,7 +502,7 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
     if (message.type === "cohub.app.context") {
       const app = await this.resolveApp();
       if (!app) return null;
-      if (browserSessionHint()) await this.browserSession(app.id);
+      await this.browserSession(app.id);
       const viewerScopes = Array.from(new Set(this.viewerGrants.flatMap((grant) => grant.scopes)));
       return {
         type: "cohub.app.context.result",

@@ -654,17 +654,24 @@ export const isSigningOut = () => signingOut;
  */
 export const signOut = async (): Promise<void> => {
 	if (typeof window === "undefined") return;
+	signingOut = true;
+	// Sign-out must still succeed locally when the API is unreachable.
+	await import("#lib/sdk.ts")
+		.then(({ sdk }) => sdk.user.revokeAppBrowserSessions())
+		.catch((error) => {
+			console.warn("[auth] Failed to end storefront sign-ins", error);
+		});
 	if ((await readyHost()) && hostOwnsCredentials()) {
 		try {
 			await callHost("auth.signOut");
 			// Match the browser, whose Logto sign-out lands on the home.
 			window.location.replace("/");
 		} catch (error) {
+			signingOut = false;
 			console.error("[auth] Native host failed to sign out", error);
 		}
 		return;
 	}
-	signingOut = true;
 	const postLogoutRedirectUri = `${window.location.origin}/`;
 	try {
 		await getLogtoClient().signOut(postLogoutRedirectUri);

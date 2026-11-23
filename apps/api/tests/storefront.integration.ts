@@ -109,11 +109,13 @@ test("browser sign-in binds a single-use code to the browser, App, origin and re
   const challenge = createHash("sha256").update(verifier).digest("base64url");
   const returnTo = "/items?sort=new#/checkout";
   principal = account("buyer");
-  assert.equal((await post("code", { challenge, returnTo: "https://another.example/" })).status, 403);
+  const userUuid = "buyer";
+  assert.equal((await post("code", { challenge, returnTo: "https://another.example/", userUuid })).status, 403);
+  assert.equal((await post("code", { challenge, returnTo, userUuid: "other" })).status, 409);
   principal = action("buyer");
-  assert.equal((await post("code", { challenge, returnTo })).status, 403);
+  assert.equal((await post("code", { challenge, returnTo, userUuid })).status, 403);
   principal = account("buyer");
-  const authorized = await post("code", { challenge, returnTo });
+  const authorized = await post("code", { challenge, returnTo, userUuid });
   assert.equal(authorized.status, 200);
   const { code } = await authorized.json();
   principal = null;
@@ -140,7 +142,7 @@ test("signing out of Cohub ends existing storefront sessions but not later ones"
     const challenge = createHash("sha256").update(verifier).digest("base64url");
     principal = account("buyer");
     const { code } = await (await api.request(`/apps/${appId}/browser-session/code`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ origin, challenge, returnTo: "/" }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ origin, challenge, returnTo: "/", userUuid: "buyer" }),
     })).json();
     principal = null;
     return (await (await api.request(`/apps/${appId}/browser-session/exchange`, {

@@ -1,4 +1,5 @@
 import {
+	APP_BROWSER_SECRET_PATTERN,
 	APP_BROWSER_SESSION_HINT,
 	APP_BROWSER_SESSION_PATH,
 	APP_BROWSER_SESSION_SECONDS,
@@ -68,7 +69,7 @@ export async function serveAppBrowserSession(input: {
 		);
 		headers.append(
 			"Set-Cookie",
-			setCookie(proofCookie(challenge), verifier, 600),
+			setCookie(proofCookie(challenge), verifier, 1800),
 		);
 		return Response.json({ challenge }, { headers });
 	}
@@ -88,7 +89,10 @@ export async function serveAppBrowserSession(input: {
 	if (action === "callback") {
 		const challenge = url.searchParams.get("challenge") ?? "";
 		const code = url.searchParams.get("code") ?? "";
-		if (!/^[\w-]{43}$/.test(challenge) || !/^[\w-]{43}$/.test(code))
+		if (
+			!APP_BROWSER_SECRET_PATTERN.test(challenge) ||
+			!APP_BROWSER_SECRET_PATTERN.test(code)
+		)
 			return respond(400);
 		const verifier = cookie(request, proofCookie(challenge));
 		const result = verifier ? await call("exchange", { verifier, code }) : null;
@@ -110,7 +114,7 @@ export async function serveAppBrowserSession(input: {
 			returnTo: string;
 		};
 		const path = appReturnPath(returnTo, url.origin);
-		if (!path || !/^[\w-]{43}$/.test(session)) return respond(502);
+		if (!path || !APP_BROWSER_SECRET_PATTERN.test(session)) return respond(502);
 		headers.append("Set-Cookie", setCookie(proofCookie(challenge), "", 0));
 		headers.append(
 			"Set-Cookie",

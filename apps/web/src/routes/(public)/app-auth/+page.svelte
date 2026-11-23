@@ -1,5 +1,6 @@
 <script lang="ts">
 import {
+	APP_BROWSER_SECRET_PATTERN,
 	APP_BROWSER_SESSION_PATH,
 	appReturnPath,
 	isUuid,
@@ -107,7 +108,7 @@ async function init() {
 		(redirect &&
 			(window.top !== window.self ||
 				!returnPath ||
-				!/^[\w-]{43}$/.test(challenge)))
+				!APP_BROWSER_SECRET_PATTERN.test(challenge)))
 	) {
 		fail(m.app_auth_invalid_entry({}, { locale }));
 		return;
@@ -170,7 +171,9 @@ async function init() {
 	}
 
 	if (redirect) {
-		await authStore.ensureLoaded();
+		await authStore.ensureLoaded(true);
+		if (!authStore.userUuid)
+			return fail(m.app_auth_unavailable({}, { locale }));
 		phase = "confirm";
 		return;
 	}
@@ -265,9 +268,16 @@ async function continueSignIn() {
 				origin: openerOrigin,
 				challenge,
 				returnTo: returnPath,
+				userUuid: authStore.userUuid,
 			}),
 		},
 	).catch(() => null);
+	if (response?.status === 409) {
+		// Another tab switched accounts; show the current one before continuing.
+		await authStore.ensureLoaded(true);
+		continuing = false;
+		return;
+	}
 	if (!response?.ok) {
 		continuing = false;
 		return fail(m.app_auth_unavailable({}, { locale }));
@@ -310,7 +320,6 @@ onMount(() => {
 });
 
 onDestroy(() => {
-	if (typeof window === "undefined") return;
 	window.removeEventListener("message", onMessage);
 	window.removeEventListener("pageshow", onPageShow);
 });

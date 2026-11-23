@@ -1,4 +1,4 @@
-import { APP_BROWSER_SESSION_HINT, APP_BROWSER_SESSION_PATH, appReturnPath } from "@cohub/protocol";
+import { APP_BROWSER_SECRET_PATTERN, APP_BROWSER_SESSION_HINT, APP_BROWSER_SESSION_PATH, appReturnPath } from "@cohub/protocol";
 
 function endpoint(appId: string, action: string) {
   return `${APP_BROWSER_SESSION_PATH}/${action}?app=${encodeURIComponent(appId)}`;
@@ -21,7 +21,7 @@ export async function startAppBrowserSignIn(appId: string, brokerOrigin: string,
   const response = await fetch(endpoint(appId, "start"), { method: "POST", credentials: "same-origin", redirect: "error" });
   if (!response.ok) throw new Error("Full-page sign-in is unavailable on this App origin.");
   const { challenge } = await response.json() as { challenge?: string };
-  if (!challenge || !/^[\w-]{43}$/.test(challenge)) throw new Error("Invalid App sign-in challenge.");
+  if (!challenge || !APP_BROWSER_SECRET_PATTERN.test(challenge)) throw new Error("Invalid App sign-in challenge.");
   const url = new URL("/app-auth", brokerOrigin);
   url.search = new URLSearchParams({ app: appId, origin, mode: "redirect", challenge, returnTo: path }).toString();
   window.location.assign(url.href);

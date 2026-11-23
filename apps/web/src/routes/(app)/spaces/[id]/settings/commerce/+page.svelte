@@ -866,7 +866,10 @@ $effect(() => {
 				</section>
 			{/if}
 			{#key spaceId + ":" + (authStore.userUuid ?? "")}
-				{#if authStore.userUuid}<CommerceOrderReport {spaceId} />{/if}
+				{#if authStore.userUuid}
+					<!-- Fetch in parallel, but appear only once the sections above stop moving. -->
+					<div hidden={loading || entitlementLoading}><CommerceOrderReport {spaceId} /></div>
+				{/if}
 			{/key}
 		</div>
 	</main>

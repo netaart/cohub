@@ -1,5 +1,7 @@
 export const APP_BROWSER_SESSION_PATH = "/.well-known/cohub/app-session";
 export const APP_BROWSER_SESSION_SECONDS = 14 * 24 * 60 * 60;
+/** 32 random bytes in base64url: sign-in challenges, codes and session handles. */
+export const APP_BROWSER_SECRET_PATTERN = /^[\w-]{43}$/;
 
 export function appReturnPath(value: string, origin: string): string | null {
 	if (!value || value.length > 2048 || /[\\\r\n]/.test(value)) return null;
