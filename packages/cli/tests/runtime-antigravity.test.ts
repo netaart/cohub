@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { RuntimeExecutionEvent, RuntimeTurnInput } from "@neta-art/cohub";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
 import { RuntimeDiagnostics } from "../src/runtime/diagnostics.js";
-import { antigravityHarness } from "../src/runtime/harnesses/antigravity.js";
+import { antigravityHarness, antigravityModels } from "../src/runtime/harnesses/antigravity.js";
 import {
   acceptsAntigravityDirectory,
   acceptsAntigravityTranscript,
@@ -25,12 +25,13 @@ import { archiveStorageFixture } from "./fixtures/runtime-archive-storage.js";
 import { runtimeProjectionSource } from "./fixtures/runtime-projection-source.js";
 
 const fixture = fileURLToPath(new URL("./fixtures/runtime-antigravity.mjs", import.meta.url));
-const ENV = ["HOME", "ANTIGRAVITY_FIXTURE", "ANTIGRAVITY_FIXTURE_LOG", "PATH"] as const;
+const ENV = ["HOME", "XDG_STATE_HOME", "ANTIGRAVITY_FIXTURE", "ANTIGRAVITY_FIXTURE_LOG", "PATH"] as const;
 
 async function withEnvironment(run: (root: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), "cohub-antigravity-"));
   const previous = Object.fromEntries(ENV.map((key) => [key, process.env[key]]));
   process.env.HOME = join(root, "home");
+  process.env.XDG_STATE_HOME = join(root, "state-home");
   process.env.ANTIGRAVITY_FIXTURE_LOG = join(root, "calls.jsonl");
   delete process.env.ANTIGRAVITY_FIXTURE;
   await chmod(fixture, 0o755);
@@ -54,13 +55,16 @@ test("Antigravity discovery groups effort variants into thinking levels and expl
   assert.deepEqual(catalog.harnesses, ["antigravity"]);
   assert.deepEqual(catalog.models.map((model) => [model.id, model.name, model.provider, model.reasoning]), [
     ["default", "Default", "antigravity", false],
-    ["gemini-4-neon", "Gemini 4 Neon", "google", true],
-    ["gemini-pro-orchestrator", "Orchestrator (Carbon)", "google", false],
-    ["claude-opus-5-5", "Claude Opus 5.5", "anthropic", true],
+    ["gemini-4-neon", "Gemini 4 Neon", "antigravity", true],
+    ["gemini-pro-orchestrator", "Orchestrator (Carbon)", "antigravity", false],
+    ["claude-opus-5-5", "Claude Opus 5.5", "antigravity", true],
   ]);
   assert.equal(catalog.models[1]?.thinkingLevelMap?.high, "high");
   assert.equal(catalog.models[1]?.thinkingLevelMap?.medium, null);
   assert.deepEqual(catalog.approvalModes?.antigravity, ["inherit", "full_access", "read_only"]);
+
+  // The docs align the columns with spaces; a pipe gets tabs.
+  assert.deepEqual(antigravityModels("Fetching available models...\ngemini-3.8-flash-high    Gemini 3.8 Flash (High)\ngemini-3.8-flash-low     Gemini 3.8 Flash (Low)\n").map((model) => model.id), ["default", "gemini-3.8-flash"]);
 
   for (const [mode, reason] of [["signed-out", /Please sign in to view available models/], ["old", /missing --settings/]] as const) {
     process.env.ANTIGRAVITY_FIXTURE = mode;
@@ -74,7 +78,14 @@ test("Antigravity discovery groups effort variants into thinking levels and expl
 test("Antigravity Turns hand over history, resume by conversation, enforce read-only and stop", () => withEnvironment(async (root) => {
   const spaceId = randomUUID(), sessionId = randomUUID(), history = randomUUID();
   const source = runtimeProjectionSource();
-  source.addTurn(sessionId, history, { userContent: [{ type: "text", text: "remember fact-one" }], assistantContent: [{ type: "text", text: "noted" }] });
+  source.addTurn(sessionId, history, {
+    userContent: [{ type: "text", text: "remember fact-one" }, { type: "image", source: { type: "base64", media_type: "image/png", data: "aGlzdG9yeQ==" } }],
+    assistantContent: [
+      { type: "tool_use", id: "s1", name: "screenshot", input: {} },
+      { type: "tool_result", tool_use_id: "s1", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "c2hvdA==" } }, { type: "image", source: { type: "url", url: "https://expired.invalid/shot.png" } }] },
+      { type: "text", text: "noted" },
+    ],
+  });
   const storage = await archiveStorageFixture();
   const stateRoot = join(root, "state");
   const native = new NativeRuntime({
@@ -101,15 +112,15 @@ test("Antigravity Turns hand over history, resume by conversation, enforce read-
     const firstResult = await run(first);
     assert.equal(firstResult.event.resume, "handoff");
     assert.equal(firstResult.event.archive, null);
-    assert.deepEqual(firstResult.event.message.content, [{ type: "text", text: "history:fact-one model:gemini-4-neon effort:high skip:false images:1" }]);
-    // Each step's own usage; the result's counts the whole conversation.
-    assert.deepEqual(firstResult.event.message.usage, { input: 10, output: 5, cacheRead: 2, cacheWrite: 0, totalTokens: 17 });
+    assert.deepEqual(firstResult.event.message.content, [{ type: "text", text: "history:fact-one model:gemini-4-neon effort:high skip:false images:3" }]);
+    // Each step's own usage; the result's counts the whole conversation. Cached input is reported apart.
+    assert.deepEqual(firstResult.event.message.usage, { input: 12, output: 5, cacheRead: 2, cacheWrite: 0, totalTokens: 19 });
 
     // Cohub's Turn is named by the step index its run reported, even beside an identical terminal Turn.
     assert.equal(native.executor.ingest.transcriptFor(sessionId, "antigravity", first.turnId)?.throughTurnId, first.turnId);
     const racedTurn = turn(null, [{ type: "text", text: "then-terminal" }], { sessionId: randomUUID() });
     const raced = await run(racedTurn);
-    const [own, terminal] = (await readAntigravityTranscript(raced.session.path, raced.session.nativeSessionId)).turns;
+    const [own, terminal] = (await readAntigravityTranscript(raced.session.path)).turns;
     assert.deepEqual(terminal?.userContent, own?.userContent);
     assert.equal(native.executor.ingest.transcriptFor(racedTurn.sessionId, "antigravity", racedTurn.turnId)?.throughTurnKey, own?.key);
 
@@ -167,6 +178,7 @@ test("Antigravity transcript reader resolves cwd via SQLite, filters subagents, 
 
   const userConv = randomUUID();
   const childConv = randomUUID();
+  const remoteConv = randomUUID();
   const db = new DatabaseSync(join(appDataRoot, "conversation_summaries.db"));
   try {
     db.exec(`CREATE TABLE conversation_summaries (
@@ -177,6 +189,7 @@ test("Antigravity transcript reader resolves cwd via SQLite, filters subagents, 
     )`);
     db.prepare("INSERT INTO conversation_summaries VALUES (?, ?, '', 0)").run(userConv, JSON.stringify([pathToFileURL(project).href]));
     db.prepare("INSERT INTO conversation_summaries VALUES (?, ?, ?, 1)").run(childConv, JSON.stringify([pathToFileURL(project).href]), userConv);
+    db.prepare("INSERT INTO conversation_summaries VALUES (?, ?, '', 0)").run(remoteConv, JSON.stringify(["vscode-remote://ssh-remote+host/home/private", pathToFileURL(project).href]));
   } finally {
     db.close();
   }
@@ -198,6 +211,14 @@ test("Antigravity transcript reader resolves cwd via SQLite, filters subagents, 
   assert.deepEqual(userHeader, { harness: "antigravity", nativeSessionId: userConv, cwd: project, thread: "user" });
   const childHeader = await antigravitySessionHeader(childPath);
   assert.equal(childHeader?.thread, "spawned");
+  // A remote primary workspace names no local project; a later local one does not take over.
+  assert.equal(await antigravitySessionHeader(antigravityTranscriptPath(remoteConv)), null);
+  // A writer holding the database briefly delays the lookup instead of dropping the conversation.
+  const writer = new DatabaseSync(join(appDataRoot, "conversation_summaries.db"));
+  writer.exec("BEGIN EXCLUSIVE");
+  setTimeout(() => writer.exec("COMMIT"), 200);
+  assert.equal((await antigravitySessionHeader(userPath))?.cwd, project);
+  writer.close();
 
   const lines = [
     { step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-21T02:00:00Z", content: "<USER_REQUEST>\ncheck status\n</USER_REQUEST>\n<ADDITIONAL_METADATA>x</ADDITIONAL_METADATA>" },
@@ -213,7 +234,7 @@ test("Antigravity transcript reader resolves cwd via SQLite, filters subagents, 
   await writeFile(userPath, `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`);
   await writeFile(join(appDataRoot, "brain", userConv, ".system_generated", "logs", "transcript_full.jsonl"), `${fullLines.map((l) => JSON.stringify(l)).join("\n")}\n`);
 
-  const parsed = await readAntigravityTranscript(userPath, userConv);
+  const parsed = await readAntigravityTranscript(userPath);
   assert.equal(parsed.cwd, project);
   assert.equal(parsed.turns.length, 1);
   const firstTurn = parsed.turns[0];
@@ -243,7 +264,7 @@ test("Antigravity transcript clears stale result across background wakeups until
     await writeFile(transcriptPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
   };
   const readTurn = async (index = 0) => {
-    const parsed = await readAntigravityTranscript(transcriptPath, convId);
+    const parsed = await readAntigravityTranscript(transcriptPath);
     const turn = parsed.turns[index];
     assert(turn);
     return { parsed, turn };
@@ -354,7 +375,7 @@ test("Antigravity transcript clears pending tool ids and result on mid-turn ERRO
   ];
   await writeFile(transcriptPath, `${lines.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 
-  const parsed = await readAntigravityTranscript(transcriptPath, convId);
+  const parsed = await readAntigravityTranscript(transcriptPath);
   const turn = parsed.turns[0];
   assert(turn);
   assert.equal(turn.messages.length, 3);
@@ -373,69 +394,4 @@ test("Antigravity transcript clears pending tool ids and result on mid-turn ERRO
   assert.equal(retryToolResult.tool_use_id, retryToolUse.id);
   assert.equal(retryToolResult.content, "contents of b.ts");
   assert.equal(turn.result, null);
-}));
-
-test("Antigravity transcript only hydrates transcript_full.jsonl for consumed truncated fields and needed step indices", () => withEnvironment(async (root) => {
-  const appDataRoot = join(root, "home", ".gemini", "antigravity-cli");
-  const convId = randomUUID();
-  const logsDir = join(appDataRoot, "brain", convId, ".system_generated", "logs");
-  const transcriptPath = antigravityTranscriptPath(convId);
-  const fullPath = join(logsDir, "transcript_full.jsonl");
-  await mkdir(logsDir, { recursive: true });
-
-  // 1. Truncated fields we do not consume (and ignored step types) must not hydrate from transcript_full.jsonl.
-  const skippedLines = [
-    { step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-22T04:00:00.000Z", content: "hello" },
-    { step_index: 1, source: "SYSTEM", type: "SYSTEM_MESSAGE", status: "DONE", created_at: "2026-11-22T04:00:01.000Z", content: "truncated sys", truncated_fields: ["content"] },
-    { step_index: 2, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:00:02.000Z", content: "compact reply", truncated_fields: ["metadata"] },
-  ];
-  await writeFile(transcriptPath, `${skippedLines.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
-  await writeFile(
-    fullPath,
-    `${JSON.stringify({ step_index: 2, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:00:02.000Z", content: "SHOULD_NOT_HYDRATE" })}\n`,
-  );
-
-  const skippedParsed = await readAntigravityTranscript(transcriptPath, convId);
-  assert.deepEqual(skippedParsed.turns[0]?.messages[0]?.content, [{ type: "text", text: "compact reply" }]);
-
-  // 2. When consumed fields are truncated, only needed step_index lines are parsed and hydrated.
-  const selectiveLines = [
-    { step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-22T04:01:00.000Z", content: "check full" },
-    { step_index: 1, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:01:01.000Z", thinking: "trunc...", tool_calls: [], truncated_fields: ["thinking", "tool_calls"] },
-    { step_index: 2, source: "MODEL", type: "GENERIC", status: "DONE", created_at: "2026-11-22T04:01:02.000Z", content: "compact tool output" },
-    { step_index: 3, source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:01:03.000Z", content: "trunc...", truncated_fields: ["content"] },
-  ];
-  const fullContent = [
-    // Unneeded step 0 with invalid JSON after prefix is skipped without JSON.parse.
-    '{"step_index":0,"source":"USER_EXPLICIT",NOT_VALID_JSON',
-    JSON.stringify({
-      step_index: 1,
-      source: "MODEL",
-      type: "PLANNER_RESPONSE",
-      status: "DONE",
-      created_at: "2026-11-22T04:01:01.000Z",
-      thinking: "full reasoning trace",
-      tool_calls: [{ name: "run_command", args: { CommandLine: '"ls"' } }],
-    }),
-    // Unneeded step 2 must not replace compact content.
-    JSON.stringify({ step_index: 2, source: "MODEL", type: "GENERIC", status: "DONE", created_at: "2026-11-22T04:01:02.000Z", content: "SHOULD_NOT_REPLACE" }),
-    // Needed step 3 where step_index is not the first JSON property still hydrates via fallback.
-    JSON.stringify({ source: "MODEL", type: "PLANNER_RESPONSE", status: "DONE", created_at: "2026-11-22T04:01:03.000Z", content: "full final answer", step_index: 3 }),
-  ].join("\n");
-
-  await writeFile(transcriptPath, `${selectiveLines.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
-  await writeFile(fullPath, `${fullContent}\n`);
-
-  const selectiveParsed = await readAntigravityTranscript(transcriptPath, convId);
-  const turn = selectiveParsed.turns[0];
-  assert(turn);
-  assert.deepEqual(turn.userContent, [{ type: "text", text: "check full" }]);
-  assert.equal(turn.messages.length, 2);
-  const thinkingBlock = turn.messages[0]?.content.find((block) => block.type === "thinking");
-  const toolUseBlock = turn.messages[0]?.content.find((block) => block.type === "tool_use");
-  const toolResultBlock = turn.messages[0]?.content.find((block) => block.type === "tool_result");
-  assert.equal(thinkingBlock?.type === "thinking" && thinkingBlock.thinking, "full reasoning trace");
-  assert.deepEqual(toolUseBlock?.type === "tool_use" && toolUseBlock.input, { CommandLine: "ls" });
-  assert.equal(toolResultBlock?.type === "tool_result" && toolResultBlock.content, "compact tool output");
-  assert.deepEqual(turn.messages[1]?.content, [{ type: "text", text: "full final answer" }]);
 }));

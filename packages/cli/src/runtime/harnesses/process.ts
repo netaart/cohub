@@ -1,4 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { delimiter, join, resolve, win32 } from "node:path";
 import type { ContentBlock, RuntimeTurnInput } from "@neta-art/cohub";
 import { RpcProcessClosedError, type JsonRpcProcess } from "../json-rpc.js";
@@ -48,6 +50,9 @@ export function harnessCommand(binary: string, args: string[], cwd: string): [st
   throw new Error(`Cannot run ${path} without a shell; pass its executable option with an .exe or Node script`);
 }
 
+/** Private per-user state shared by this machine's Runtimes, outside any harness's own data. */
+export const localStateDirectory = () => join(process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state"), "cohub");
+
 /** Variables a Turn's tools see, so a `cohub` call inside a tool knows where it runs. */
 export const turnEnvironment = (input: RuntimeTurnInput) => ({ COHUB_SPACE_ID: input.spaceId, COHUB_SESSION_ID: input.sessionId, COHUB_TURN_ID: input.turnId });
 
@@ -55,6 +60,17 @@ export async function inlineImage(block: Extract<ContentBlock, { type: "image" }
   if (block.source.type === "base64") return { type: "image" as const, data: block.source.data, mimeType: block.source.media_type };
   const image = await downloadPublicImage(block.source.url);
   return { type: "image" as const, data: Buffer.from(image.bytes).toString("base64"), mimeType: image.mimeType };
+}
+
+export type ImageBlock = Extract<ContentBlock, { type: "image" }>;
+const IMAGE_EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+
+/** An image as a private file `<name>.<ext>` in `directory`, for CLIs that take images by path. */
+export async function writeImage(block: ImageBlock, directory: string, name: string): Promise<string> {
+  const image = await inlineImage(block);
+  const path = join(directory, `${name}.${IMAGE_EXTENSIONS[image.mimeType] ?? "png"}`);
+  await writeFile(path, Buffer.from(image.data, "base64"), { mode: 0o600 });
+  return path;
 }
 
 export function watchHost(host: JsonRpcProcess, diagnostics: RuntimeDiagnostics | undefined, context: RuntimeDiagnosticContext | undefined) {

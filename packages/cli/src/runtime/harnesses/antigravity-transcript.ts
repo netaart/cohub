@@ -1,9 +1,8 @@
 import { createReadStream, existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { createInterface } from "node:readline";
-import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { ContentBlock, NativeTurnMessage } from "@neta-art/cohub";
 import { record, type JsonRecord } from "../json-rpc.js";
@@ -19,8 +18,6 @@ const FULL_TRANSCRIPT_FILE = "transcript_full.jsonl";
 const SUMMARIES_DB = "conversation_summaries.db";
 /** The CLI's own data, then the desktop app's; both keep conversations under `brain/`. */
 const APP_DATA_DIRS = ["antigravity-cli", "antigravity"] as const;
-/** Readers rarely wait in WAL mode; a short timeout keeps a checkpoint from stalling the Runtime. */
-const BUSY_TIMEOUT_MS = 250;
 /** Wraps Cohub history handed to a new conversation inside its first prompt. */
 export const HANDOFF_TAG = "cohub_session_history";
 const USER_REQUEST = /<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/;
@@ -57,12 +54,8 @@ export function acceptsAntigravityDirectory(path: string, root: string, _cwd: st
 }
 
 export function acceptsAntigravityTranscript(path: string, _cwd: string): boolean {
-  if (basename(path) !== TRANSCRIPT_FILE) return false;
-  for (const root of antigravityRoots()) {
-    const parts = brainParts(path, root);
-    if (parts?.length === 4 && parts[1] === SYSTEM_GENERATED && parts[2] === LOGS_DIR && parts[3] === TRANSCRIPT_FILE) return true;
-  }
-  return false;
+  const parsed = parseAntigravityTranscriptPath(path);
+  return Boolean(parsed) && antigravityRoots().includes(join(parsed?.appDataRoot ?? "", "brain"));
 }
 
 /** Extract conversation id and app data root from `<appDataRoot>/brain/<id>/.system_generated/logs/transcript.jsonl`. */
@@ -79,40 +72,30 @@ export function parseAntigravityTranscriptPath(path: string): { nativeSessionId:
   return { nativeSessionId, appDataRoot: dirname(brainDir) };
 }
 
+/** Only a local file URL or absolute path names a project here; a remote workspace never matches one. */
 function uriToPath(value: string): string | null {
   const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("file://")) {
+  if (trimmed.startsWith("file:")) {
     try { return fileURLToPath(trimmed); } catch { return null; }
   }
-  return trimmed;
+  return isAbsolute(trimmed) ? trimmed : null;
 }
 
-function parseWorkspaceCwds(rawUris: unknown): string[] {
-  if (typeof rawUris !== "string" || !rawUris.trim()) return [];
-  const results: string[] = [];
-  const seen = new Set<string>();
-  const add = (value: string) => {
-    const resolved = uriToPath(value);
-    if (resolved && !seen.has(resolved)) {
-      seen.add(resolved);
-      results.push(resolved);
-    }
-  };
+/** The primary workspace: the first entry of `workspace_uris` (a JSON array, or one bare URI). */
+function primaryWorkspace(rawUris: unknown): string | null {
+  if (typeof rawUris !== "string" || !rawUris.trim()) return null;
+  let first: unknown = rawUris;
   try {
     const parsed: unknown = JSON.parse(rawUris);
-    if (Array.isArray(parsed)) {
-      for (const entry of parsed) {
-        if (typeof entry === "string") add(entry);
-      }
-      return results;
-    }
-  } catch {
-    add(rawUris);
-    return results;
-  }
-  return results;
+    first = Array.isArray(parsed) ? parsed[0] : parsed;
+  } catch { /* A bare URI. */ }
+  return typeof first === "string" ? uriToPath(first) : null;
 }
+
+/** Antigravity writes the summaries in WAL mode; a reader is refused only briefly, so it waits without blocking. */
+const BUSY_RETRIES = 20;
+const BUSY_DELAY_MS = 50;
+const busy = (error: unknown) => /SQLITE_BUSY|database is locked/i.test(String((error as { code?: unknown })?.code ?? "") + String((error as Error)?.message ?? ""));
 
 type SummaryRow = {
   workspace_uris?: unknown;
@@ -120,33 +103,35 @@ type SummaryRow = {
   nesting_depth?: unknown;
 };
 
-/** A conversation's workspace and nesting live only in `conversation_summaries.db`; its first workspace owns it. */
+/**
+ * A conversation's workspace and nesting live only in `conversation_summaries.db`; its primary workspace owns
+ * it, and a remote one owns nothing here. Reads never block the Runtime: a database still busy after the
+ * retries throws, so the caller retries or fails instead of taking the conversation as unattributed.
+ * `node:sqlite` loads only when an Antigravity transcript is read.
+ */
 export async function antigravitySessionHeader(path: string): Promise<SessionHeader | null> {
   const parsed = parseAntigravityTranscriptPath(path);
   if (!parsed) return null;
   const dbPath = join(parsed.appDataRoot, SUMMARIES_DB);
   if (!existsSync(dbPath)) return null;
-  let db: DatabaseSync | null = null;
-  try {
-    db = new DatabaseSync(dbPath, { readOnly: true, timeout: BUSY_TIMEOUT_MS });
-    const row = db.prepare(
-      "SELECT workspace_uris, parent_conversation_id, nesting_depth FROM conversation_summaries WHERE conversation_id = ?",
-    ).get(parsed.nativeSessionId) as SummaryRow | undefined;
-    if (!row) return null;
-    const cwd = parseWorkspaceCwds(row.workspace_uris)[0];
-    if (!cwd) return null;
-    const parentId = text(row.parent_conversation_id).trim();
-    const nestingDepth = typeof row.nesting_depth === "number" ? row.nesting_depth : 0;
-    return {
-      harness: "antigravity",
-      nativeSessionId: parsed.nativeSessionId,
-      cwd,
-      thread: parentId || nestingDepth > 0 ? "spawned" : "user",
-    };
-  } catch {
-    return null;
-  } finally {
-    try { db?.close(); } catch { /* ignore close errors */ }
+  const { DatabaseSync } = await import("node:sqlite");
+  for (let attempt = 0; ; attempt++) {
+    let row: SummaryRow | undefined;
+    try {
+      const db = new DatabaseSync(dbPath, { readOnly: true, timeout: 0 });
+      try {
+        row = db.prepare("SELECT workspace_uris, parent_conversation_id, nesting_depth FROM conversation_summaries WHERE conversation_id = ?")
+          .get(parsed.nativeSessionId) as SummaryRow | undefined;
+      } finally { db.close(); }
+    } catch (error) {
+      if (!busy(error) || attempt >= BUSY_RETRIES) throw error;
+      await new Promise((resolve) => setTimeout(resolve, BUSY_DELAY_MS));
+      continue;
+    }
+    const cwd = row && primaryWorkspace(row.workspace_uris);
+    if (!row || !cwd) return null;
+    const nested = Boolean(text(row.parent_conversation_id).trim()) || (typeof row.nesting_depth === "number" && row.nesting_depth > 0);
+    return { harness: "antigravity", nativeSessionId: parsed.nativeSessionId, cwd, thread: nested ? "spawned" : "user" };
   }
 }
 
@@ -171,12 +156,12 @@ function normalizeToolArgs(value: unknown): Record<string, unknown> {
   return out;
 }
 
-/** Antigravity's input tokens include cached ones; Cohub counts them apart. */
+/** Antigravity reports cached input apart from `input_tokens` (which can be far smaller), and leaves it out of its total. */
 export function antigravityUsage(value: unknown): NativeTurnMessage["usage"] {
   const usage = record(value);
   const count = (key: string) => typeof usage[key] === "number" ? usage[key] as number : 0;
   const cacheRead = count("cache_read_tokens");
-  const input = Math.max(0, count("input_tokens") - cacheRead);
+  const input = count("input_tokens");
   const output = count("output_tokens");
   if (!input && !output && !cacheRead) return undefined;
   return { input, output, cacheRead, cacheWrite: 0, totalTokens: input + output + cacheRead };
@@ -207,7 +192,6 @@ async function loadFullRecords(
   if (!neededSteps.size) return byStep;
   signal?.throwIfAborted();
   const fullPath = join(dirname(transcriptPath), FULL_TRANSCRIPT_FILE);
-  if (!existsSync(fullPath)) return byStep;
   const stream = createReadStream(fullPath, { encoding: "utf8", signal });
   const rl = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
   try {
@@ -236,19 +220,13 @@ async function loadFullRecords(
   return byStep;
 }
 
-export function antigravityReplyEnded(turn: NativeTranscriptTurn): boolean {
-  if (!turn.result) return false;
-  const last = turn.messages.at(-1);
-  return Boolean(last?.stopReason && last.stopReason !== "tool_use");
-}
-
 /**
  * Parse Antigravity's `transcript.jsonl` into Cohub Turns.
  * Each `USER_INPUT` (from `USER_EXPLICIT` or non-system source) starts a Turn, keyed by the file's
  * running checksum through that line. `PLANNER_RESPONSE` lines form assistant messages (with optional
  * `thinking`, `content`, and `tool_calls`), and subsequent `GENERIC` lines attach `tool_result` blocks.
  */
-export async function readAntigravityTranscript(path: string, nativeSessionId: string, signal?: AbortSignal): Promise<NativeTranscript> {
+export async function readAntigravityTranscript(path: string, signal?: AbortSignal): Promise<NativeTranscript> {
   const read = await readChainedLines(path, signal);
   const modified = (await stat(path)).mtime.toISOString();
   const header = await antigravitySessionHeader(path);
@@ -258,17 +236,13 @@ export async function readAntigravityTranscript(path: string, nativeSessionId: s
       neededSteps.add(line.value.step_index);
     }
   }
-  const fullRecords = neededSteps.size ? await loadFullRecords(path, neededSteps, signal) : null;
+  const fullRecords = await loadFullRecords(path, neededSteps, signal);
   const turns: NativeTranscriptTurn[] = [];
   let current: NativeTranscriptTurn | null = null;
   let pendingToolIds: string[] = [];
 
   for (const line of read.lines) {
-    let value = line.value;
-    if (fullRecords && needsHydration(value) && typeof value.step_index === "number") {
-      const full = fullRecords.get(value.step_index);
-      if (full) value = full;
-    }
+    const value = (typeof line.value.step_index === "number" && fullRecords.get(line.value.step_index)) || line.value;
 
     const type = text(value.type);
     const source = text(value.source);
@@ -369,7 +343,7 @@ export async function readAntigravityTranscript(path: string, nativeSessionId: s
   }
 
   return {
-    nativeSessionId,
+    nativeSessionId: parseAntigravityTranscriptPath(path)?.nativeSessionId ?? "",
     cwd: header?.cwd ?? "",
     turns,
     prefixes: read.prefixes,

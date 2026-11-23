@@ -21,18 +21,16 @@ import {
   acceptsAntigravityDirectory,
   acceptsAntigravityTranscript,
   antigravityCliDir,
-  antigravityReplyEnded,
   antigravityRoots,
   antigravitySessionHeader,
   antigravityStepStart,
   antigravityTranscriptPath,
   antigravityUsage,
   HANDOFF_TAG,
-  parseAntigravityTranscriptPath,
   readAntigravityTranscript,
 } from "./antigravity-transcript.js";
 import { projectChainedSession } from "./chained-projection.js";
-import { array, closeHost, harnessCommand, inlineImage, missing, text, turnEnvironment, watchHost } from "./process.js";
+import { array, closeHost, harnessCommand, type ImageBlock, localStateDirectory, missing, text, turnEnvironment, watchHost, writeImage } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn, LocalHarnessAdapter } from "./types.js";
 
 const BINARY = "agy";
@@ -49,7 +47,6 @@ const ABORT_ESCALATION_MS = 5_000;
 /** After input closes, the CLI finishes writing its transcript; it is reaped when it does not exit by then. */
 const FLUSH_TIMEOUT_MS = 10_000;
 const MAX_HANDOFF_CHARS = 80_000;
-const IMAGE_EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 /**
  * Deny rules win over every mode, allow rule and `--dangerously-skip-permissions`. `--settings` replaces
  * the user's own deny list, so a read-only Turn carries it along.
@@ -71,17 +68,12 @@ function commandError(error: unknown): Error {
   return new Error(line?.replace(/^error:\s*/i, "") || output.message || "agy failed");
 }
 
-function modelProvider(id: string): string {
-  if (id.startsWith("gemini-")) return "google";
-  if (id.startsWith("claude-")) return "anthropic";
-  return PROVIDER;
-}
-
 /** One Cohub model per base slug; its effort variants become thinking levels passed as `--effort`. */
 export function antigravityModels(listing: string): HarnessModel[] {
   const groups = new Map<string, { name: string; levels: ModelThinkingLevel[] }>();
   for (const line of listing.split("\n")) {
-    const [slug = "", name = ""] = line.trim().split("\t").map((part) => part.trim());
+    // Columns are tab-separated when piped; the docs show them aligned with spaces.
+    const [slug = "", name = ""] = line.trim().split(/\t|\s{2,}/).map((part) => part.trim());
     if (!slug || !name) continue;
     const effort = EFFORT_SUFFIX.exec(slug);
     const id = (effort ? slug.slice(0, -effort[0].length) : slug).slice(0, 255);
@@ -93,7 +85,7 @@ export function antigravityModels(listing: string): HarnessModel[] {
   return [
     { harness: "antigravity", provider: PROVIDER, id: DEFAULT_MODEL, name: "Default", isDefault: true, reasoning: false },
     ...[...groups].map(([id, { name, levels }]): HarnessModel => ({
-      harness: "antigravity", provider: modelProvider(id), id, name,
+      harness: "antigravity", provider: PROVIDER, id, name,
       ...(levels.length ? { reasoning: true, thinkingLevelMap: thinkingLevelMapFor((level) => levels.includes(level) ? level : null) } : { reasoning: false }),
     })),
   ];
@@ -153,11 +145,10 @@ export function antigravityTranslator(emit: (event: RuntimeExecutionEvent) => vo
     const info = record(step.tool_info);
     const id = `agy-step-${Number(step.step_index)}`;
     const use: ContentBlock = { type: "tool_use", id, name: text(info.name) || text(step.tool_name) || "tool", input: record(info.parameters) };
-    const at = message.content.findIndex((block) => block.type === "tool_use" && block.id === id);
-    if (at >= 0) message.content[at] = use;
-    else message.content.push(use);
+    let index = message.content.findIndex((block) => block.type === "tool_use" && block.id === id);
+    if (index < 0) index = message.content.push(use) - 1;
+    else message.content[index] = use;
     if (text(step.state) === "DONE") {
-      const index = message.content.findIndex((block) => block.type === "tool_use" && block.id === id);
       const next = message.content[index + 1];
       const result: ContentBlock = { type: "tool_result", tool_use_id: id, content: toolOutput(info), is_error: Boolean(info.error) };
       message.content.splice(index + 1, next?.type === "tool_result" && next.tool_use_id === id ? 1 : 0, result);
@@ -208,20 +199,26 @@ export function antigravityTranslator(emit: (event: RuntimeExecutionEvent) => vo
   };
 }
 
-/** Projected Cohub history, read once and removed: it is handed over inside the first prompt. */
-async function readHandoff(path: string): Promise<string | null> {
-  const raw = await readFile(path, "utf8").catch(() => "");
-  await rm(path, { force: true }).catch(() => undefined);
-  const lines = raw.split("\n").flatMap((entry) => {
-    try {
-      const value = record(JSON.parse(entry));
-      return text(value.role) && text(value.text) ? [`[${text(value.role)}]\n${text(value.text)}`] : [];
-    } catch { return []; }
-  });
+/**
+ * Projected Cohub history, read once and removed: it is handed over inside the first prompt. A projection
+ * that cannot be read fails the Turn rather than starting the conversation without its history.
+ */
+async function readHandoff(path: string, directory: () => Promise<string>): Promise<string | null> {
+  const raw = await readFile(path, "utf8");
+  await rm(path, { force: true });
+  const lines: string[] = [];
+  let images = 0;
+  for (const entry of raw.split("\n").filter((line) => line.trim())) {
+    const value = record(JSON.parse(entry));
+    const attached: string[] = [];
+    for (const block of array(value.images) as ImageBlock[]) attached.push(`[image: ${await writeImage(block, await directory(), `history-image-${++images}`)}]`);
+    const body = [text(value.text), ...attached].filter(Boolean).join("\n");
+    if (text(value.role) && body) lines.push(`[${text(value.role)}]\n${body}`);
+  }
   if (!lines.length) return null;
   const joined = lines.join("\n\n");
   const clipped = joined.length > MAX_HANDOFF_CHARS ? `...(earlier history truncated)\n\n${joined.slice(-MAX_HANDOFF_CHARS)}` : joined;
-  return `<${HANDOFF_TAG}>\nEarlier turns of this Cohub chat, before it continued in Antigravity:\n\n${clipped}\n</${HANDOFF_TAG}>`;
+  return `<${HANDOFF_TAG}>\nEarlier turns of this Cohub chat, before it continued in Antigravity (open listed images with read_file):\n\n${clipped}\n</${HANDOFF_TAG}>`;
 }
 
 function summarizeBlocks(blocks: ContentBlock[]): string {
@@ -237,16 +234,13 @@ function summarizeBlocks(blocks: ContentBlock[]): string {
   return parts.join("\n");
 }
 
-/** Stream-json input takes text only; images go beside it as files, which `read_file` shows the model. */
+/** Stream-json input takes text only; images go beside the prompt as files, which `read_file` shows the model. */
 async function prompt(input: RuntimeTurnInput, directory: () => Promise<string>, handoff: string | null): Promise<string> {
   const parts: string[] = [];
   const images: string[] = [];
   for (const block of input.messages.flatMap((message) => message.content)) {
-    if (block.type !== "image") { parts.push(block.type === "text" ? block.text : JSON.stringify(block)); continue; }
-    const image = await inlineImage(block);
-    const path = join(await directory(), `image-${images.length + 1}.${IMAGE_EXTENSIONS[image.mimeType] ?? "png"}`);
-    await writeFile(path, Buffer.from(image.data, "base64"), { mode: 0o600 });
-    images.push(path);
+    if (block.type === "image") images.push(await writeImage(block, await directory(), `image-${images.length + 1}`));
+    else parts.push(block.type === "text" ? block.text : JSON.stringify(block));
   }
   return [
     handoff,
@@ -276,7 +270,7 @@ async function runAntigravity(executor: Executor, turn: HarnessTurn): Promise<Ha
   let created: string | null = null;
   const directory = async () => created ??= await mkdtemp(join(tmpdir(), "cohub-antigravity-"));
   let host: JsonRpcProcess | null = null;
-  const translator = antigravityTranslator(turn.emit, { provider: input.provider || (model ? modelProvider(model) : PROVIDER), model });
+  const translator = antigravityTranslator(turn.emit, { provider: input.provider || PROVIDER, model });
   let message: RuntimeMessage = { ordinal: 0, content: [] };
   let begun = false;
   let before = 0;
@@ -326,7 +320,7 @@ async function runAntigravity(executor: Executor, turn: HarnessTurn): Promise<Ha
         prepared = await prepare(() => false);
       }
       session = { ...prepared.session, nativeSessionId: conversation, path: antigravityTranscriptPath(conversation) };
-      const handoff = prepared.resume === "handoff" ? await readHandoff(prepared.session.path) : null;
+      const handoff = prepared.resume === "handoff" ? await readHandoff(prepared.session.path, directory) : null;
       const content = await prompt(input, directory, handoff);
       before = prepared.resume === "native" ? await stat(session.path).then((info) => info.size, () => 0) : 0;
       signal.throwIfAborted();
@@ -369,7 +363,7 @@ async function runAntigravity(executor: Executor, turn: HarnessTurn): Promise<Ha
   host?.endInput();
   await host?.exited(FLUSH_TIMEOUT_MS);
   if (created) await rm(created, { recursive: true, force: true }).catch(() => undefined);
-  const transcript = await readAntigravityTranscript(session.path, session.nativeSessionId).catch(() => null);
+  const transcript = await readAntigravityTranscript(session.path).catch(() => null);
   if (transcript) {
     // The run reported the step index of its prompt, which names Cohub's Turn in the file exactly. Without
     // it the server has the file through the Turns before this run; terminal Turns after them still sync.
@@ -398,11 +392,14 @@ export const antigravityHarness: LocalHarnessAdapter = {
   run: runAntigravity,
   session: {
     // Only a staging file: projected history is handed over inside the first prompt, never as Antigravity's own state.
-    path: (nativeSessionId) => join(tmpdir(), "cohub-antigravity-handoff", `${nativeSessionId}.jsonl`),
+    path: (nativeSessionId) => join(localStateDirectory(), "antigravity-handoff", `${nativeSessionId}.jsonl`),
     startsWithoutFile: true,
     project: (input) => projectChainedSession(input, "antigravity", { id: "cohubId", parent: "cohubParentId" }, (segment) => {
       const summary = summarizeBlocks(segment.blocks);
-      return summary ? [{ role: segment.role, text: summary }] : [];
+      // Embedded images, uploaded or returned by a tool; URL images are omitted, as for Cursor, rather than fetched.
+      const images = segment.blocks.flatMap((block) => block.type === "tool_result" && Array.isArray(block.content) ? block.content : [block])
+        .filter((block) => block.type === "image" && block.source.type === "base64");
+      return summary || images.length ? [{ role: segment.role, text: summary, ...(images.length ? { images } : {}) }] : [];
     }),
     rebind: (records) => records,
   },
@@ -411,10 +408,11 @@ export const antigravityHarness: LocalHarnessAdapter = {
     acceptsDirectory: acceptsAntigravityDirectory,
     acceptsTranscript: acceptsAntigravityTranscript,
     header: (path) => antigravitySessionHeader(path),
-    read: (path, signal) => readAntigravityTranscript(path, parseAntigravityTranscriptPath(path)?.nativeSessionId ?? "", signal),
+    read: readAntigravityTranscript,
     boundaries: ['"type":"USER_INPUT"', '"type":"PLANNER_RESPONSE"'],
     turnEndRecorded: false,
-    replyEnded: antigravityReplyEnded,
+    // The reader sets a result only once a final, tool-free reply is done.
+    replyEnded: (turn) => turn.result !== null,
     userFinalMarked: false,
     globalTurnKeys: false,
     marksCohubTurns: false,

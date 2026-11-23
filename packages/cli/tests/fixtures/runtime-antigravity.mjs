@@ -109,7 +109,7 @@ input.on("line", (line) => {
       process.exit(130);
     }
     const history = /<cohub_session_history>([\s\S]*?)<\/cohub_session_history>/.exec(content)?.[1] ?? "";
-    const images = [...content.matchAll(/^- (.+image-\d+\.\w+)$/gm)].filter((match) => existsSync(match[1])).length;
+    const images = [...content.matchAll(/(?:^- |\[image: )(\S+image-\d+\.\w+)/gm)].filter((match) => existsSync(match[1])).length;
     const facts = [...history.matchAll(/fact-\w+/g)].map((match) => match[0]).join(",") || "none";
     const answer = { response: reply(`history:${facts} model:${flag("--model") ?? "default"} effort:${flag("--effort") ?? "none"} skip:${skip} images:${images}`) };
     result(answer);

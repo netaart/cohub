@@ -148,8 +148,8 @@ cohub -s home spaces files ls
 
 ## Local Runtime
 
-Connect one local workspace to a Space and select Pi, Codex, Claude Code, WorkBuddy or Cursor per turn.
-Terminal conversations of every harness sync to the Space; Claude Code (`claude`), WorkBuddy (`codebuddy`) and Cursor (`cursor-agent`) sync read-only.
+Connect one local workspace to a Space and select Pi, Codex, Claude Code, WorkBuddy, Cursor or Antigravity per turn.
+Terminal conversations of every harness sync to the Space; Claude Code (`claude`), WorkBuddy (`codebuddy`), Cursor (`cursor-agent`) and Antigravity (`agy`) sync read-only.
 Without `--harness`, every installed harness is tried; one that cannot start is skipped with a warning.
 
 To keep using native terminals with ordinary Cohub Chats / Turns:
@@ -193,7 +193,7 @@ are never uploaded automatically. Use `runtime logs --json` to export a failure 
 events carry the local `runtimeId` plus server `requestId` / `traceparent` when a turn has
 reached the Agent trace.
 
-The Runtime uses WebSockets, native Pi RPC / Codex app-server / Claude Code and Cursor stream-json, and existing cloud
+The Runtime uses WebSockets, native Pi RPC / Codex app-server / Claude Code, Cursor and Antigravity stream-json, and existing cloud
 streaming. Local executables and credentials are required. `sandbox up` has been
 removed. Reconnection and result reconciliation are automatic; no recovery command is needed.
 When a result genuinely cannot be determined, the affected Chat offers an explicit stop
