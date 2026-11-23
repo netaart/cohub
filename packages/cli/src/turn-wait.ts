@@ -1,14 +1,19 @@
-import type {
-  SessionSubscriptionHandlers,
-  SessionTurnRecord,
-  SessionTurnResponse,
-  WebSocketConnectionState,
+import {
+  HttpError,
+  type ContentBlock,
+  type GenerationStreamSubscribeOptions,
+  type GenerationStreamSubscriptionHandlers,
+  type SessionSubscriptionHandlers,
+  type SessionTurnRecord,
+  type SessionTurnResponse,
+  type WebSocketConnectionState,
 } from "@neta-art/cohub";
+import { isFetchFailure } from "./network-error.js";
 
-export type SessionTurnStatus = SessionTurnRecord["status"];
-type SessionEvent = Parameters<NonNullable<SessionSubscriptionHandlers["patch"]>>[0];
+type SessionTurnStatus = SessionTurnRecord["status"];
+type SessionEvent = Parameters<NonNullable<SessionSubscriptionHandlers["turnUpdated"]>>[0];
 
-export const TERMINAL_TURN_STATUSES = new Set<SessionTurnStatus>([
+const TERMINAL_TURN_STATUSES = new Set<SessionTurnStatus>([
   "completed",
   "failed",
   "interrupted",
@@ -24,72 +29,69 @@ const DURATION_UNITS: Record<string, number> = {
   h: 3_600_000,
   d: 86_400_000,
 };
+// setTimeout fires after 1ms for anything longer.
+const MAX_TIMEOUT_MS = 2_147_483_647;
 const DEFAULT_RECONCILE_INTERVAL_MS = 15_000;
+const STOP_REQUEST_TIMEOUT_MS = 10_000;
 const MAX_MERGED_HOPS = 20;
-
-export function isTerminalTurnStatus(status: SessionTurnStatus): boolean {
-  return TERMINAL_TURN_STATUSES.has(status);
-}
 
 /** Parse a positive wait duration such as `90s`, `10m`, `2h`, `5000ms`, or plain seconds `60`. */
 export function parseWaitTimeout(value: string): number {
   const match = DURATION_RE.exec(value.trim());
-  if (!match) {
-    throw new Error("Use a positive duration such as 90s, 10m, or 2h.");
-  }
-  const amount = Number(match[1]);
-  const unit = (match[2] ?? "s").toLowerCase();
-  const ms = amount * (DURATION_UNITS[unit] ?? 1_000);
-  if (!Number.isSafeInteger(ms) || ms <= 0) {
-    throw new Error("Use a positive duration such as 90s, 10m, or 2h.");
+  const ms = match ? Number(match[1]) * (DURATION_UNITS[(match[2] ?? "s").toLowerCase()] ?? 1_000) : Number.NaN;
+  if (!Number.isSafeInteger(ms) || ms <= 0 || ms > MAX_TIMEOUT_MS) {
+    throw new Error("Use a positive duration up to 24d, such as 90s, 10m, or 2h.");
   }
   return ms;
 }
 
-export class TurnWaitTimeoutError extends Error {
-  readonly spaceId: string;
-  readonly sessionId: string;
-  readonly turnId: string;
-  readonly timeoutMs: number;
-  readonly abortedCloudTurn: boolean;
+type TurnRef = { spaceId: string; sessionId: string; turnId: string };
 
-  constructor(input: {
-    spaceId: string;
-    sessionId: string;
-    turnId: string;
-    timeoutMs: number;
-    abortedCloudTurn: boolean;
-  }) {
-    super(`Timed out waiting for turn ${input.turnId} after ${input.timeoutMs}ms`);
+/** Lowercase hyphenated form, so short or uppercase IDs still match server records. */
+export function canonicalId(value: string): string {
+  const id = value.trim().toLowerCase();
+  return /^[0-9a-f]{32}$/.test(id) ? `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}` : id;
+}
+
+export class TurnWaitTimeoutError extends Error {
+  readonly ref: TurnRef;
+  readonly timeoutMs: number;
+  /** The server accepted the stop request. */
+  readonly abortedCloudTurn: boolean;
+  /** Why a requested stop did not go through. */
+  readonly abortError: string | null;
+
+  constructor(ref: TurnRef, input: { timeoutMs: number; abortedCloudTurn: boolean; abortError: string | null }) {
+    super(`Timed out waiting for turn ${ref.turnId} after ${input.timeoutMs}ms`);
     this.name = "TurnWaitTimeoutError";
-    this.spaceId = input.spaceId;
-    this.sessionId = input.sessionId;
-    this.turnId = input.turnId;
+    this.ref = ref;
     this.timeoutMs = input.timeoutMs;
     this.abortedCloudTurn = input.abortedCloudTurn;
+    this.abortError = input.abortError;
   }
 }
 
 export class TurnWaitAbortedError extends Error {
-  readonly spaceId: string;
-  readonly sessionId: string;
-  readonly turnId: string;
+  readonly ref: TurnRef;
+  /** Interrupted after the timeout had already sent a stop request. */
+  readonly stopRequested: boolean;
 
-  constructor(input: { spaceId: string; sessionId: string; turnId: string }) {
-    super(`Stopped waiting for turn ${input.turnId}`);
+  constructor(ref: TurnRef, stopRequested = false) {
+    super(`Stopped waiting for turn ${ref.turnId}`);
     this.name = "TurnWaitAbortedError";
-    this.spaceId = input.spaceId;
-    this.sessionId = input.sessionId;
-    this.turnId = input.turnId;
+    this.ref = ref;
+    this.stopRequested = stopRequested;
   }
 }
 
 export type TurnWaitSessionClient = {
   subscribe(handlers: SessionSubscriptionHandlers): () => void;
+  subscribeGeneration(handlers: GenerationStreamSubscriptionHandlers, options?: GenerationStreamSubscribeOptions): () => void;
   turns: {
     get(turnId: string, request?: { signal?: AbortSignal }): Promise<SessionTurnResponse>;
   };
   abort(options?: { turnId?: string | null }): Promise<{ ok: true }>;
+  cancelTurn(turnId: string): Promise<unknown>;
 };
 
 export type TurnWaitClient = {
@@ -106,8 +108,11 @@ export type TurnWaitResult = {
   turnId: string;
   resolvedTurnId: string;
   mergedChain: string[];
-  turn: SessionTurnRecord;
+  /** Final HTTP state of the resolved turn, with its session and billing. */
+  response: SessionTurnResponse;
   streamedText: boolean;
+  /** The last streamed message matches the final reply, so nothing needs reprinting. */
+  streamComplete: boolean;
 };
 
 export type WaitForTurnOptions = {
@@ -115,6 +120,8 @@ export type WaitForTurnOptions = {
   spaceId: string;
   sessionId: string;
   turnId: string;
+  /** The response that created the turn; it already confirms the session and status. */
+  initial?: SessionTurnResponse;
   timeoutMs?: number;
   abortOnTimeout?: boolean;
   reconcileIntervalMs?: number;
@@ -124,29 +131,19 @@ export type WaitForTurnOptions = {
   onStatus?: (status: SessionTurnStatus, turnId: string) => void;
 };
 
-type PatchOp = { o?: string; p?: string; v?: unknown };
+const textOf = (blocks: readonly ContentBlock[] | null | undefined) =>
+  (blocks ?? []).flatMap((block) => (block.type === "text" && block.text ? [block.text] : [])).join("\n\n");
 
-/** Extract incremental text chunks from a `session.turn.patch` event's `ops` array. */
-export function extractPatchTextDeltas(
-  ops: readonly PatchOp[] | undefined,
-  state: { lastAppendPath: string | null },
-): string[] {
-  const chunks: string[] = [];
-  for (const op of ops ?? []) {
-    if (op.o === "append" && typeof op.v === "string" && op.p?.endsWith("/text")) {
-      state.lastAppendPath = op.p;
-      if (op.v) chunks.push(op.v);
-      continue;
-    }
-    if (op.o === "append" && typeof op.p === "string") {
-      state.lastAppendPath = op.p;
-      continue;
-    }
-    if (!op.o && !op.p && typeof op.v === "string" && state.lastAppendPath?.endsWith("/text")) {
-      if (op.v) chunks.push(op.v);
-    }
-  }
-  return chunks;
+/** The final reply with its formatting; `assistantText` is a whitespace-collapsed preview. */
+export const finalReplyText = (turn: SessionTurnRecord) => textOf(turn.assistantContent) || turn.assistantText || "";
+
+const errorStatus = (error: unknown) => (error as { status?: unknown })?.status;
+
+// Only failures that can clear up on their own are retried; auth and other client errors surface at once.
+function isTransientError(error: unknown): boolean {
+  const status = errorStatus(error);
+  if (typeof status === "number") return status === 408 || status === 429 || status >= 500;
+  return isFetchFailure(error);
 }
 
 function eventTurnId(event: SessionEvent): string | null {
@@ -158,6 +155,44 @@ function eventTurnId(event: SessionEvent): string | null {
     return (turn as { id: string }).id;
   }
   return null;
+}
+
+async function withDeadline<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Stop a turn: a queued follow-up is cancelled, an active turn aborted. Returns why it failed, or null. */
+async function stopTurn(session: TurnWaitSessionClient, turnId: string, status: SessionTurnStatus | null): Promise<string | null> {
+  const request = async () => {
+    if (status === "queued") {
+      try {
+        await session.cancelTurn(turnId);
+        return;
+      } catch (error) {
+        if (errorStatus(error) !== 409) throw error;
+        // The turn moved on; only a turn that is now running can still be aborted.
+        const { turn } = await session.turns.get(turnId);
+        if (turn.status === "queued") throw error;
+        if (turn.status === "merged") throw new Error(`Turn was merged into ${turn.summary?.mergedIntoTurnId ?? "another turn"}, which was not stopped`);
+        if (turn.status !== "running" && turn.status !== "abort_requested") throw new Error(`Turn already ${turn.status}`);
+      }
+    }
+    await session.abort({ turnId });
+  };
+  try {
+    await withDeadline(request(), STOP_REQUEST_TIMEOUT_MS, "Stop request timed out");
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 /**
@@ -172,9 +207,7 @@ function eventTurnId(event: SessionEvent): string | null {
 export async function waitForTurn(options: WaitForTurnOptions): Promise<TurnWaitResult> {
   const {
     client,
-    spaceId,
-    sessionId,
-    turnId,
+    initial,
     timeoutMs,
     abortOnTimeout = false,
     reconcileIntervalMs = DEFAULT_RECONCILE_INTERVAL_MS,
@@ -183,6 +216,9 @@ export async function waitForTurn(options: WaitForTurnOptions): Promise<TurnWait
     onTurnMerged,
     onStatus,
   } = options;
+  const spaceId = canonicalId(options.spaceId);
+  const sessionId = canonicalId(options.sessionId);
+  const turnId = canonicalId(options.turnId);
 
   if (signal?.aborted) {
     throw new TurnWaitAbortedError({ spaceId, sessionId, turnId });
@@ -192,28 +228,38 @@ export async function waitForTurn(options: WaitForTurnOptions): Promise<TurnWait
   let currentTurnId = turnId;
   const visited = new Set<string>([turnId]);
   const mergedChain: string[] = [];
-  const patchState = { lastAppendPath: null as string | null };
   let streamedText = false;
-  let lastReportedStatus: SessionTurnStatus | null = null;
+  /** Text printed for the assistant message currently streaming. */
+  let printed = "";
+  /** Assistant message the printed text belongs to, and whether it was rewritten after printing. */
+  let printedMessageId: string | null = null;
+  let diverged = false;
+  const belongsHere = (response: SessionTurnResponse) => response.session.spaceId === spaceId && response.session.id === sessionId;
+  // Nothing is stopped until a response shows the session belongs to `spaceId`.
+  let verified = Boolean(initial && belongsHere(initial) && initial.turn.id === turnId);
+  let lastStatus: SessionTurnStatus | null = verified && initial ? initial.turn.status : null;
 
   return await new Promise<TurnWaitResult>((resolve, reject) => {
     let settled = false;
+    // After the deadline only the stop request or Ctrl-C decide the outcome.
+    let stopping = false;
     let reconciling = false;
     let reconcileQueued = false;
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     let intervalTimer: ReturnType<typeof setInterval> | undefined;
-    let unsubscribeSession: (() => void) | undefined;
-    let unsubscribeConnection: (() => void) | undefined;
+    let unsubscribes: Array<() => void> = [];
 
-    const cleanup = () => {
+    const stopListening = () => {
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (intervalTimer) clearInterval(intervalTimer);
       timeoutTimer = undefined;
       intervalTimer = undefined;
-      unsubscribeSession?.();
-      unsubscribeConnection?.();
-      unsubscribeSession = undefined;
-      unsubscribeConnection = undefined;
+      for (const unsubscribe of unsubscribes) unsubscribe();
+      unsubscribes = [];
+    };
+
+    const cleanup = () => {
+      stopListening();
       signal?.removeEventListener("abort", onAbort);
     };
 
@@ -232,11 +278,11 @@ export async function waitForTurn(options: WaitForTurnOptions): Promise<TurnWait
     };
 
     const onAbort = () => {
-      fail(new TurnWaitAbortedError({ spaceId, sessionId, turnId: currentTurnId }));
+      fail(new TurnWaitAbortedError({ spaceId, sessionId, turnId: currentTurnId }, stopping));
     };
 
     const reconcile = async () => {
-      if (settled) return;
+      if (settled || stopping) return;
       if (reconciling) {
         reconcileQueued = true;
         return;
@@ -253,18 +299,20 @@ export async function waitForTurn(options: WaitForTurnOptions): Promise<TurnWait
               onAbort();
               return;
             }
-            const status = (err as { status?: number })?.status;
-            if (status === 401 || status === 403 || status === 404) {
-              fail(err);
-              return;
-            }
-            // Transient network / 5xx error: keep waiting for next WS event or safety-net tick.
+            if (settled || stopping) return;
+            // Transient: keep waiting for the next WS event or safety-net tick.
+            if (!isTransientError(err)) fail(err);
             return;
           }
-          if (settled) return;
+          if (settled || stopping) return;
+          if (!belongsHere(response)) {
+            fail(new HttpError("Session not found in this space", 404, { code: "session_context_mismatch" }));
+            return;
+          }
+          verified = true;
           const turn = response.turn;
-          if (turn.status !== lastReportedStatus) {
-            lastReportedStatus = turn.status;
+          if (turn.status !== lastStatus) {
+            lastStatus = turn.status;
             onStatus?.(turn.status, turn.id);
           }
           if (turn.status === "merged") {
@@ -274,22 +322,25 @@ export async function waitForTurn(options: WaitForTurnOptions): Promise<TurnWait
               mergedChain.push(previousId);
               visited.add(nextId);
               currentTurnId = nextId;
-              patchState.lastAppendPath = null;
-              lastReportedStatus = null;
+              printed = "";
+              printedMessageId = null;
+              diverged = false;
+              lastStatus = null;
               onTurnMerged?.(previousId, nextId);
               reconcileQueued = true;
               continue;
             }
           }
-          if (isTerminalTurnStatus(turn.status)) {
+          if (TERMINAL_TURN_STATUSES.has(turn.status)) {
             finish({
               spaceId,
               sessionId,
               turnId,
               resolvedTurnId: turn.id,
               mergedChain,
-              turn,
+              response,
               streamedText,
+              streamComplete: streamedText && !diverged && printed === finalReplyText(turn),
             });
             return;
           }
@@ -301,7 +352,7 @@ export async function waitForTurn(options: WaitForTurnOptions): Promise<TurnWait
     };
 
     const scheduleReconcile = () => {
-      if (settled) return;
+      if (settled || stopping) return;
       void reconcile();
     };
 
@@ -309,70 +360,64 @@ export async function waitForTurn(options: WaitForTurnOptions): Promise<TurnWait
 
     if (timeoutMs !== undefined) {
       timeoutTimer = setTimeout(() => {
+        timeoutTimer = undefined;
         if (settled) return;
-        settled = true;
-        cleanup();
         const timedOutTurnId = currentTurnId;
-        if (!abortOnTimeout) {
-          reject(new TurnWaitTimeoutError({
-            spaceId,
-            sessionId,
-            turnId: timedOutTurnId,
-            timeoutMs,
-            abortedCloudTurn: false,
-          }));
-          return;
-        }
-        void session.abort({ turnId: timedOutTurnId })
-          .then(
-            () => true,
-            () => false,
-          )
-          .then((abortedCloudTurn) => {
-            reject(new TurnWaitTimeoutError({
-              spaceId,
-              sessionId,
-              turnId: timedOutTurnId,
-              timeoutMs,
-              abortedCloudTurn,
-            }));
-          });
+        const timeout = (abortedCloudTurn: boolean, abortError: string | null) =>
+          fail(new TurnWaitTimeoutError({ spaceId, sessionId, turnId: timedOutTurnId }, { timeoutMs, abortedCloudTurn, abortError }));
+        if (!abortOnTimeout) return timeout(false, null);
+        if (!verified) return timeout(false, "The turn was never confirmed in this Space, so nothing was stopped");
+        stopping = true;
+        stopListening();
+        void stopTurn(session, timedOutTurnId, lastStatus).then((abortError) => timeout(abortError === null, abortError));
       }, timeoutMs);
     }
 
-    unsubscribeConnection = client.onConnection(({ state }) => {
+    unsubscribes.push(client.onConnection(({ state }) => {
       if (state === "open") scheduleReconcile();
-    });
+    }));
 
-    unsubscribeSession = session.subscribe({
-      patch: (event) => {
-        if (settled || !onTextDelta) return;
-        const id = eventTurnId(event);
-        if (id && id !== currentTurnId) return;
-        const ops = (event.payload as { ops?: PatchOp[] } | undefined)?.ops;
-        for (const chunk of extractPatchTextDeltas(ops, patchState)) {
-          streamedText = true;
-          onTextDelta(chunk);
-        }
-      },
-      turnUpdated: (event) => {
-        const id = eventTurnId(event);
-        if (!id || id === currentTurnId) scheduleReconcile();
-      },
-      turnFinalized: (event) => {
-        const id = eventTurnId(event);
-        if (!id || id === currentTurnId) scheduleReconcile();
-      },
+    const onTurnEvent = (event: SessionEvent) => {
+      const id = eventTurnId(event);
+      if (!id || id === currentTurnId) scheduleReconcile();
+    };
+    unsubscribes.push(session.subscribe({
+      turnUpdated: onTurnEvent,
+      turnFinalized: onTurnEvent,
       error: (event) => {
-        if (event.type === "system.subscribe.error") {
-          // Subscription denied; still reconcile over HTTP which surfaces any 403/404 cleanly.
-          scheduleReconcile();
-          return;
-        }
-        const id = eventTurnId(event);
-        if (!id || id === currentTurnId) scheduleReconcile();
+        // A denied subscription still reconciles over HTTP, which surfaces any 403/404 cleanly.
+        if (event.type === "system.subscribe.error") scheduleReconcile();
+        else onTurnEvent(event);
       },
-    });
+    }));
+
+    if (onTextDelta) {
+      // The generation stream seeds an in-flight message from the server snapshot and resyncs after gaps.
+      unsubscribes.push(session.subscribeGeneration({
+        state: ({ state, messageId }) => {
+          if (settled || stopping || (state.turnId && state.turnId !== currentTurnId)) return;
+          const text = textOf(state.contentBlocks);
+          // A new message's boundary waits for its first visible text, so the separator lands with it.
+          if (!text && messageId !== printedMessageId) return;
+          let delta: string;
+          // Without message IDs, text that stops extending the printed text is the next message.
+          if (messageId !== printedMessageId || (messageId === null && !text.startsWith(printed))) {
+            delta = `${streamedText && text ? "\n\n" : ""}${text}`;
+            printedMessageId = messageId;
+            diverged = false;
+          } else if (text.startsWith(printed)) {
+            delta = text.slice(printed.length);
+          } else {
+            delta = "";
+            diverged = true;
+          }
+          printed = text;
+          if (!delta) return;
+          streamedText = true;
+          onTextDelta(delta);
+        },
+      }, { recover: true }));
+    }
 
     if (reconcileIntervalMs > 0) {
       intervalTimer = setInterval(scheduleReconcile, reconcileIntervalMs);

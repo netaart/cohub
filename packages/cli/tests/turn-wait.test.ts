@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type {
+  GenerationStreamSubscriptionHandlers,
   SessionSubscriptionHandlers,
   SessionTurnRecord,
   SessionTurnResponse,
   WebSocketConnectionState,
 } from "@neta-art/cohub";
+type SessionEvent = Parameters<NonNullable<SessionSubscriptionHandlers["turnFinalized"]>>[0];
 
-type SessionEvent = Parameters<NonNullable<SessionSubscriptionHandlers["patch"]>>[0];
 import {
-  extractPatchTextDeltas,
+  canonicalId,
   parseWaitTimeout,
   TurnWaitAbortedError,
   TurnWaitTimeoutError,
@@ -49,10 +50,14 @@ function makeTurn(overrides: Partial<SessionTurnRecord> = {}): SessionTurnRecord
   };
 }
 
-function createFakeRealtime(turnsById: Record<string, SessionTurnRecord>) {
+const tick = (ms = 15) => new Promise((r) => setTimeout(r, ms));
+
+function createFakeRealtime(turnsById: Record<string, SessionTurnRecord>, options: { sessionSpaceId?: string; cancelStatus?: number; getDelayMs?: number; abortDelayMs?: number } = {}) {
   let sessionHandlers: SessionSubscriptionHandlers | null = null;
+  let generationHandlers: GenerationStreamSubscriptionHandlers | null = null;
   let connectionHandler: ((state: WebSocketConnectionState) => void) | null = null;
   const abortedTurns: Array<string | null | undefined> = [];
+  const cancelledTurns: string[] = [];
   let unsubscribed = false;
 
   const client: TurnWaitClient = {
@@ -65,18 +70,31 @@ function createFakeRealtime(turnsById: Record<string, SessionTurnRecord>) {
             sessionHandlers = null;
           };
         },
+        subscribeGeneration: (handlers) => {
+          generationHandlers = handlers;
+          return () => {
+            generationHandlers = null;
+          };
+        },
         turns: {
           get: async (turnId) => {
+            if (options.getDelayMs) await tick(options.getDelayMs);
             const turn = turnsById[turnId];
             if (!turn) {
               const err = Object.assign(new Error("turn not found"), { status: 404 });
               throw err;
             }
-            return { turn } as SessionTurnResponse;
+            return { session: { id: "sess-1", spaceId: options.sessionSpaceId ?? "space-1" }, turn } as SessionTurnResponse;
           },
         },
-        abort: async (options) => {
-          abortedTurns.push(options?.turnId);
+        abort: async (input) => {
+          abortedTurns.push(input?.turnId);
+          if (options.abortDelayMs) await tick(options.abortDelayMs);
+          return { ok: true };
+        },
+        cancelTurn: async (turnId) => {
+          if (options.cancelStatus) throw Object.assign(new Error("turn is not queued"), { status: options.cancelStatus });
+          cancelledTurns.push(turnId);
           return { ok: true };
         },
       }),
@@ -93,14 +111,18 @@ function createFakeRealtime(turnsById: Record<string, SessionTurnRecord>) {
   return {
     client,
     abortedTurns,
+    cancelledTurns,
     isUnsubscribed: () => unsubscribed,
-    emitPatch: (turnId: string, ops: Array<{ o?: string; p?: string; v?: unknown }>) => {
-      sessionHandlers?.patch?.({
-        type: "session.turn.patch",
-        spaceId: "space-1",
-        sessionId: "sess-1",
-        payload: { turnId, ops },
-      } as unknown as SessionEvent);
+    emitText: (turnId: string, messageId: string, text: string) => {
+      generationHandlers?.state?.({
+        type: "state",
+        source: "patch",
+        state: { spaceId: "space-1", sessionId: "sess-1", status: "streaming", contentBlocks: [{ type: "text", text }], anchorUserMessageId: null, patchSeq: 1, turnId, appendPath: null },
+        messageId,
+        messageOrdinal: null,
+        intermediateMessages: [],
+        rawEvent: null,
+      });
     },
     emitFinalized: (turnId: string) => {
       sessionHandlers?.turnFinalized?.({
@@ -116,6 +138,8 @@ function createFakeRealtime(turnsById: Record<string, SessionTurnRecord>) {
   };
 }
 
+const textBlock = (text: string) => [{ type: "text" as const, text }];
+
 test("parseWaitTimeout parses valid durations and rejects invalid values", () => {
   assert.equal(parseWaitTimeout("500ms"), 500);
   assert.equal(parseWaitTimeout("90s"), 90_000);
@@ -127,24 +151,7 @@ test("parseWaitTimeout parses valid durations and rejects invalid values", () =>
   assert.throws(() => parseWaitTimeout("-5s"));
   assert.throws(() => parseWaitTimeout("abc"));
   assert.throws(() => parseWaitTimeout(""));
-});
-
-test("extractPatchTextDeltas streams only text paths and continuation chunks", () => {
-  const state = { lastAppendPath: null as string | null };
-  assert.deepEqual(
-    extractPatchTextDeltas(
-      [
-        { o: "append", p: "/message/content/blocks/0/thinking", v: "hidden" },
-        { v: "still-thinking" },
-        { o: "append", p: "/message/content/blocks/1/text", v: "Hello" },
-        { v: " world" },
-        { o: "append", p: "/message/content/blocks/2/input", v: "{}" },
-        { v: "ignored" },
-      ],
-      state,
-    ),
-    ["Hello", " world"],
-  );
+  assert.throws(() => parseWaitTimeout("30d"));
 });
 
 test("waitForTurn settles immediately when the turn already completed before WS events arrive", async () => {
@@ -159,12 +166,12 @@ test("waitForTurn settles immediately when the turn already completed before WS 
     reconcileIntervalMs: 0,
   });
   assert.equal(result.resolvedTurnId, "turn-1");
-  assert.equal(result.turn.assistantText, "Already done");
+  assert.equal(result.response.turn.assistantText, "Already done");
   assert.equal(result.streamedText, false);
   assert.equal(fake.isUnsubscribed(), true);
 });
 
-test("waitForTurn streams text deltas via WS and settles on turn.finalized", async () => {
+test("waitForTurn streams only new text of the waited turn and settles on turn.finalized", async () => {
   const turns: Record<string, SessionTurnRecord> = {
     "turn-1": makeTurn({ id: "turn-1", status: "running" }),
   };
@@ -180,18 +187,75 @@ test("waitForTurn streams text deltas via WS and settles on turn.finalized", asy
     onTextDelta: (delta) => chunks.push(delta),
   });
 
-  await new Promise((r) => setTimeout(r, 15));
-  fake.emitPatch("turn-1", [{ o: "append", p: "/message/content/blocks/0/text", v: "Hi " }]);
-  fake.emitPatch("other-turn", [{ o: "append", p: "/message/content/blocks/0/text", v: "NOPE" }]);
-  fake.emitPatch("turn-1", [{ v: "there!" }]);
+  await tick();
+  fake.emitText("turn-1", "m1", "Hi ");
+  fake.emitText("other-turn", "m9", "NOPE");
+  fake.emitText("turn-1", "m1", "Hi there!");
 
-  turns["turn-1"] = makeTurn({ id: "turn-1", status: "completed", assistantText: "Hi there!" });
+  turns["turn-1"] = makeTurn({ id: "turn-1", status: "completed", assistantText: "Hi there!", assistantContent: textBlock("Hi there!") });
   fake.emitFinalized("turn-1");
 
   const result = await pending;
   assert.deepEqual(chunks, ["Hi ", "there!"]);
   assert.equal(result.streamedText, true);
-  assert.equal(result.turn.assistantText, "Hi there!");
+  assert.equal(result.streamComplete, true);
+  assert.equal(result.response.turn.assistantText, "Hi there!");
+});
+
+test("waitForTurn separates assistant messages and judges completeness by the final one", async () => {
+  const turns: Record<string, SessionTurnRecord> = {
+    "turn-1": makeTurn({ id: "turn-1", status: "running" }),
+  };
+  const fake = createFakeRealtime(turns);
+  const chunks: string[] = [];
+
+  const pending = waitForTurn({
+    client: fake.client,
+    spaceId: "space-1",
+    sessionId: "sess-1",
+    turnId: "turn-1",
+    reconcileIntervalMs: 0,
+    onTextDelta: (delta) => chunks.push(delta),
+  });
+
+  await tick();
+  fake.emitText("turn-1", "m1", "Checking.");
+  fake.emitText("turn-1", "m2", "");
+  fake.emitText("turn-1", "m2", "All pass.");
+  turns["turn-1"] = makeTurn({ id: "turn-1", status: "completed", assistantText: "All pass.", assistantContent: textBlock("All pass.") });
+  fake.emitFinalized("turn-1");
+
+  const result = await pending;
+  assert.equal(chunks.join(""), "Checking.\n\nAll pass.");
+  assert.equal(result.streamComplete, true);
+});
+
+test("waitForTurn reports an incomplete stream when printed text was rewritten", async () => {
+  const turns: Record<string, SessionTurnRecord> = {
+    "turn-1": makeTurn({ id: "turn-1", status: "running" }),
+  };
+  const fake = createFakeRealtime(turns);
+  const chunks: string[] = [];
+
+  const pending = waitForTurn({
+    client: fake.client,
+    spaceId: "space-1",
+    sessionId: "sess-1",
+    turnId: "turn-1",
+    reconcileIntervalMs: 0,
+    onTextDelta: (delta) => chunks.push(delta),
+  });
+
+  await tick();
+  fake.emitText("turn-1", "m1", "Hello wrld");
+  fake.emitText("turn-1", "m1", "Hello world");
+  turns["turn-1"] = makeTurn({ id: "turn-1", status: "completed", assistantText: "Hello world", assistantContent: textBlock("Hello world") });
+  fake.emitFinalized("turn-1");
+
+  const result = await pending;
+  assert.deepEqual(chunks, ["Hello wrld"]);
+  assert.equal(result.streamedText, true);
+  assert.equal(result.streamComplete, false);
 });
 
 test("waitForTurn reconciles on WebSocket reconnect if finalized event was missed", async () => {
@@ -212,7 +276,7 @@ test("waitForTurn reconciles on WebSocket reconnect if finalized event was misse
   fake.emitConnection("open");
 
   const result = await pending;
-  assert.equal(result.turn.assistantText, "Recovered");
+  assert.equal(result.response.turn.assistantText, "Recovered");
 });
 
 test("waitForTurn follows merged turns via summary.mergedIntoTurnId and guards against cycles", async () => {
@@ -235,8 +299,8 @@ test("waitForTurn follows merged turns via summary.mergedIntoTurnId and guards a
   });
 
   await new Promise((r) => setTimeout(r, 20));
-  fake.emitPatch("turn-2", [{ o: "append", p: "/message/content/blocks/0/text", v: "Combined reply" }]);
-  turns["turn-2"] = makeTurn({ id: "turn-2", status: "completed", assistantText: "Combined reply" });
+  fake.emitText("turn-2", "m1", "Combined reply");
+  turns["turn-2"] = makeTurn({ id: "turn-2", status: "completed", assistantText: "Combined reply", assistantContent: textBlock("Combined reply") });
   fake.emitFinalized("turn-2");
 
   const result = await pending;
@@ -257,7 +321,7 @@ test("waitForTurn follows merged turns via summary.mergedIntoTurnId and guards a
     turnId: "turn-loop",
     reconcileIntervalMs: 0,
   });
-  assert.equal(cyclicRes.turn.status, "merged");
+  assert.equal(cyclicRes.response.turn.status, "merged");
   assert.deepEqual(cyclicRes.mergedChain, []);
 });
 
@@ -275,7 +339,7 @@ test("waitForTurn honors timeout without aborting cloud turn by default, and abo
     (err: unknown) => {
       assert(err instanceof TurnWaitTimeoutError);
       assert.equal(err.abortedCloudTurn, false);
-      assert.equal(err.turnId, "turn-1");
+      assert.equal(err.ref.turnId, "turn-1");
       return true;
     },
   );
@@ -328,6 +392,87 @@ test("waitForTurn handles AbortSignal without aborting cloud turn and returns fa
     turnId: "turn-fail",
     reconcileIntervalMs: 0,
   });
-  assert.equal(failed.turn.status, "failed");
-  assert.equal(failed.turn.errorMessage, "Model error");
+  assert.equal(failed.response.turn.status, "failed");
+  assert.equal(failed.response.turn.errorMessage, "Model error");
+});
+
+test("waitForTurn cancels a queued turn on timeout and reports a failed stop with its reason", async () => {
+  const queued = createFakeRealtime({ "turn-q": makeTurn({ id: "turn-q", status: "queued" }) });
+  await assert.rejects(
+    waitForTurn({ client: queued.client, spaceId: "space-1", sessionId: "sess-1", turnId: "turn-q", timeoutMs: 30, abortOnTimeout: true, reconcileIntervalMs: 0 }),
+    (err: unknown) => err instanceof TurnWaitTimeoutError && err.abortedCloudTurn,
+  );
+  assert.deepEqual(queued.cancelledTurns, ["turn-q"]);
+  assert.deepEqual(queued.abortedTurns, []);
+
+  const steer = createFakeRealtime({ "turn-q": makeTurn({ id: "turn-q", status: "queued", intent: "steer" }) }, { cancelStatus: 409 });
+  await assert.rejects(
+    waitForTurn({ client: steer.client, spaceId: "space-1", sessionId: "sess-1", turnId: "turn-q", timeoutMs: 30, abortOnTimeout: true, reconcileIntervalMs: 0 }),
+    (err: unknown) => err instanceof TurnWaitTimeoutError && !err.abortedCloudTurn && err.abortError === "turn is not queued",
+  );
+  assert.deepEqual(steer.abortedTurns, []);
+
+  const mergeTurns: Record<string, SessionTurnRecord> = { "turn-q": makeTurn({ id: "turn-q", status: "queued" }) };
+  const merging = createFakeRealtime(mergeTurns, { cancelStatus: 409 });
+  const pending = waitForTurn({ client: merging.client, spaceId: "space-1", sessionId: "sess-1", turnId: "turn-q", timeoutMs: 30, abortOnTimeout: true, reconcileIntervalMs: 0 });
+  await tick();
+  mergeTurns["turn-q"] = makeTurn({ id: "turn-q", status: "merged", summary: { finishReason: "merged", mergedIntoTurnId: "owner" } });
+  await assert.rejects(pending, (err: unknown) => err instanceof TurnWaitTimeoutError && !err.abortedCloudTurn && /merged into owner/.test(err.abortError ?? ""));
+  assert.deepEqual(merging.abortedTurns, []);
+
+  const refused = createFakeRealtime({ "turn-q": makeTurn({ id: "turn-q", status: "queued" }) }, { cancelStatus: 403 });
+  await assert.rejects(
+    waitForTurn({ client: refused.client, spaceId: "space-1", sessionId: "sess-1", turnId: "turn-q", timeoutMs: 30, abortOnTimeout: true, reconcileIntervalMs: 0 }),
+    (err: unknown) => err instanceof TurnWaitTimeoutError && !err.abortedCloudTurn && err.abortError === "turn is not queued",
+  );
+});
+
+test("waitForTurn rejects a session from another Space and never stops it", async () => {
+  const fake = createFakeRealtime({ "turn-1": makeTurn({ id: "turn-1", status: "running" }) }, { sessionSpaceId: "space-2" });
+  await assert.rejects(
+    waitForTurn({ client: fake.client, spaceId: "space-1", sessionId: "sess-1", turnId: "turn-1", timeoutMs: 50, abortOnTimeout: true, reconcileIntervalMs: 0 }),
+    (err: unknown) => (err as { status?: number }).status === 404,
+  );
+  assert.deepEqual(fake.abortedTurns, []);
+});
+
+test("waitForTurn fails at once on errors that retrying cannot fix", async () => {
+  const fake = createFakeRealtime({});
+  const authError = new Error("Not signed in");
+  const client: TurnWaitClient = {
+    ...fake.client,
+    space: () => ({
+      session: () => ({
+        ...fake.client.space("space-1").session("sess-1"),
+        turns: { get: async () => { throw authError; } },
+      }),
+    }),
+  };
+  await assert.rejects(
+    waitForTurn({ client, spaceId: "space-1", sessionId: "sess-1", turnId: "turn-1", reconcileIntervalMs: 0 }),
+    (err: unknown) => err === authError,
+  );
+});
+
+test("waitForTurn keeps the timeout outcome once the deadline fires, and stops a turn the send already confirmed", async () => {
+  const turns: Record<string, SessionTurnRecord> = { "turn-1": makeTurn({ id: "turn-1", status: "running" }) };
+  const racing = createFakeRealtime(turns, { abortDelayMs: 40 });
+  const pending = waitForTurn({ client: racing.client, spaceId: "space-1", sessionId: "sess-1", turnId: "turn-1", timeoutMs: 30, abortOnTimeout: true, reconcileIntervalMs: 0 });
+  await tick(45);
+  turns["turn-1"] = makeTurn({ id: "turn-1", status: "completed" });
+  racing.emitFinalized("turn-1");
+  await assert.rejects(pending, (err: unknown) => err instanceof TurnWaitTimeoutError && err.abortedCloudTurn);
+
+  const slow = createFakeRealtime({ "turn-1": makeTurn({ id: "turn-1", status: "running" }) }, { getDelayMs: 100 });
+  const initial = { session: { id: "sess-1", spaceId: "space-1" }, turn: makeTurn({ id: "turn-1", status: "running" }) } as SessionTurnResponse;
+  await assert.rejects(
+    waitForTurn({ client: slow.client, spaceId: "space-1", sessionId: "sess-1", turnId: "turn-1", initial, timeoutMs: 20, abortOnTimeout: true, reconcileIntervalMs: 0 }),
+    (err: unknown) => err instanceof TurnWaitTimeoutError && err.abortedCloudTurn,
+  );
+  assert.deepEqual(slow.abortedTurns, ["turn-1"]);
+});
+
+test("canonicalId expands short and uppercase UUIDs", () => {
+  assert.equal(canonicalId("0F8FAD5BD9CB469FA16570867728950E"), "0f8fad5b-d9cb-469f-a165-70867728950e");
+  assert.equal(canonicalId(" 0F8FAD5B-D9CB-469F-A165-70867728950E "), "0f8fad5b-d9cb-469f-a165-70867728950e");
 });

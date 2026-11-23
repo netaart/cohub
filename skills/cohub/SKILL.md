@@ -63,7 +63,7 @@ Use `spaces prompt` for all sends: immediate, delayed, one-time scheduled, recur
 cohub spaces prompt "message"
 cohub -s <spaceId> spaces prompt "message"
 cohub -s <spaceId> prompt "message" --wait --json
-cohub -s <spaceId> prompt "message" --stream --timeout 10m
+cohub -s <spaceId> prompt "message" --stream --timeout 10m   # timeout only stops waiting; add --abort-on-timeout to stop the turn
 cat prompt.md | cohub spaces prompt
 cohub spaces prompt --session <sessionId> "message"
 cohub spaces prompt --title "<chat title>" "message"
