@@ -66,7 +66,7 @@ COHUB_BASE_URL=https://api.example.com cohub spaces ls
 | `--json` | 机器可读输出 |
 | `-h, --help` | 命令帮助 |
 
-很多工作流需要 Space。CLI 依次使用 `-s`、`COHUB_SPACE_ID`，以及 `cohub runtime up` 为当前目录记住的 Space。`<space>` 可以是 Space ID、自己 Space 的 slug（比如 `home`），或 `username/slug`：
+很多工作流需要 Space。CLI 依次使用 `-s`、`COHUB_SPACE_ID`，以及 `cohub runtime up` 为当前目录或最近一级已绑定的上级目录记住的 Space。`<space>` 可以是 Space ID、自己 Space 的 slug（比如 `home`），或 `username/slug`：
 
 ```bash
 cohub -s <spaceId> spaces get

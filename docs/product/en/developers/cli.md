@@ -72,7 +72,8 @@ Sign in once for each custom server, or supply `COHUB_EXECUTION_TOKEN`.
 | `-h, --help` | Command help |
 
 Many workflows need a Space. The CLI uses `-s`, then `COHUB_SPACE_ID`, then the
-Space remembered for the current directory by `cohub runtime up`. `<space>` is a
+Space remembered by `cohub runtime up` for the current directory or its nearest bound
+parent directory. `<space>` is a
 Space ID, a slug you own such as `home`, or `username/slug`:
 
 ```bash

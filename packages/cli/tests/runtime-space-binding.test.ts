@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, test } from "node:test";
-import { canonicalRuntimeRoot, findRuntimeSpaceBinding, parseRuntimeSpaceBindings, resolveRuntimeSpace, withRuntimeSpaceBindingsLock } from "../src/runtime/space-binding.js";
+import { canonicalRuntimeRoot, findNearestRuntimeSpaceBinding, findRuntimeSpaceBinding, parseRuntimeSpaceBindings, resolveRuntimeSpace, withRuntimeSpaceBindingsLock } from "../src/runtime/space-binding.js";
 
 const roots: string[] = [];
 
@@ -195,4 +195,28 @@ test("a corrupt binding file fails closed instead of creating another Space", as
     /Runtime Space bindings are invalid/,
   );
   assert.equal(created, false);
+});
+
+test("commands in a subdirectory use the nearest bound directory, like Git", async () => {
+  const base = await tempRoot("cohub-runtime-ancestor-");
+  const repo = join(base, "repo");
+  const nested = join(repo, "packages", "web");
+  const sibling = join(base, "repo-2");
+  const alias = join(base, "repo-link");
+  const bindingsPath = join(base, "runtime-spaces.json");
+  await mkdir(join(nested, "src"), { recursive: true });
+  await mkdir(sibling);
+  await symlink(repo, alias);
+  const bind = (root: string, spaceId: string) =>
+    resolveRuntimeSpace({ root, identityKey: "prod:alice", path: bindingsPath, explicitSpaceId: spaceId });
+  await bind(repo, "space-repo");
+  await bind(nested, "space-web");
+  const nearest = async (cwd: string, key = "prod:alice") =>
+    (await findNearestRuntimeSpaceBinding(cwd, key, bindingsPath))?.spaceId ?? null;
+
+  assert.equal(await nearest(join(repo, "packages")), "space-repo");
+  assert.equal(await nearest(join(alias, "packages")), "space-repo");
+  assert.equal(await nearest(join(nested, "src")), "space-web");
+  assert.equal(await nearest(sibling), null);
+  assert.equal(await nearest(join(repo, "packages"), "prod:bob"), null);
 });
