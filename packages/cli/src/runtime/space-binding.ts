@@ -122,7 +122,7 @@ export function findRuntimeSpaceBinding(
  * Walks ancestor directories via `dirname` (like Git), so sibling prefixes such as
  * `/work/app-2` never match `/work/app`, and nested bindings override their parent.
  */
-export function findContainingRuntimeSpaceBinding(
+function findContainingRuntimeSpaceBinding(
   bindings: RuntimeSpaceBinding[] | RuntimeSpaceBindingsFile,
   input: { cwd: string; key: string },
 ): RuntimeSpaceBinding | null {
