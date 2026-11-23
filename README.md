@@ -44,6 +44,12 @@ npm install -g @neta-art/cohub-cli
 cohub auth login
 ```
 
+**Agent skills** (Antigravity, Claude Code, Codex, Cursor, etc.) —
+
+```bash
+npx skills add netaart/cohub
+```
+
 **Self-host** — see [docs/self-hosting.md](docs/self-hosting.md).
 
 ## Docs

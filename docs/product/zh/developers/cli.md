@@ -14,6 +14,12 @@ npm install -g @neta-art/cohub-cli
 cohub --help
 ```
 
+为本机 Agent（Antigravity、Claude Code、Codex、Cursor 等）安装官方 Cohub Skills：
+
+```bash
+npx skills add netaart/cohub
+```
+
 ## 登录
 
 ```bash
