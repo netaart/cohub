@@ -4,6 +4,21 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.107 — 2026-11-23
+
+- **Config-driven pricing rules and quotas**: operators publish a hot-reloaded `pricing.yaml` (per usage type, model, provider, benefit, and date window) that applies multipliers or draws quota tokens, with the price frozen at admission so queued work keeps its price and quota refunded on failure, cancel, or never-enqueued tasks. Model listings carry the caller's `offer` and `quota`, `billing.getQuotas()` returns quota balances, and model pickers, the composer, the balance ledger, public pricing, and `cohub models ls` / `cohub generate` show discounted prices, original prices, and quota coverage.
+- **CLI turn waiting and streaming**: `cohub prompt` gains `--wait`, `--stream`, `--timeout`, and `--abort-on-timeout`, and `cohub spaces sessions turns wait` re-attaches to a running turn. Waiting follows merged turns, reconciles WebSocket events with HTTP turn state across reconnects, and prints a copyable resume command when a wait times out or is interrupted.
+- **Antigravity local harness**: Cohub Turns can run on Antigravity's `agy` headless stream-json mode, handing over conversation history and continuing the same conversation, while terminal and desktop Antigravity chats sync read-only.
+- **Bare board media**: images and videos accept `props.decoration: card | none`, frames pass a `contentDecoration` down to the media inside them, and script-created temporary items are bare by default, so pixel-themed game scenes no longer show photo cards. The editor and selection toolbar expose the same toggle as Show contents only.
+- **Unified Space references across the CLI**: Space arguments and `-s` now accept an ID, `home`, your own slug, or `username/slug` for get, setup, update, rename, config, pin, archive, search, references, app authorize, and `run` in either position; runtime commands resolve the nearest bound ancestor directory so they work from subdirectories.
+
+### Bug Fixes
+
+- Checkpoint tree, file, and diff endpoints now apply the guest gitignore-filtered file view, and checkpoint row metadata drops hidden paths and diff data for non-full viewers, closing a leak of ignored files to guests.
+- `cohub spaces sessions tail --json` writes only JSONL to stdout and flushes pending writes before exiting, so piping and framing stay clean.
+- Pricing pages and purchase panels reserve their loaded geometry, and quota balances hydrate from a user-scoped cache, so the catalog arriving no longer moves the layout.
+- The SDK no longer logs an error when `disconnect()` cancels an in-flight realtime connect.
+
 ## v2.106 — 2026-11-20
 
 - **Quieter Space activity**: Set a personal default for danmaku in General Settings and override it per Space. Live and catch-up danmaku show only human-started Turns. Agent and automation successes no longer trigger completion alerts; failure alerts are unchanged. The Space Turns CLI now shows who initiated each Turn.
