@@ -228,6 +228,16 @@ Use `run` for a one-off shell command in the current Space workspace.
 # Send now
 cohub -s <spaceId> spaces prompt "message" --json
 
+# Send and wait for the final reply (or stream it live)
+cohub -s <spaceId> prompt "message" --wait --json
+cohub -s <spaceId> prompt "message" --stream --timeout 10m
+
+# Re-attach and wait for an existing turn
+cohub -s <spaceId> spaces sessions turns wait <sessionId> <turnId> --json
+
+# A timeout or Ctrl-C only stops waiting; add --abort-on-timeout to also stop the cloud turn
+cohub -s <spaceId> prompt "message" --wait --timeout 10m --abort-on-timeout
+
 # Send long content from stdin
 cat prompt.md | cohub -s <spaceId> spaces prompt --json
 

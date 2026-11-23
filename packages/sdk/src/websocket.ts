@@ -223,6 +223,14 @@ type RoomSubscriptionState = {
   pending: boolean;
 };
 
+/** Rejects a pending `connect()` when the caller disconnects first. */
+export class WebsocketDisconnectedError extends Error {
+  override name = "WebsocketDisconnectedError";
+  constructor(reason: string) {
+    super(`WebSocket disconnected: ${reason}`);
+  }
+}
+
 export class WebsocketClient {
   private readonly url: string;
   private readonly autoReconnect: boolean;
@@ -479,7 +487,7 @@ export class WebsocketClient {
     const ws = this.ws;
     this.ws = null;
     ws?.close(code, reason);
-    this.pendingConnectReject?.(new Error(`WebSocket disconnected: ${reason}`));
+    this.pendingConnectReject?.(new WebsocketDisconnectedError(reason));
     this.pendingConnectReject = null;
     this.connectPromise = null;
     if (ws) {

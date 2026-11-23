@@ -128,9 +128,14 @@ default page.
 
 ```bash
 cohub -s <spaceId> spaces prompt "Fix the failing tests" --json
+cohub -s <spaceId> prompt "Fix the failing tests" --wait --json
+cohub -s <spaceId> prompt "Fix the failing tests" --stream --timeout 10m
 cohub -s <spaceId> spaces prompt --title "Planning" "Draft a launch plan" --json
 cohub -s <spaceId> spaces prompt --session <sessionId> "Continue from the diff" --json
+cohub -s <spaceId> spaces sessions turns wait <sessionId> <turnId> --json
 ```
+
+`--wait` (and `--stream`, which implies `--wait`) listens on Cohub's realtime WebSocket with HTTP reconciliation until the turn settles, automatically following `merged` turns via `mergedIntoTurnId`. `--timeout` and Ctrl-C only stop waiting: the cloud turn keeps running and you can re-attach later with `spaces sessions turns wait`. Add `--abort-on-timeout` to also stop the turn when the timeout expires; Ctrl-C never stops it. Without `--timeout` it waits until the turn settles. If `--stream` misses part of the reply (for example across a reconnect), the full final reply is printed when the turn finishes.
 
 Schedule:
 

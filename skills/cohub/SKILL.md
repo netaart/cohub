@@ -62,6 +62,8 @@ Use `spaces prompt` for all sends: immediate, delayed, one-time scheduled, recur
 ```bash
 cohub spaces prompt "message"
 cohub -s <spaceId> spaces prompt "message"
+cohub -s <spaceId> prompt "message" --wait --json
+cohub -s <spaceId> prompt "message" --stream --timeout 10m   # timeout only stops waiting; add --abort-on-timeout to stop the turn
 cat prompt.md | cohub spaces prompt
 cohub spaces prompt --session <sessionId> "message"
 cohub spaces prompt --title "<chat title>" "message"
@@ -139,6 +141,7 @@ Inspect turns:
 ```bash
 cohub spaces sessions turns ls <sessionId>
 cohub spaces sessions turns get <sessionId> <turnId>
+cohub spaces sessions turns wait <sessionId> <turnId> --json
 cohub spaces sessions turns speak <sessionId> <turnId>   # read the reply aloud; prints audio URLs
 ```
 
