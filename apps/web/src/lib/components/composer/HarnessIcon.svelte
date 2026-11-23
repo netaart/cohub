@@ -16,7 +16,7 @@ const icons: Partial<Record<HarnessKind, { url: string; mono?: boolean }>> = {
 	claude: { url: claude },
 	workbuddy: { url: workbuddy },
 	cursor: { url: cursor, mono: true },
-	antigravity: { url: antigravity, mono: true },
+	antigravity: { url: antigravity },
 };
 const { harness, size = 16 }: { harness: HarnessKind; size?: number } =
 	$props();

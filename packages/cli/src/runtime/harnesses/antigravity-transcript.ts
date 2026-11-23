@@ -17,34 +17,25 @@ const LOGS_DIR = "logs";
 const TRANSCRIPT_FILE = "transcript.jsonl";
 const FULL_TRANSCRIPT_FILE = "transcript_full.jsonl";
 const SUMMARIES_DB = "conversation_summaries.db";
-const DEFAULT_APP_DATA_DIRS = ["antigravity-cli", "antigravity"] as const;
+/** The CLI's own data, then the desktop app's; both keep conversations under `brain/`. */
+const APP_DATA_DIRS = ["antigravity-cli", "antigravity"] as const;
+/** Readers rarely wait in WAL mode; a short timeout keeps a checkpoint from stalling the Runtime. */
+const BUSY_TIMEOUT_MS = 250;
+/** Wraps Cohub history handed to a new conversation inside its first prompt. */
+export const HANDOFF_TAG = "cohub_session_history";
 const USER_REQUEST = /<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/;
 const METADATA_BLOCKS = /<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>[\s\S]*?<\/(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>/g;
+const HANDOFF_BLOCK = new RegExp(`^<${HANDOFF_TAG}>[\\s\\S]*?</${HANDOFF_TAG}>\\s*`);
 const HYDRATED_FIELDS = new Set(["content", "thinking", "tool_calls"]);
 const STEP_INDEX_PREFIX = /^\s*\{\s*"step_index"\s*:\s*(\d+)(?=\s*[,}])/;
 
-export const antigravityGeminiDir = () => process.env.ANTIGRAVITY_GEMINI_DIR?.trim() || join(homedir(), ".gemini");
+/** `~/.gemini/antigravity-cli`: the CLI's settings and conversations. */
+export const antigravityCliDir = () => join(homedir(), ".gemini", APP_DATA_DIRS[0]);
 
-/**
- * Primary app data dir name under `.gemini/` used for new ACP sessions (`antigravity-cli` by default).
- * When `ANTIGRAVITY_DATA_DIR` lists comma-separated names, the first is primary.
- */
-export function antigravityPrimaryAppDataDir(): string {
-  const configured = process.env.ANTIGRAVITY_DATA_DIR?.split(",").map((entry) => entry.trim()).filter(Boolean);
-  return configured?.[0] || DEFAULT_APP_DATA_DIRS[0];
-}
+export const antigravityRoots = (): string[] => APP_DATA_DIRS.map((dir) => join(homedir(), ".gemini", dir, "brain"));
 
-/** App data directories under `.gemini/` scanned for native Antigravity conversations. */
-export function antigravityAppDataDirs(): string[] {
-  const configured = process.env.ANTIGRAVITY_DATA_DIR?.split(",").map((entry) => entry.trim()).filter(Boolean);
-  const dirs = configured?.length ? configured : [...DEFAULT_APP_DATA_DIRS];
-  return [...new Set(dirs)];
-}
-
-export const antigravityRoots = (): string[] => antigravityAppDataDirs().map((dir) => join(antigravityGeminiDir(), dir, "brain"));
-
-export const antigravityTranscriptPath = (nativeSessionId: string, appDataDir = antigravityPrimaryAppDataDir()): string =>
-  join(antigravityGeminiDir(), appDataDir, "brain", nativeSessionId, SYSTEM_GENERATED, LOGS_DIR, TRANSCRIPT_FILE);
+export const antigravityTranscriptPath = (nativeSessionId: string): string =>
+  join(antigravityCliDir(), "brain", nativeSessionId, SYSTEM_GENERATED, LOGS_DIR, TRANSCRIPT_FILE);
 
 /** Path relative to a brain root, split by OS separator; returns null when outside `root`. */
 function brainParts(path: string, root: string): string[] | null {
@@ -129,11 +120,7 @@ type SummaryRow = {
   nesting_depth?: unknown;
 };
 
-/**
- * Look up a conversation's workspace cwds and parent nesting from `conversation_summaries.db`.
- * Uses Node 24's built-in `node:sqlite` in read-only mode with a busy timeout so active WAL writes
- * from Antigravity Desktop do not cause spurious SQLITE_BUSY misses.
- */
+/** A conversation's workspace and nesting live only in `conversation_summaries.db`; its first workspace owns it. */
 export async function antigravitySessionHeader(path: string): Promise<SessionHeader | null> {
   const parsed = parseAntigravityTranscriptPath(path);
   if (!parsed) return null;
@@ -141,21 +128,19 @@ export async function antigravitySessionHeader(path: string): Promise<SessionHea
   if (!existsSync(dbPath)) return null;
   let db: DatabaseSync | null = null;
   try {
-    db = new DatabaseSync(dbPath, { readOnly: true, timeout: 1_000 });
+    db = new DatabaseSync(dbPath, { readOnly: true, timeout: BUSY_TIMEOUT_MS });
     const row = db.prepare(
       "SELECT workspace_uris, parent_conversation_id, nesting_depth FROM conversation_summaries WHERE conversation_id = ?",
     ).get(parsed.nativeSessionId) as SummaryRow | undefined;
     if (!row) return null;
-    const cwds = parseWorkspaceCwds(row.workspace_uris);
-    const primaryCwd = cwds[0];
-    if (!primaryCwd) return null;
+    const cwd = parseWorkspaceCwds(row.workspace_uris)[0];
+    if (!cwd) return null;
     const parentId = text(row.parent_conversation_id).trim();
     const nestingDepth = typeof row.nesting_depth === "number" ? row.nesting_depth : 0;
     return {
       harness: "antigravity",
       nativeSessionId: parsed.nativeSessionId,
-      cwd: primaryCwd,
-      ...(cwds.length > 1 ? { cwds: cwds.slice(1) } : {}),
+      cwd,
       thread: parentId || nestingDepth > 0 ? "spawned" : "user",
     };
   } catch {
@@ -165,11 +150,11 @@ export async function antigravitySessionHeader(path: string): Promise<SessionHea
   }
 }
 
-/** Extract clean user text from `<USER_REQUEST>...</USER_REQUEST>` or strip injected metadata blocks. */
+/** The prompt as typed: `<USER_REQUEST>` without injected metadata or the history Cohub handed over. */
 export function extractAntigravityUserText(raw: string): string {
   const matched = USER_REQUEST.exec(raw);
-  if (matched?.[1] !== undefined) return matched[1].trim();
-  return raw.replace(METADATA_BLOCKS, "").trim();
+  const prompt = matched?.[1] !== undefined ? matched[1] : raw.replace(METADATA_BLOCKS, "");
+  return prompt.trim().replace(HANDOFF_BLOCK, "").trim();
 }
 
 /** Antigravity sometimes stores tool argument values as JSON-encoded strings (e.g. `"\"echo hi\""`). */
@@ -186,11 +171,13 @@ function normalizeToolArgs(value: unknown): Record<string, unknown> {
   return out;
 }
 
-function transcriptUsage(value: JsonRecord): NativeTurnMessage["usage"] {
-  const count = (key: string) => typeof value[key] === "number" ? value[key] as number : 0;
-  const input = count("input_tokens");
-  const output = count("output_tokens");
+/** Antigravity's input tokens include cached ones; Cohub counts them apart. */
+export function antigravityUsage(value: unknown): NativeTurnMessage["usage"] {
+  const usage = record(value);
+  const count = (key: string) => typeof usage[key] === "number" ? usage[key] as number : 0;
   const cacheRead = count("cache_read_tokens");
+  const input = Math.max(0, count("input_tokens") - cacheRead);
+  const output = count("output_tokens");
   if (!input && !output && !cacheRead) return undefined;
   return { input, output, cacheRead, cacheWrite: 0, totalTokens: input + output + cacheRead };
 }
@@ -350,7 +337,7 @@ export async function readAntigravityTranscript(path: string, nativeSessionId: s
         model: text(value.model) || null,
         stopReason: isError ? "error" : hasTools ? "tool_use" : isDone ? "stop" : null,
         errorMessage: isError ? text(value.error) || "Turn failed" : null,
-        usage: transcriptUsage(value),
+        usage: antigravityUsage(value),
       };
       if (content.length || isError) current.messages.push(message);
       extendTurn(current, line, true);
@@ -387,4 +374,11 @@ export async function readAntigravityTranscript(path: string, nativeSessionId: s
     turns,
     prefixes: read.prefixes,
   };
+}
+
+/** Where the `USER_INPUT` step a run reported begins; Cohub's own Turn is the one starting there. */
+export async function antigravityStepStart(path: string, stepIndex: number): Promise<number | null> {
+  const read = await readChainedLines(path).catch(() => null);
+  const line = read?.lines.find((entry) => entry.value.step_index === stepIndex && text(entry.value.type) === "USER_INPUT");
+  return line ? line.startBytes : null;
 }

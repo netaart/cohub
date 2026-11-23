@@ -1,4 +1,8 @@
-import { readFile, rm, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   isModelThinkingLevel,
   thinkingLevelMapFor,
@@ -14,44 +18,57 @@ import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import type { Executor } from "../native/execution.js";
 import type { TranscriptState } from "../native/ingest.js";
 import {
-  answerAntigravityApproval,
-  antigravityAcpMode,
-  antigravityApprovalMode,
-  antigravityApprovalModes,
-} from "./antigravity-approval.js";
-import {
   acceptsAntigravityDirectory,
   acceptsAntigravityTranscript,
-  antigravityPrimaryAppDataDir,
+  antigravityCliDir,
   antigravityReplyEnded,
   antigravityRoots,
   antigravitySessionHeader,
+  antigravityStepStart,
   antigravityTranscriptPath,
+  antigravityUsage,
+  HANDOFF_TAG,
   parseAntigravityTranscriptPath,
   readAntigravityTranscript,
 } from "./antigravity-transcript.js";
 import { projectChainedSession } from "./chained-projection.js";
-import { SessionGrants } from "./claude-approval.js";
-import { array, harnessCommand, inlineImage, text, turnEnvironment, watchHost } from "./process.js";
+import { array, closeHost, harnessCommand, inlineImage, missing, text, turnEnvironment, watchHost } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn, LocalHarnessAdapter } from "./types.js";
 
 const BINARY = "agy";
 const PROVIDER = "antigravity";
+/** Runs without `--model`, so the account's own default applies. */
 const DEFAULT_MODEL = "default";
-const INITIALIZE_TIMEOUT_MS = 30_000;
-const SESSION_TIMEOUT_MS = 30_000;
-const PROMPT_TIMEOUT_MS = 24 * 60 * 60_000;
+/** `agy models` lists one slug per effort, such as `gemini-4-neon-high`. */
+const EFFORT_SUFFIX = /-(low|medium|high|xhigh|max)$/;
+const EFFORT_NAME = /\s*\((?:low|medium|high|xhigh|max)\)\s*$/i;
+/** Flags every Turn relies on; an executable whose help lacks one is an older or unrelated CLI. */
+const REQUIRED_FLAGS = ["--input-format", "--output-format", "--conversation", "--model", "--effort", "--settings", "--dangerously-skip-permissions"];
+const STARTUP_TIMEOUT_MS = 60_000;
 const ABORT_ESCALATION_MS = 5_000;
-const FLUSH_WAIT_MS = 250;
-const EFFORT_LEVELS: readonly ModelThinkingLevel[] = ["low", "medium", "high", "xhigh", "max"];
+/** After input closes, the CLI finishes writing its transcript; it is reaped when it does not exit by then. */
+const FLUSH_TIMEOUT_MS = 10_000;
 const MAX_HANDOFF_CHARS = 80_000;
+const IMAGE_EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+/**
+ * Deny rules win over every mode, allow rule and `--dangerously-skip-permissions`. `--settings` replaces
+ * the user's own deny list, so a read-only Turn carries it along.
+ */
+const READ_ONLY_DENY = ["write_file(*)", "command(*)", "mcp(*)", "read_url(*)", "execute_url(*)", "download_url(*)"];
+/** Headless mode cannot ask: anything needing approval is denied. Cohub only chooses how much is pre-approved. */
+const APPROVAL_MODES: ApprovalMode[] = ["inherit", "full_access", "read_only"];
 
-const grants = new SessionGrants();
-const supportedModes = new Map<string, Promise<ApprovalMode[]>>();
+const execute = promisify(execFile);
 
-function acpBaseArgs(extra: string[] = []): string[] {
-  const configuredDir = process.env.ANTIGRAVITY_DATA_DIR?.split(",").map((entry) => entry.trim()).filter(Boolean)[0];
-  return ["acp", "--stdio", ...(configuredDir && !configuredDir.startsWith("/") && !configuredDir.includes("\\") ? ["--app-data-dir", configuredDir] : []), ...extra];
+async function command(executable: string, args: string[], cwd: string, timeout: number) {
+  return await execute(...harnessCommand(executable, args, cwd), { cwd, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+}
+
+/** The CLI's own explanation, such as asking to sign in, rather than "Command failed". */
+function commandError(error: unknown): Error {
+  const output = error as { stderr?: string; message?: string };
+  const line = (output.stderr ?? "").split("\n").map((entry) => entry.trim()).filter(Boolean).at(-1);
+  return new Error(line?.replace(/^error:\s*/i, "") || output.message || "agy failed");
 }
 
 function modelProvider(id: string): string {
@@ -60,277 +77,151 @@ function modelProvider(id: string): string {
   return PROVIDER;
 }
 
-/**
- * Parse Antigravity's ACP `session/new` response (`models.availableModels` and `configOptions`)
- * into Cohub's `HarnessModel[]`, preserving per-model thinking levels and a `default` entry.
- */
-export function antigravityModels(sessionResult: JsonRecord): HarnessModel[] {
-  const availableVariants = array(record(sessionResult.models).availableModels).map(record);
-  const configOptions = array(sessionResult.configOptions).map(record);
-  const modelOption = configOptions.find((option) => text(option.id) === "model" || text(option.category) === "model");
-  const thoughtOption = configOptions.find((option) => text(option.id) === "thought_level" || text(option.category) === "thought_level");
-  const globalEfforts = array(thoughtOption?.options)
-    .map((entry) => text(record(entry).value))
-    .filter((level): level is ModelThinkingLevel => isModelThinkingLevel(level) && level !== "off");
-  const defaultEfforts = globalEfforts.length ? globalEfforts : EFFORT_LEVELS;
-
-  const variantIds = new Set(availableVariants.map((variant) => text(variant.modelId)).filter(Boolean));
-  const entries = array(modelOption?.options).map(record);
-  const models: HarnessModel[] = [{
-    harness: "antigravity",
-    provider: PROVIDER,
-    id: DEFAULT_MODEL,
-    name: "Default",
-    isDefault: true,
-    reasoning: true,
-    thinkingLevelMap: thinkingLevelMapFor((level) => defaultEfforts.includes(level) ? level : null),
-  }];
-
-  const seen = new Set<string>([DEFAULT_MODEL]);
-  if (entries.length) {
-    for (const entry of entries) {
-      const id = text(entry.value).slice(0, 255);
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      const name = (text(entry.name) || id).slice(0, 255);
-      const suffixed = EFFORT_LEVELS.filter((level) => variantIds.has(`${id}-${level}`));
-      const reasoning = suffixed.length > 0;
-      models.push({
-        harness: "antigravity",
-        provider: modelProvider(id),
-        id,
-        name,
-        ...(reasoning
-          ? { reasoning: true, thinkingLevelMap: thinkingLevelMapFor((level) => suffixed.includes(level) ? level : null) }
-          : { reasoning: false }),
-      });
-    }
-    return models;
+/** One Cohub model per base slug; its effort variants become thinking levels passed as `--effort`. */
+export function antigravityModels(listing: string): HarnessModel[] {
+  const groups = new Map<string, { name: string; levels: ModelThinkingLevel[] }>();
+  for (const line of listing.split("\n")) {
+    const [slug = "", name = ""] = line.trim().split("\t").map((part) => part.trim());
+    if (!slug || !name) continue;
+    const effort = EFFORT_SUFFIX.exec(slug);
+    const id = (effort ? slug.slice(0, -effort[0].length) : slug).slice(0, 255);
+    const group = groups.get(id) ?? { name: name.replace(EFFORT_NAME, "").slice(0, 255) || id, levels: [] };
+    const level = effort?.[1];
+    if (isModelThinkingLevel(level) && !group.levels.includes(level)) group.levels.push(level);
+    groups.set(id, group);
   }
+  return [
+    { harness: "antigravity", provider: PROVIDER, id: DEFAULT_MODEL, name: "Default", isDefault: true, reasoning: false },
+    ...[...groups].map(([id, { name, levels }]): HarnessModel => ({
+      harness: "antigravity", provider: modelProvider(id), id, name,
+      ...(levels.length ? { reasoning: true, thinkingLevelMap: thinkingLevelMapFor((level) => levels.includes(level) ? level : null) } : { reasoning: false }),
+    })),
+  ];
+}
 
-  for (const variant of availableVariants) {
-    const id = text(variant.modelId).slice(0, 255);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    models.push({
-      harness: "antigravity",
-      provider: modelProvider(id),
-      id,
-      name: (text(variant.name) || id).slice(0, 255),
-      reasoning: false,
-    });
+/** The platform's read-only access always wins; there is no approval card, so no mode asks. */
+export function antigravityApprovalMode(input: RuntimeTurnInput): ApprovalMode {
+  if (input.accessMode === "read_only") {
+    if (input.approvalMode && input.approvalMode !== "read_only") throw new Error("The approval mode conflicts with read-only access");
+    return "read_only";
   }
-  return models;
+  const mode = input.approvalMode ?? "inherit";
+  if (!APPROVAL_MODES.includes(mode)) throw new Error(`Antigravity does not support the ${mode} approval mode`);
+  return mode;
 }
 
-function availableAcpModes(sessionResult: JsonRecord): string[] {
-  const fromModes = array(record(sessionResult.modes).availableModes).map((entry) => text(record(entry).id)).filter(Boolean);
-  if (fromModes.length) return fromModes;
-  const modeOption = array(sessionResult.configOptions).map(record).find((option) => text(option.id) === "mode" || text(option.category) === "mode");
-  return array(modeOption?.options).map((entry) => text(record(entry).value)).filter(Boolean);
+/** The user's deny rules plus Cohub's; a file Antigravity cannot parse contributes none, as for Antigravity. */
+export async function antigravityReadOnlySettings(): Promise<JsonRecord> {
+  const raw = await readFile(join(antigravityCliDir(), "settings.json"), "utf8").catch((error) => { if (missing(error)) return ""; throw error; });
+  let deny: string[] = [];
+  try { deny = array(record(record(JSON.parse(raw.replace(/^\uFEFF/, ""))).permissions).deny).filter((rule): rule is string => typeof rule === "string"); }
+  catch { /* No usable rules of the user's own. */ }
+  return { permissions: { deny: [...new Set([...deny, ...READ_ONLY_DENY])] } };
 }
 
-async function probeAcpSession(executable: string, cwd: string): Promise<{ models: HarnessModel[]; modes: ApprovalMode[] }> {
-  const host = new JsonRpcProcess(...harnessCommand(executable, acpBaseArgs(), cwd), cwd, "jsonrpc");
-  try {
-    await host.request("initialize", {
-      protocolVersion: 1,
-      clientCapabilities: {},
-      clientInfo: { name: "cohub", version: "1" },
-    }, INITIALIZE_TIMEOUT_MS);
-    const created = await host.request("session/new", { cwd, mcpServers: [] }, SESSION_TIMEOUT_MS);
-    const sessionId = text(created.sessionId);
-    if (sessionId) await host.request("session/close", { sessionId }, 5_000).catch(() => undefined);
-    const models = antigravityModels(created);
-    if (models.length <= 1) throw new Error("Antigravity ACP lists no models; sign in with `agy`");
-    return { models, modes: antigravityApprovalModes(availableAcpModes(created)) };
-  } finally {
-    await host.close().catch(() => undefined);
-  }
+function toolOutput(info: JsonRecord): string {
+  const error = record(info.error);
+  return text(info.output) || text(error.message) || text(info.error);
 }
 
-function probeApprovalModes(executable: string, cwd: string): Promise<ApprovalMode[]> {
-  const probe = probeAcpSession(executable, cwd).then((result) => result.modes);
-  supportedModes.set(executable, probe);
-  probe.catch(() => { if (supportedModes.get(executable) === probe) supportedModes.delete(executable); });
-  return probe;
-}
-
-function acpUsage(value: unknown): RuntimeMessage["usage"] {
-  const usage = record(value);
-  const count = (key: string) => typeof usage[key] === "number" ? usage[key] as number : 0;
-  const input = count("inputTokens");
-  const output = count("outputTokens");
-  const cacheRead = count("cachedReadTokens");
-  const cacheWrite = count("cachedWriteTokens");
-  const total = count("totalTokens") || input + output + cacheRead + cacheWrite;
-  if (!input && !output && !cacheRead && !cacheWrite && !total) return undefined;
-  return { input, output, cacheRead, cacheWrite, totalTokens: total };
-}
-
-function toolResultText(update: JsonRecord): string {
-  const rawOutput = update.rawOutput;
-  if (typeof rawOutput === "string" && rawOutput) return rawOutput;
-  if (rawOutput && typeof rawOutput === "object") {
-    const out = record(rawOutput);
-    const direct = text(out.output) || text(out.content) || text(out.error) || text(out.message);
-    if (direct) return direct;
-    return JSON.stringify(rawOutput);
-  }
-  const contentBlocks = array(update.content).map((entry) => {
-    const block = record(entry);
-    if (block.type === "content") return text(record(block.content).text);
-    return text(block.text) || text(block.content);
-  }).filter(Boolean);
-  if (contentBlocks.length) return contentBlocks.join("\n");
-  return text(update.title);
-}
-
-type Step = { ordinal: number; content: ContentBlock[] };
+type Message = { ordinal: number; step: number; content: ContentBlock[] };
 
 /**
- * Translate ACP `session/update` notifications onto Cohub's streaming protocol.
- * A step commits once all of its `tool_use` blocks have corresponding `tool_result` blocks and new output begins.
+ * Maps `--output-format stream-json` onto Cohub's streaming protocol. Each `agent_response` step opens a
+ * message; the `tool` steps after it are its tool calls, keyed by step index.
  */
 export function antigravityTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; model: string | null }) {
-  const steps: Step[] = [];
-  const owners = new Map<string, Step>();
-  let current: Step | null = null;
-  let open: { index: number; kind: "text" | "thinking" } | null = null;
+  let current: Message | null = null;
+  let count = 0;
   let model = identity.model;
-
-  const settled = (step: Step) => step.content.some((block) => block.type === "tool_use")
-    && step.content.every((block) => block.type !== "tool_use" || step.content.some((result) => result.type === "tool_result" && result.tool_use_id === block.id));
-
-  const snapshot = (step: Step): RuntimeMessage => ({
-    ordinal: step.ordinal,
-    content: [...step.content],
-    provider: identity.provider,
-    model,
-    stopReason: step.content.some((block) => block.type === "tool_use") ? "tool_use" : "stop",
+  let final: RuntimeMessage | null = null;
+  // `result.usage` counts the whole conversation, so this Turn's usage is the sum of its own steps.
+  const spent = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0 };
+  const settledContent = (content: ContentBlock[]) => content.map((block) => block.type === "text" ? { ...block, text: block.text.trimEnd() } : block);
+  const snapshot = (message: Message): RuntimeMessage => ({
+    ordinal: message.ordinal, content: settledContent(message.content), provider: identity.provider, model,
+    stopReason: message.content.some((block) => block.type === "tool_use") ? "tool_use" : "stop",
   });
-
-  const target = () => {
-    if (current && !settled(current)) return current;
+  const begin = (step: number) => {
     if (current) emit({ type: "message.commit", message: snapshot(current) });
-    current = { ordinal: steps.length, content: [] };
-    steps.push(current);
-    open = null;
+    current = { ordinal: count++, step, content: [] };
     emit({ type: "message.start", ordinal: current.ordinal });
     return current;
   };
-
-  const replace = (step: Step) => emit({ type: "content.replace", ordinal: step.ordinal, content: [...step.content] });
-
-  const append = (kind: "text" | "thinking", chunk: string) => {
-    if (!chunk) return;
-    const step = target();
-    if (!open || open.kind !== kind || open.index !== step.content.length - 1) {
-      step.content.push(kind === "text" ? { type: "text", text: "" } : { type: "thinking", thinking: "" });
-      open = { index: step.content.length - 1, kind };
+  const last = (): RuntimeMessage => current ? snapshot(current) : { ordinal: 0, content: [], provider: identity.provider, model };
+  const tool = (message: Message, step: JsonRecord) => {
+    const info = record(step.tool_info);
+    const id = `agy-step-${Number(step.step_index)}`;
+    const use: ContentBlock = { type: "tool_use", id, name: text(info.name) || text(step.tool_name) || "tool", input: record(info.parameters) };
+    const at = message.content.findIndex((block) => block.type === "tool_use" && block.id === id);
+    if (at >= 0) message.content[at] = use;
+    else message.content.push(use);
+    if (text(step.state) === "DONE") {
+      const index = message.content.findIndex((block) => block.type === "tool_use" && block.id === id);
+      const next = message.content[index + 1];
+      const result: ContentBlock = { type: "tool_result", tool_use_id: id, content: toolOutput(info), is_error: Boolean(info.error) };
+      message.content.splice(index + 1, next?.type === "tool_result" && next.tool_use_id === id ? 1 : 0, result);
     }
-    const block = step.content[open.index];
-    step.content[open.index] = block?.type === "thinking"
-      ? { type: "thinking", thinking: block.thinking + chunk }
-      : { type: "text", text: (block?.type === "text" ? block.text : "") + chunk };
-    emit({ type: "text.delta", ordinal: step.ordinal, index: open.index, kind, delta: chunk });
+    emit({ type: "content.replace", ordinal: message.ordinal, content: [...message.content] });
   };
-
-  const upsertTool = (update: JsonRecord) => {
-    const id = text(update.toolCallId);
-    if (!id) return;
-    const name = text(update.name) || text(update.kind) || "tool";
-    const rawInput = record(update.rawInput);
-    const input = Object.keys(rawInput).length ? rawInput : record(update.args);
-    const existingOwner = owners.get(id);
-    const step = existingOwner ?? target();
-    const index = step.content.findIndex((block) => block.type === "tool_use" && block.id === id);
-    if (index >= 0) {
-      const prev = step.content[index];
-      const mergedInput = Object.keys(input).length ? input : (prev?.type === "tool_use" ? prev.input : {});
-      step.content[index] = { type: "tool_use", id, name, input: mergedInput };
-    } else {
-      step.content.push({ type: "tool_use", id, name, input });
-      owners.set(id, step);
-      open = null;
-    }
-
-    const status = text(update.status);
-    if (status === "completed" || status === "failed") {
-      const toolIndex = step.content.findIndex((block) => block.type === "tool_use" && block.id === id);
-      if (toolIndex >= 0) {
-        const resultBlock: ContentBlock = {
-          type: "tool_result",
-          tool_use_id: id,
-          content: toolResultText(update),
-          is_error: status === "failed",
-        };
-        const next = step.content[toolIndex + 1];
-        step.content.splice(toolIndex + 1, next?.type === "tool_result" && next.tool_use_id === id ? 1 : 0, resultBlock);
-      }
-    }
-    replace(step);
-  };
-
-  const last = (): RuntimeMessage => current
-    ? snapshot(current)
-    : { ordinal: 0, content: [], provider: identity.provider, model };
-
   return {
+    /** The final `result`, or `null` while the Turn runs. */
+    result: () => final,
     last,
-    setModel(nextModel: string | null) { if (nextModel) model = nextModel; },
-    push(update: JsonRecord) {
-      const kind = text(update.sessionUpdate);
-      if (kind === "agent_message_chunk") {
-        append("text", text(record(update.content).text));
-        return;
+    push(event: JsonRecord): boolean {
+      if (event.event === "init") { model = text(record(event.init).model) || model; return false; }
+      if (event.event === "step_update") {
+        const step = record(event.step_update);
+        const index = Number(step.step_index);
+        const kind = text(step.step_type);
+        const usage = record(step.usage);
+        if (text(step.state) === "DONE") for (const key of Object.keys(spent) as Array<keyof typeof spent>) if (typeof usage[key] === "number") spent[key] += usage[key] as number;
+        if (kind === "agent_response") {
+          const message = current?.step === index ? current : begin(index);
+          const delta = text(step.text_delta);
+          if (!delta) return false;
+          const tail = message.content.at(-1);
+          if (tail?.type === "text") message.content[message.content.length - 1] = { type: "text", text: tail.text + delta };
+          else message.content.push({ type: "text", text: delta });
+          emit({ type: "text.delta", ordinal: message.ordinal, index: message.content.length - 1, kind: "text", delta });
+        } else if (kind === "tool") {
+          tool(current ?? begin(index), step);
+        }
+        return false;
       }
-      if (kind === "agent_thought_chunk") {
-        append("thinking", text(record(update.content).text));
-        return;
-      }
-      if (kind === "tool_call" || kind === "tool_call_update") {
-        upsertTool(update);
-        return;
-      }
-      if (kind === "config_option_update") {
-        const modelOption = array(update.configOptions).map(record).find((option) => text(option.id) === "model");
-        if (modelOption && text(modelOption.currentValue)) model = text(modelOption.currentValue);
-      }
-    },
-    finish(result: JsonRecord, aborted: boolean): RuntimeMessage {
-      const stop = text(result.stopReason);
-      const isAborted = aborted || stop === "cancelled";
-      const isError = !isAborted && stop === "error";
-      return {
+      if (event.event !== "result") return false;
+      const result = record(event.result);
+      const status = text(result.status);
+      const denied = array(result.denied_actions).map((entry) => text(record(entry).display_name) || text(record(entry).action)).filter(Boolean);
+      const answered = Boolean(text(result.response).trim());
+      const error = status === "SUCCESS"
+        ? !answered && denied.length ? `Antigravity denied ${[...new Set(denied)].join(", ")}: headless mode cannot ask. Allow it in ${join(antigravityCliDir(), "settings.json")} or choose full access.` : null
+        : text(result.error) || `Antigravity ended the Turn: ${status || "unknown status"}`;
+      final = {
         ...last(),
-        stopReason: isAborted ? "aborted" : isError ? "error" : "stop",
-        errorMessage: isError ? text(result.error) || "Turn failed" : null,
-        usage: acpUsage(result.usage),
+        stopReason: status === "INTERRUPTED" || status === "CANCELED" ? "aborted" : error ? "error" : "stop",
+        errorMessage: error,
+        usage: antigravityUsage(spent),
       };
+      return true;
     },
   };
 }
 
-/** Format projected Cohub history records as a compact system-prompt handoff block for ACP `session/new`. */
-async function readHandoffContext(path: string): Promise<string | null> {
+/** Projected Cohub history, read once and removed: it is handed over inside the first prompt. */
+async function readHandoff(path: string): Promise<string | null> {
   const raw = await readFile(path, "utf8").catch(() => "");
   await rm(path, { force: true }).catch(() => undefined);
-  if (!raw.trim()) return null;
-  const lines: string[] = [];
-  for (const entry of raw.split("\n")) {
-    if (!entry.trim()) continue;
+  const lines = raw.split("\n").flatMap((entry) => {
     try {
-      const rec = record(JSON.parse(entry));
-      const role = text(rec.role);
-      const body = text(rec.text);
-      if (role && body) lines.push(`[${role}]\n${body}`);
-    } catch { /* skip malformed line */ }
-  }
+      const value = record(JSON.parse(entry));
+      return text(value.role) && text(value.text) ? [`[${text(value.role)}]\n${text(value.text)}`] : [];
+    } catch { return []; }
+  });
   if (!lines.length) return null;
   const joined = lines.join("\n\n");
   const clipped = joined.length > MAX_HANDOFF_CHARS ? `...(earlier history truncated)\n\n${joined.slice(-MAX_HANDOFF_CHARS)}` : joined;
-  return `<cohub_session_history>\nThe following prior turns occurred earlier in this Cohub Chat before continuing in Antigravity:\n\n${clipped}\n</cohub_session_history>`;
+  return `<${HANDOFF_TAG}>\nEarlier turns of this Cohub chat, before it continued in Antigravity:\n\n${clipped}\n</${HANDOFF_TAG}>`;
 }
 
 function summarizeBlocks(blocks: ContentBlock[]): string {
@@ -346,201 +237,147 @@ function summarizeBlocks(blocks: ContentBlock[]): string {
   return parts.join("\n");
 }
 
-async function buildAcpPrompt(input: RuntimeTurnInput): Promise<{ blocks: JsonRecord[]; plainText: string }> {
-  const blocks: JsonRecord[] = [];
-  const textParts: string[] = [];
+/** Stream-json input takes text only; images go beside it as files, which `read_file` shows the model. */
+async function prompt(input: RuntimeTurnInput, directory: () => Promise<string>, handoff: string | null): Promise<string> {
+  const parts: string[] = [];
+  const images: string[] = [];
   for (const block of input.messages.flatMap((message) => message.content)) {
-    if (block.type === "image") {
-      const image = await inlineImage(block);
-      blocks.push({ type: "image", data: image.data, mimeType: image.mimeType });
-      continue;
-    }
-    const content = block.type === "text" ? block.text : JSON.stringify(block);
-    if (content) {
-      blocks.push({ type: "text", text: content });
-      textParts.push(content);
-    }
+    if (block.type !== "image") { parts.push(block.type === "text" ? block.text : JSON.stringify(block)); continue; }
+    const image = await inlineImage(block);
+    const path = join(await directory(), `image-${images.length + 1}.${IMAGE_EXTENSIONS[image.mimeType] ?? "png"}`);
+    await writeFile(path, Buffer.from(image.data, "base64"), { mode: 0o600 });
+    images.push(path);
   }
-  if (!blocks.length) blocks.push({ type: "text", text: "" });
-  return { blocks, plainText: textParts.join("\n\n").trim() };
+  return [
+    handoff,
+    parts.join("\n\n").trim(),
+    images.length ? `Attached images (open them with read_file):\n${images.map((path) => `- ${path}`).join("\n")}` : null,
+  ].filter(Boolean).join("\n\n");
 }
 
 /**
- * Run one Cohub Turn in Antigravity via `agy acp --stdio`.
- * New/handoff sessions use `session/new` (carrying projected Cohub history via `_meta.antigravity.systemPrompt.append`),
- * later Turns resume via `session/resume`. Interactive permissions map to Cohub approval cards.
+ * One `agy --input-format stream-json` process per Turn, continuing a conversation with `--conversation`.
+ * The CLI reports its conversation id before it reads a prompt, so the Turn starts on the real file.
  */
 async function runAntigravity(executor: Executor, turn: HarnessTurn): Promise<HarnessRun> {
   const { input, signal, context } = turn;
-  const executable = executor.executables.antigravity || BINARY;
-  const modes = await (supportedModes.get(executable) ?? probeApprovalModes(executable, executor.cwd)).catch((): ApprovalMode[] => ["inherit", "auto", "full_access", "read_only"]);
-  const mode = antigravityApprovalMode(input, modes);
+  const mode = antigravityApprovalMode(input);
   const prepare = (resumable: (transcript: TranscriptState) => boolean) => executor.sessions.prepare({
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    harness: "antigravity",
-    cwd: executor.cwd,
-    provider: input.provider,
-    context: input.context,
-    signal,
-    resumable,
+    sessionId: input.sessionId, turnId: input.turnId, harness: "antigravity", cwd: executor.cwd,
+    provider: input.provider, context: input.context, signal, resumable,
   });
-
-  // Without a live control plane into user IDE sessions, Cohub continues only sessions it started.
+  // Without a control plane, a terminal conversation is read-only: Cohub continues only conversations it started.
   let prepared = await prepare((transcript) => transcript.path !== turn.diverged && transcript.origin === "cohub");
   let session = prepared.session;
-  const requestedModel = input.model && input.model !== DEFAULT_MODEL ? input.model : null;
-  const translator = antigravityTranslator(turn.emit, {
-    provider: input.provider || (requestedModel ? modelProvider(requestedModel) : PROVIDER),
-    model: requestedModel,
-  });
-
-  const extraArgs = mode === "full_access" ? ["--dangerously-skip-permissions"] : [];
+  const requested = prepared.resume === "native" ? session.nativeSessionId : null;
+  const model = input.model && input.model !== DEFAULT_MODEL ? input.model : null;
+  // Cohub has already fitted the level to the model's own; `--effort` has no `off`.
+  const effort = isModelThinkingLevel(input.thinkingLevel) && input.thinkingLevel !== "off" ? input.thinkingLevel : null;
+  let created: string | null = null;
+  const directory = async () => created ??= await mkdtemp(join(tmpdir(), "cohub-antigravity-"));
   let host: JsonRpcProcess | null = null;
-  let message: RuntimeMessage = { ordinal: 0, content: [], provider: PROVIDER, model: requestedModel };
+  const translator = antigravityTranslator(turn.emit, { provider: input.provider || (model ? modelProvider(model) : PROVIDER), model });
+  let message: RuntimeMessage = { ordinal: 0, content: [] };
   let begun = false;
-  let sentText = "";
-  let beforeSize = 0;
-
+  let before = 0;
+  let ownStep: number | null = null;
   try {
-    const promptPayload = await buildAcpPrompt(input);
-    sentText = promptPayload.plainText;
+    const settings = mode === "read_only" ? join(await directory(), "settings.json") : null;
+    if (settings) await writeFile(settings, JSON.stringify(await antigravityReadOnlySettings()), { mode: 0o600 });
+    const args = [
+      "--input-format", "stream-json", "--output-format", "stream-json",
+      ...(requested ? ["--conversation", requested] : []),
+      ...(model ? ["--model", model] : []),
+      ...(effort ? ["--effort", effort] : []),
+      ...(mode === "full_access" ? ["--dangerously-skip-permissions"] : []),
+      ...(settings ? ["--settings", settings] : []),
+    ];
     signal.throwIfAborted();
-
-    host = new JsonRpcProcess(...harnessCommand(executable, acpBaseArgs(extraArgs), executor.cwd), executor.cwd, "jsonrpc", turnEnvironment(input));
-    watchHost(host, executor.diagnostics, context);
-    const rpc = host;
-
-    await rpc.request("initialize", {
-      protocolVersion: 1,
-      clientCapabilities: {},
-      clientInfo: { name: "cohub", version: "1" },
-    }, INITIALIZE_TIMEOUT_MS);
-
-    let opened: JsonRecord | null = null;
-    if (prepared.resume === "native") {
-      opened = await rpc.request("session/resume", {
-        sessionId: session.nativeSessionId,
-        cwd: executor.cwd,
-        mcpServers: [],
-      }, SESSION_TIMEOUT_MS).catch(() => null);
-      if (!opened) prepared = await prepare(() => false);
-    }
-
-    if (!opened) {
-      session = prepared.session;
-      const handoffAppend = prepared.resume === "handoff" ? await readHandoffContext(session.path) : null;
-      const readOnlyNote = input.accessMode === "read_only" || mode === "read_only"
-        ? "This session is strictly read-only. Do not modify workspace files, do not run write/shell commands, and do not create artifact files."
-        : null;
-      const systemAppend = [handoffAppend, readOnlyNote].filter(Boolean).join("\n\n");
-      opened = await rpc.request("session/new", {
-        cwd: executor.cwd,
-        mcpServers: [],
-        ...(systemAppend ? { _meta: { antigravity: { systemPrompt: { append: systemAppend } } } } : {}),
-      }, SESSION_TIMEOUT_MS);
-    }
-
-    const acpSessionId = text(opened.sessionId) || session.nativeSessionId;
-    const realPath = antigravityTranscriptPath(acpSessionId, antigravityPrimaryAppDataDir());
-    if (acpSessionId !== session.nativeSessionId || realPath !== session.path) {
-      session = { ...session, nativeSessionId: acpSessionId, path: realPath };
-    }
-    beforeSize = prepared.resume === "native" ? await stat(session.path).then((info) => info.size, () => 0) : 0;
-
-    const currentModel = text(record(opened.models).currentModelId);
-    if (!requestedModel && currentModel) translator.setModel(currentModel);
-
-    // Apply approval mode, model, and thinking level before sending the prompt.
-    const acpMode = antigravityAcpMode(mode);
-    if (acpMode) {
-      await rpc.request("session/set_mode", { sessionId: acpSessionId, modeId: acpMode }, 15_000).catch(() => undefined);
-    }
-    if (requestedModel) {
-      await rpc.request("session/set_config_option", { sessionId: acpSessionId, configId: "model", value: requestedModel }, 15_000)
-        .catch(() => rpc.request("session/set_model", { sessionId: acpSessionId, modelId: requestedModel }, 15_000));
-    }
-    const effort = isModelThinkingLevel(input.thinkingLevel) && input.thinkingLevel !== "off" ? input.thinkingLevel : null;
-    if (effort) {
-      await rpc.request("session/set_config_option", { sessionId: acpSessionId, configId: "thought_level", value: effort }, 15_000).catch(() => undefined);
-    }
-
-    signal.throwIfAborted();
-    await turn.started(session);
-    begun = true;
-
-    const approvalScope = new AbortController();
-    const cancel = () => {
-      approvalScope.abort();
-      try { rpc.write({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: acpSessionId } }); } catch { /* ignore */ }
-    };
-    let escalation: ReturnType<typeof setTimeout> | undefined;
-    const onAbort = () => {
-      cancel();
-      escalation = setTimeout(() => void rpc.close().catch(() => undefined), ABORT_ESCALATION_MS);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-
+    const rpc = new JsonRpcProcess(...harnessCommand(executor.executables.antigravity || BINARY, args, executor.cwd), executor.cwd, "stream", turnEnvironment(input));
+    host = rpc;
+    watchHost(rpc, executor.diagnostics, context);
+    let ready: (conversation: string) => void = () => {};
+    let fail: (error: unknown) => void = () => {};
+    let finish: (error?: unknown) => void = () => {};
+    let started = false;
     const offEvent = rpc.onEvent((event) => {
-      // Server-initiated permission request has both `id` and `method`.
-      if (event.id != null && event.method === "session/request_permission") {
-        const requestId = event.id;
-        void answerAntigravityApproval(record(event.params), input, mode, executor.approvals, grants, approvalScope.signal)
-          .then((result) => { try { rpc.write({ jsonrpc: "2.0", id: requestId, result }); } catch { /* ignore if closed */ } })
-          .catch(() => { try { rpc.write({ jsonrpc: "2.0", id: requestId, result: { outcome: { outcome: "cancelled" } } }); } catch { /* ignore */ } });
+      if (!started) {
+        if (event.event === "init") { started = true; ready(text(event.conversation_id)); translator.push(event); }
+        else if (event.event === "result") fail(new Error(text(record(event.result).error) || "Antigravity did not start a conversation"));
         return;
       }
-      if (event.method === "session/update") {
-        const params = record(event.params);
-        if (text(params.sessionId) && text(params.sessionId) !== acpSessionId) return;
-        translator.push(record(params.update));
-      }
+      const step = record(event.step_update);
+      if (ownStep === null && text(step.step_type) === "user_input" && typeof step.step_index === "number") ownStep = step.step_index;
+      try { if (translator.push(event)) finish(); } catch (error) { finish(error); }
     });
-
+    const offFailure = rpc.onFailure((error) => { fail(error); finish(error); });
     try {
-      if (signal.aborted) onAbort();
-      const promptResult = await rpc.request("session/prompt", {
-        sessionId: acpSessionId,
-        prompt: promptPayload.blocks,
-      }, PROMPT_TIMEOUT_MS);
-      message = translator.finish(promptResult, signal.aborted);
+      const conversation = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Antigravity did not start a conversation in time")), STARTUP_TIMEOUT_MS);
+        const abort = () => reject(signal.reason);
+        signal.addEventListener("abort", abort, { once: true });
+        const settle = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); };
+        ready = (id) => { settle(); if (id) resolve(id); else reject(new Error("Antigravity reported no conversation id")); };
+        fail = (error) => { settle(); reject(error); };
+      });
+      if (requested && conversation !== requested) {
+        // `--conversation` silently starts a new conversation when the old one is gone; history goes into the prompt.
+        executor.diagnostics?.log("warn", "harness.antigravity_conversation_missing", { conversation: requested }, { ...context, component: "harness" });
+        prepared = await prepare(() => false);
+      }
+      session = { ...prepared.session, nativeSessionId: conversation, path: antigravityTranscriptPath(conversation) };
+      const handoff = prepared.resume === "handoff" ? await readHandoff(prepared.session.path) : null;
+      const content = await prompt(input, directory, handoff);
+      before = prepared.resume === "native" ? await stat(session.path).then((info) => info.size, () => 0) : 0;
+      signal.throwIfAborted();
+      await turn.started(session);
+      begun = true;
+      await new Promise<void>((resolve, reject) => {
+        let escalation: ReturnType<typeof setTimeout> | undefined;
+        let done = false;
+        const abort = () => {
+          rpc.interrupt();
+          escalation = setTimeout(() => void rpc.close().catch(() => undefined), ABORT_ESCALATION_MS);
+        };
+        finish = (error?: unknown) => {
+          if (done) return;
+          done = true;
+          signal.removeEventListener("abort", abort);
+          clearTimeout(escalation);
+          if (error) reject(error); else resolve();
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        try { rpc.write({ event: "user", message: { content: content || " " } }); } catch (error) { finish(error); }
+        if (signal.aborted) abort();
+      });
     } finally {
-      approvalScope.abort();
-      clearTimeout(escalation);
-      signal.removeEventListener("abort", onAbort);
       offEvent();
+      offFailure();
     }
-
-    // Best-effort close session so Antigravity flushes transcript bytes.
-    await rpc.request("session/close", { sessionId: acpSessionId }, 5_000).catch(() => undefined);
-    await new Promise((resolve) => setTimeout(resolve, FLUSH_WAIT_MS));
+    message = translator.result() ?? translator.last();
+    if (signal.aborted) message = { ...message, stopReason: "aborted", errorMessage: null };
   } catch (error) {
     if (!begun) {
-      if (host) await host.close().catch(() => undefined);
-      if (prepared.resume === "handoff") await rm(session.path, { force: true }).catch(() => undefined);
+      if (host) await closeHost(host, null).catch(() => undefined);
+      if (created) await rm(created, { recursive: true, force: true }).catch(() => undefined);
+      if (prepared.resume === "handoff") await rm(prepared.session.path, { force: true }).catch(() => undefined);
       throw error;
     }
-    message = {
-      ...translator.last(),
-      stopReason: signal.aborted ? "aborted" : "error",
-      errorMessage: signal.aborted ? null : describeError(error),
-    };
+    message = { ...translator.last(), stopReason: signal.aborted ? "aborted" : "error", errorMessage: signal.aborted ? null : describeError(error) };
   }
-
-  // Mark Cohub's Turn in the ingest ledger so terminal Turns appended afterwards sync cleanly without re-sending this one.
-  const transcriptSize = await stat(session.path).then((info) => info.size, () => 0);
-  if (transcriptSize > 0) {
-    const turns = (await readAntigravityTranscript(session.path, session.nativeSessionId).catch(() => null))?.turns ?? [];
-    const recorded = turns.filter((entry) => entry.startBytes >= beforeSize && entry.startBytes < transcriptSize);
-    const words = (blocks: ContentBlock[]) => blocks.flatMap((block) => block.type === "text" ? [block.text] : []).join("").trim();
-    const matching = sentText ? recorded.filter((entry) => words(entry.userContent) === sentText) : [];
-    const own = matching.length === 1 ? matching[0] : recorded.length === 1 ? recorded[0] : recorded.at(-1);
-    const earlier = turns.filter((entry) => entry.startBytes < beforeSize).at(-1);
+  // Closing input lets the CLI finish its transcript before the executor reaps the process.
+  host?.endInput();
+  await host?.exited(FLUSH_TIMEOUT_MS);
+  if (created) await rm(created, { recursive: true, force: true }).catch(() => undefined);
+  const transcript = await readAntigravityTranscript(session.path, session.nativeSessionId).catch(() => null);
+  if (transcript) {
+    // The run reported the step index of its prompt, which names Cohub's Turn in the file exactly. Without
+    // it the server has the file through the Turns before this run; terminal Turns after them still sync.
+    const start = ownStep === null ? null : await antigravityStepStart(session.path, ownStep);
+    const own = start === null ? undefined : transcript.turns.find((entry) => entry.startBytes === start);
+    const earlier = transcript.turns.filter((entry) => entry.startBytes < before).at(-1);
     executor.ingest.adopt(session, input.sessionId, { turnKey: (own ?? earlier)?.key ?? null, turnId: input.turnId });
-  } else {
-    executor.ingest.adopt(session, input.sessionId, { turnKey: null, turnId: input.turnId });
   }
-
   return { session, resume: prepared.resume, message, host };
 }
 
@@ -548,14 +385,20 @@ export const antigravityHarness: LocalHarnessAdapter = {
   id: "antigravity",
   binary: BINARY,
   async models(executable, cwd) {
-    const result = await probeAcpSession(executable, cwd);
-    supportedModes.set(executable, Promise.resolve(result.modes));
-    return result.models;
+    // Go's flag package prints usage on stderr.
+    const help = await command(executable, ["--help"], cwd, 30_000).then(({ stdout, stderr }) => stdout + stderr, (error: { stdout?: string; stderr?: string }) => `${error.stdout ?? ""}${error.stderr ?? ""}`);
+    const missingFlags = REQUIRED_FLAGS.filter((flag) => !new RegExp(`(^|\\s)${flag}(?=\\s|$)`, "m").test(help));
+    if (missingFlags.length) throw new Error(`${executable} is not a supported Antigravity CLI (missing ${missingFlags.join(", ")}); update Antigravity`);
+    const { stdout } = await command(executable, ["models"], cwd, 60_000).catch((error: unknown) => { throw commandError(error); });
+    const models = antigravityModels(stdout);
+    if (models.length <= 1) throw new Error("Antigravity lists no models; run `agy` to sign in");
+    return models;
   },
-  approvalModes: probeApprovalModes,
+  approvalModes: async () => APPROVAL_MODES,
   run: runAntigravity,
   session: {
-    path: (nativeSessionId) => antigravityTranscriptPath(nativeSessionId),
+    // Only a staging file: projected history is handed over inside the first prompt, never as Antigravity's own state.
+    path: (nativeSessionId) => join(tmpdir(), "cohub-antigravity-handoff", `${nativeSessionId}.jsonl`),
     startsWithoutFile: true,
     project: (input) => projectChainedSession(input, "antigravity", { id: "cohubId", parent: "cohubParentId" }, (segment) => {
       const summary = summarizeBlocks(segment.blocks);

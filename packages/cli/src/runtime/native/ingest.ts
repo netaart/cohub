@@ -107,14 +107,6 @@ const HEADER_CONCURRENCY = 16;
 export const owns = (root: string, cwd: string, nested: readonly string[] = []) => Boolean(cwd) && containsNativePath(root, cwd) && !nested.some((inner) => containsNativePath(inner, cwd));
 
 /** Every transcript of the bound directory and its subdirectories, newest first. */
-function matchingHeaderCwd(root: string, header: { cwd: string; cwds?: string[] }, nested: readonly string[] = []): string | null {
-  if (owns(root, header.cwd, nested)) return header.cwd;
-  for (const extra of header.cwds ?? []) {
-    if (owns(root, extra, nested)) return extra;
-  }
-  return null;
-}
-
 export async function discoverTranscripts(cwd: string, harnesses: Harness[], options: { headers?: boolean; nested?: readonly string[]; signal?: AbortSignal } = {}): Promise<Array<NativeCandidate & { nativeSessionId?: string }>> {
   const found: Array<NativeCandidate & { nativeSessionId?: string }> = [];
   for (const harness of harnesses) {
@@ -145,7 +137,7 @@ export async function discoverTranscripts(cwd: string, harnesses: Harness[], opt
       const index = next++;
       const candidate = found[index] as NativeCandidate;
       const header = await readSessionHeader(candidate.path, candidate.harness, options.signal).catch(() => null);
-      if (header?.thread === "user" && matchingHeaderCwd(cwd, header, options.nested)) kept[index] = { ...candidate, nativeSessionId: header.nativeSessionId };
+      if (header?.thread === "user" && owns(cwd, header.cwd, options.nested)) kept[index] = { ...candidate, nativeSessionId: header.nativeSessionId };
     }
   }));
   return kept.filter((candidate) => candidate !== null);
@@ -581,16 +573,14 @@ export class NativeIngest {
     // A paused harness uploads nothing, not even for transcripts it already tracks.
     if (!harness || !this.harnesses.includes(harness)) return;
     if (previous && (previous.threadKind !== "user" || !this.owns(previous.cwd))) return;
-    let matchedCwd = previous?.cwd ?? null;
     if (!previous) {
       // A header is read once per file: it names the project and the thread's purpose.
       const header = await readSessionHeader(path, harness);
       if (!header) return;
-      matchedCwd = matchingHeaderCwd(this.options.cwd, header, this.nested);
-      if (!matchedCwd) { this.foreign.add(path); return; }
+      if (!this.owns(header.cwd)) { this.foreign.add(path); return; }
       if (header.thread !== "user") {
         // Codex's own reviews, compaction runs and spawned agents are not chats; remember and skip them.
-        this.states.set(path, this.blank(path, header.nativeSessionId, matchedCwd, harness, header.thread, info));
+        this.states.set(path, this.blank(path, header.nativeSessionId, header.cwd, harness, header.thread, info));
         this.markDirty(path);
         return;
       }
@@ -605,7 +595,7 @@ export class NativeIngest {
       }
     }
     const transcript = await readTranscript(path, harness);
-    const state = previous ?? this.blank(path, transcript.nativeSessionId, matchedCwd ?? transcript.cwd, harness, "user", { size: -1, mtimeMs: 0, ino: 0 });
+    const state = previous ?? this.blank(path, transcript.nativeSessionId, transcript.cwd, harness, "user", { size: -1, mtimeMs: 0, ino: 0 });
     this.states.set(path, state);
     // The file counts as read only once the server confirmed it; a failed send is retried.
     await this.apply(state, transcript.turns, lane, info.mtimeMs);

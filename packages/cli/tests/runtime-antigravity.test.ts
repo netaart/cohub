@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { ApprovalDecision, RuntimeExecutionEvent, RuntimeTurnInput } from "@neta-art/cohub";
+import type { RuntimeExecutionEvent, RuntimeTurnInput } from "@neta-art/cohub";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
 import { RuntimeDiagnostics } from "../src/runtime/diagnostics.js";
 import { antigravityHarness } from "../src/runtime/harnesses/antigravity.js";
@@ -21,18 +21,17 @@ import {
 import { discoverHarnesses } from "../src/runtime/harnesses/index.js";
 import { NativeRuntime } from "../src/runtime/native/daemon.js";
 import { executeTurn } from "../src/runtime/native/execution.js";
-import { discoverTranscripts } from "../src/runtime/native/ingest.js";
 import { archiveStorageFixture } from "./fixtures/runtime-archive-storage.js";
 import { runtimeProjectionSource } from "./fixtures/runtime-projection-source.js";
 
 const fixture = fileURLToPath(new URL("./fixtures/runtime-antigravity.mjs", import.meta.url));
-const ENV = ["ANTIGRAVITY_GEMINI_DIR", "ANTIGRAVITY_DATA_DIR", "ANTIGRAVITY_FIXTURE", "PATH"] as const;
+const ENV = ["HOME", "ANTIGRAVITY_FIXTURE", "ANTIGRAVITY_FIXTURE_LOG", "PATH"] as const;
 
 async function withEnvironment(run: (root: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), "cohub-antigravity-"));
   const previous = Object.fromEntries(ENV.map((key) => [key, process.env[key]]));
-  process.env.ANTIGRAVITY_GEMINI_DIR = join(root, "gemini");
-  process.env.ANTIGRAVITY_DATA_DIR = "antigravity-cli";
+  process.env.HOME = join(root, "home");
+  process.env.ANTIGRAVITY_FIXTURE_LOG = join(root, "calls.jsonl");
   delete process.env.ANTIGRAVITY_FIXTURE;
   await chmod(fixture, 0o755);
   await mkdir(join(root, "bin"));
@@ -47,175 +46,123 @@ async function withEnvironment(run: (root: string) => Promise<void>) {
   }
 }
 
-test("Antigravity discovery reports models, thinking levels, and approval modes; skips when models missing", () => withEnvironment(async (root) => {
+const calls = async (root: string) => (await readFile(join(root, "calls.jsonl"), "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line) as { args: string[]; settings: { permissions?: { deny?: string[] } } });
+const reply = (result: { event: { message: { content: unknown[] } } }) => JSON.stringify(result.event.message.content);
+
+test("Antigravity discovery groups effort variants into thinking levels and explains a failed startup check", () => withEnvironment(async (root) => {
   const catalog = await discoverHarnesses(["antigravity"], {}, root);
   assert.deepEqual(catalog.harnesses, ["antigravity"]);
-  assert.deepEqual(catalog.models.map((m) => m.id), ["default", "gemini-4-neon", "claude-opus-5-5", "gpt-oss-120b-medium"]);
-  assert.equal(catalog.models[0]?.isDefault, true);
-  assert.equal(catalog.models[1]?.provider, "google");
-  assert.equal(catalog.models[1]?.reasoning, true);
+  assert.deepEqual(catalog.models.map((model) => [model.id, model.name, model.provider, model.reasoning]), [
+    ["default", "Default", "antigravity", false],
+    ["gemini-4-neon", "Gemini 4 Neon", "google", true],
+    ["gemini-pro-orchestrator", "Orchestrator (Carbon)", "google", false],
+    ["claude-opus-5-5", "Claude Opus 5.5", "anthropic", true],
+  ]);
   assert.equal(catalog.models[1]?.thinkingLevelMap?.high, "high");
-  assert.equal(catalog.models[2]?.provider, "anthropic");
-  assert.equal(catalog.models[3]?.reasoning, false);
-  assert.deepEqual(catalog.approvalModes?.antigravity, ["inherit", "auto", "full_access", "read_only"]);
+  assert.equal(catalog.models[1]?.thinkingLevelMap?.medium, null);
+  assert.deepEqual(catalog.approvalModes?.antigravity, ["inherit", "full_access", "read_only"]);
 
-  process.env.ANTIGRAVITY_FIXTURE = "no-models";
-  const skipped: string[] = [];
-  const empty = await discoverHarnesses(["antigravity"], {}, root, (harness, error) => skipped.push(`${harness}:${(error as Error).message}`));
-  assert.deepEqual(empty.harnesses, []);
-  assert.match(skipped[0] ?? "", /lists no models/);
+  for (const [mode, reason] of [["signed-out", /Please sign in to view available models/], ["old", /missing --settings/]] as const) {
+    process.env.ANTIGRAVITY_FIXTURE = mode;
+    const skipped: string[] = [];
+    const empty = await discoverHarnesses(["antigravity"], {}, root, (harness, error) => skipped.push(`${harness}:${(error as Error).message}`));
+    assert.deepEqual(empty.harnesses, []);
+    assert.match(skipped[0] ?? "", reason);
+  }
 }));
 
-test("Antigravity Turns hand over Cohub history, stream thinking/tools/text, resume natively, enforce approvals and cancel", () => withEnvironment(async (root) => {
-  const spaceId = randomUUID();
-  const sessionId = randomUUID();
-  const history = randomUUID();
+test("Antigravity Turns hand over history, resume by conversation, enforce read-only and stop", () => withEnvironment(async (root) => {
+  const spaceId = randomUUID(), sessionId = randomUUID(), history = randomUUID();
   const source = runtimeProjectionSource();
-  source.addTurn(sessionId, history, {
-    userContent: [{ type: "text", text: "historical fact" }],
-    assistantContent: [{ type: "text", text: "noted" }],
-  });
+  source.addTurn(sessionId, history, { userContent: [{ type: "text", text: "remember fact-one" }], assistantContent: [{ type: "text", text: "noted" }] });
   const storage = await archiveStorageFixture();
   const stateRoot = join(root, "state");
-  const diagnostics = new RuntimeDiagnostics({ root: stateRoot, spaceId });
   const native = new NativeRuntime({
-    spaceId,
-    root,
-    stateRoot,
-    harnesses: ["antigravity"],
-    executables: {},
-    identity: "test",
-    config: null,
-    archives: new RuntimeArchiveStore(join(stateRoot, "archives"), storage.transport),
-    projectionSource: source,
-    diagnostics,
+    spaceId, root, stateRoot, harnesses: ["antigravity"], executables: {}, identity: "test", config: null,
+    archives: new RuntimeArchiveStore(join(stateRoot, "archives"), storage.transport), projectionSource: source,
+    diagnostics: new RuntimeDiagnostics({ root: stateRoot, spaceId }),
   });
-
-  const makeTurn = (
-    throughTurnId: string | null,
-    content: RuntimeTurnInput["messages"][number]["content"],
-    options: Partial<RuntimeTurnInput> = {},
-  ): RuntimeTurnInput => {
+  const turn = (throughTurnId: string | null, content: RuntimeTurnInput["messages"][number]["content"], options: Partial<RuntimeTurnInput> = {}): RuntimeTurnInput => {
     const turnId = randomUUID();
     return {
-      spaceId,
-      sessionId,
-      turnId,
-      userMessageId: turnId,
-      harness: "antigravity",
-      accessMode: "full_access",
-      ...options,
+      spaceId, sessionId, turnId, userMessageId: turnId, harness: "antigravity", accessMode: "full_access", ...options,
       messages: [{ turnId, userMessageId: turnId, userId: "author", content }],
       context: { revision: randomUUID(), throughTurnId, messages: [] },
     };
   };
-
-  const settle = async (input: RuntimeTurnInput, result: Awaited<ReturnType<typeof executeTurn>>) => {
+  const run = async (input: RuntimeTurnInput, signal = new AbortController().signal, events: RuntimeExecutionEvent[] = []) => {
+    const result = await executeTurn(native.executor, input, (event) => events.push(event), signal, null);
     await native.executor.results.record(result.session, input, null, [result.event]);
     await native.executor.results.acknowledge(input.sessionId, input.turnId);
+    return result;
   };
-
   try {
-    // 1. Handoff + streaming thought, tool_call, tool_result, message, usage, image
-    const events: RuntimeExecutionEvent[] = [];
-    const first = makeTurn(
-      history,
-      [{ type: "text", text: "with-read" }, { type: "image", source: { type: "base64", media_type: "image/png", data: "eA==" } }],
-      { model: "default", thinkingLevel: "medium" },
-    );
-    const firstResult = await executeTurn(native.executor, first, (event) => events.push(event), new AbortController().signal, null);
+    const first = turn(history, [{ type: "text", text: "hello" }, { type: "image", source: { type: "base64", media_type: "image/png", data: "eA==" } }], { model: "gemini-4-neon", thinkingLevel: "high" });
+    const firstResult = await run(first);
     assert.equal(firstResult.event.resume, "handoff");
     assert.equal(firstResult.event.archive, null);
-    assert.deepEqual(firstResult.event.message.content, [{ type: "text", text: "history retained mode:default model:gemini-4-neon effort:medium images:1" }]);
-    assert.deepEqual(firstResult.event.message.usage, { input: 12, output: 5, cacheRead: 2, cacheWrite: 0, totalTokens: 19 });
-    const committed = events.find((event) => event.type === "message.commit");
-    assert.deepEqual(committed?.type === "message.commit" && committed.message.content, [
-      { type: "thinking", thinking: "plan" },
-      { type: "text", text: "Reading" },
-      { type: "tool_use", id: "c1", name: "read_file", input: { Path: "a.txt" } },
-      { type: "tool_result", tool_use_id: "c1", content: "ok", is_error: false },
-    ]);
-    await settle(first, firstResult);
+    assert.deepEqual(firstResult.event.message.content, [{ type: "text", text: "history:fact-one model:gemini-4-neon effort:high skip:false images:1" }]);
+    // Each step's own usage; the result's counts the whole conversation.
+    assert.deepEqual(firstResult.event.message.usage, { input: 10, output: 5, cacheRead: 2, cacheWrite: 0, totalTokens: 17 });
 
-    // 2. Native resume with explicit model & effort
-    const second = makeTurn(first.turnId, [{ type: "text", text: "continue" }], { model: "claude-opus-5-5", thinkingLevel: "low", approvalMode: "auto" });
-    const secondResult = await executeTurn(native.executor, second, () => {}, new AbortController().signal, null);
+    // Cohub's Turn is named by the step index its run reported, even beside an identical terminal Turn.
+    assert.equal(native.executor.ingest.transcriptFor(sessionId, "antigravity", first.turnId)?.throughTurnId, first.turnId);
+    const racedTurn = turn(null, [{ type: "text", text: "then-terminal" }], { sessionId: randomUUID() });
+    const raced = await run(racedTurn);
+    const [own, terminal] = (await readAntigravityTranscript(raced.session.path, raced.session.nativeSessionId)).turns;
+    assert.deepEqual(terminal?.userContent, own?.userContent);
+    assert.equal(native.executor.ingest.transcriptFor(racedTurn.sessionId, "antigravity", racedTurn.turnId)?.throughTurnKey, own?.key);
+
+    const events: RuntimeExecutionEvent[] = [];
+    const second = turn(first.turnId, [{ type: "text", text: "need-cmd" }], { approvalMode: "full_access" });
+    const secondResult = await run(second, undefined, events);
     assert.equal(secondResult.event.resume, "native");
     assert.equal(secondResult.session.nativeSessionId, firstResult.session.nativeSessionId);
-    assert.deepEqual(secondResult.event.message.content, [{ type: "text", text: "history retained mode:auto model:claude-opus-5-5 effort:low" }]);
-    await settle(second, secondResult);
+    assert.deepEqual(secondResult.event.message.content, [{ type: "text", text: "command done" }]);
+    const committed = events.find((event) => event.type === "message.commit");
+    assert.deepEqual(committed?.type === "message.commit" && committed.message.content, [
+      { type: "tool_use", id: "agy-step-4", name: "run_command", input: { CommandLine: "echo hello" } },
+      { type: "tool_result", tool_use_id: "agy-step-4", content: "ran\n", is_error: false },
+    ]);
 
-    // 3. Approval card: accept_for_session remembers command for this chat, and decline rejects file edit
-    const requestedApprovals: Array<{ kind: string; command?: string; paths?: string[] }> = [];
-    let nextDecision: ApprovalDecision = "accept_for_session";
-    native.executor.approvals.connect(async (event) => {
-      if (event.type === "approval") {
-        requestedApprovals.push({ kind: event.approval.kind, command: event.approval.command, paths: event.approval.paths });
-        queueMicrotask(() => native.executor.approvals.decide({
-          sessionId: event.sessionId,
-          turnId: event.turnId,
-          approvalId: event.approval.id,
-          decision: nextDecision,
-        }));
-      }
-    });
+    // Headless mode cannot ask; a denial without an answer is reported, not silent.
+    const deniedTurn = turn(second.turnId, [{ type: "text", text: "need-cmd" }]);
+    const denied = await run(deniedTurn);
+    assert.equal(denied.event.message.stopReason, "error");
+    assert.match(denied.event.message.errorMessage ?? "", /Antigravity denied Bash/);
 
-    const cmdTurn1 = makeTurn(second.turnId, [{ type: "text", text: "need-cmd" }], { approvalMode: "inherit" });
-    const cmdRes1 = await executeTurn(native.executor, cmdTurn1, () => {}, new AbortController().signal, null);
-    assert.equal(requestedApprovals.length, 1);
-    assert.equal(requestedApprovals[0]?.kind, "command");
-    assert.equal(requestedApprovals[0]?.command, "echo hello");
-    assert.match(String(cmdRes1.event.message.content[0]?.type === "text" ? cmdRes1.event.message.content[0].text : ""), /perm:allowed/);
-    await settle(cmdTurn1, cmdRes1);
+    // Read-only deny rules keep the user's own and win over --dangerously-skip-permissions.
+    await mkdir(join(root, "home", ".gemini", "antigravity-cli"), { recursive: true });
+    await writeFile(join(root, "home", ".gemini", "antigravity-cli", "settings.json"), `\uFEFF${JSON.stringify({ permissions: { deny: ["read_file(/secret)"], allow: ["command(echo)"] } })}`);
+    await assert.rejects(run(turn(null, [{ type: "text", text: "need-cmd" }], { sessionId: randomUUID(), accessMode: "read_only", approvalMode: "full_access" })), /conflicts with read-only/);
+    const readOnly = await run(turn(null, [{ type: "text", text: "need-cmd" }], { sessionId: randomUUID(), accessMode: "read_only" }));
+    assert.match(reply(readOnly), /denied by rule/);
+    const readOnlyCall = (await calls(root)).at(-1);
+    assert.equal(readOnlyCall?.args.includes("--dangerously-skip-permissions"), false);
+    assert.deepEqual(readOnlyCall?.settings.permissions?.deny, ["read_file(/secret)", "write_file(*)", "command(*)", "mcp(*)", "read_url(*)", "execute_url(*)", "download_url(*)"]);
 
-    // Second identical command reuses session grant without prompting again
-    const cmdTurn2 = makeTurn(cmdTurn1.turnId, [{ type: "text", text: "need-cmd" }], { approvalMode: "inherit" });
-    const cmdRes2 = await executeTurn(native.executor, cmdTurn2, () => {}, new AbortController().signal, null);
-    assert.equal(requestedApprovals.length, 1);
-    assert.match(String(cmdRes2.event.message.content[0]?.type === "text" ? cmdRes2.event.message.content[0].text : ""), /perm:allowed/);
-    await settle(cmdTurn2, cmdRes2);
+    // A conversation Antigravity no longer has is not silently restarted without history.
+    source.addTurn(sessionId, deniedTurn.turnId, { userContent: [{ type: "text", text: "fact-two" }], assistantContent: [{ type: "text", text: "ok" }] });
+    await rm(join(root, "home", ".gemini", "antigravity-cli", "brain", firstResult.session.nativeSessionId), { recursive: true });
+    const lost = await run(turn(deniedTurn.turnId, [{ type: "text", text: "again" }]));
+    assert.equal(lost.event.resume, "handoff");
+    assert.notEqual(lost.session.nativeSessionId, firstResult.session.nativeSessionId);
+    assert.match(reply(lost), /history:fact-one,fact-two/);
 
-    // Decline file edit
-    nextDecision = "decline";
-    const editTurn = makeTurn(cmdTurn2.turnId, [{ type: "text", text: "need-edit" }], { approvalMode: "inherit" });
-    const editRes = await executeTurn(native.executor, editTurn, () => {}, new AbortController().signal, null);
-    assert.equal(requestedApprovals.length, 2);
-    assert.equal(requestedApprovals[1]?.kind, "file_change");
-    assert.deepEqual(requestedApprovals[1]?.paths, ["/workspace/a.ts"]);
-    assert.match(String(editRes.event.message.content[0]?.type === "text" ? editRes.event.message.content[0].text : ""), /perm:edit-denied/);
-    await settle(editTurn, editRes);
-
-    // 4. Platform read-only mode denies permission without showing a card and rejects conflicting approvalMode
-    const roSession = randomUUID();
-    await assert.rejects(
-      executeTurn(native.executor, makeTurn(null, [{ type: "text", text: "need-cmd" }], { sessionId: roSession, accessMode: "read_only", approvalMode: "full_access" }), () => {}, new AbortController().signal, null),
-      /conflicts with read-only/,
-    );
-    const roTurn = makeTurn(null, [{ type: "text", text: "need-cmd" }], { sessionId: roSession, accessMode: "read_only" });
-    const roRes = await executeTurn(native.executor, roTurn, () => {}, new AbortController().signal, null);
-    assert.equal(requestedApprovals.length, 2);
-    assert.match(String(roRes.event.message.content[0]?.type === "text" ? roRes.event.message.content[0].text : ""), /mode:plan .*perm:denied/);
-
-    // 5. full_access passes --dangerously-skip-permissions
-    const faTurn = makeTurn(null, [{ type: "text", text: "need-cmd" }], { sessionId: randomUUID(), approvalMode: "full_access" });
-    const faRes = await executeTurn(native.executor, faTurn, () => {}, new AbortController().signal, null);
-    assert.match(String(faRes.event.message.content[0]?.type === "text" ? faRes.event.message.content[0].text : ""), /perm:allowed skip:1/);
-
-    // 6. Abort triggers session/cancel and settles as aborted
     const controller = new AbortController();
-    const cancelTurn = makeTurn(null, [{ type: "text", text: "sleep:5000" }], { sessionId: randomUUID() });
-    setTimeout(() => controller.abort(), 150);
-    const cancelRes = await executeTurn(native.executor, cancelTurn, () => {}, controller.signal, null);
-    assert.equal(cancelRes.event.message.stopReason, "aborted");
+    setTimeout(() => controller.abort(), 300);
+    const stopped = await run(turn(null, [{ type: "text", text: "sleep" }], { sessionId: randomUUID() }), controller.signal);
+    assert.equal(stopped.event.message.stopReason, "aborted");
+    assert.equal(stopped.event.message.errorMessage, null);
   } finally {
-    await native.close();
+    await native.close(AbortSignal.timeout(2_000));
   }
 }));
 
 test("Antigravity transcript reader resolves cwd via SQLite, filters subagents, pairs tool results and reads transcript_full.jsonl", () => withEnvironment(async (root) => {
   const project = join(root, "proj");
   await mkdir(project, { recursive: true });
-  const appDataRoot = join(root, "gemini", "antigravity-cli");
+  const appDataRoot = join(root, "home", ".gemini", "antigravity-cli");
   await mkdir(appDataRoot, { recursive: true });
 
   const userConv = randomUUID();
@@ -234,8 +181,8 @@ test("Antigravity transcript reader resolves cwd via SQLite, filters subagents, 
     db.close();
   }
 
-  const userPath = antigravityTranscriptPath(userConv, "antigravity-cli");
-  const childPath = antigravityTranscriptPath(childConv, "antigravity-cli");
+  const userPath = antigravityTranscriptPath(userConv);
+  const childPath = antigravityTranscriptPath(childConv);
   await mkdir(join(appDataRoot, "brain", userConv, ".system_generated", "logs"), { recursive: true });
   await mkdir(join(appDataRoot, "brain", childConv, ".system_generated", "logs"), { recursive: true });
 
@@ -283,59 +230,13 @@ test("Antigravity transcript reader resolves cwd via SQLite, filters subagents, 
   assert.equal(antigravityHarness.transcript.replyEnded?.(firstTurn), true);
 
   assert.equal(extractAntigravityUserText("plain prompt\n<ADDITIONAL_METADATA>meta</ADDITIONAL_METADATA>"), "plain prompt");
-}));
-
-test("antigravity transcript matches secondary workspace_uris roots and reads WAL-mode SQLite databases", () => withEnvironment(async (root) => {
-  const repoA = join(root, "repo-a");
-  const repoB = join(root, "repo-b");
-  const repoC = join(root, "repo-c");
-  await Promise.all([
-    mkdir(repoA, { recursive: true }),
-    mkdir(repoB, { recursive: true }),
-    mkdir(repoC, { recursive: true }),
-  ]);
-
-  const appDataRoot = join(root, "gemini", "antigravity-cli");
-  await mkdir(appDataRoot, { recursive: true });
-  const convId = randomUUID();
-  const db = new DatabaseSync(join(appDataRoot, "conversation_summaries.db"));
-  try {
-    db.exec("PRAGMA journal_mode = WAL;");
-    db.exec("CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, workspace_uris TEXT, parent_conversation_id TEXT, nesting_depth INTEGER)");
-    db.prepare("INSERT INTO conversation_summaries VALUES (?, ?, '', 0)").run(
-      convId,
-      JSON.stringify([pathToFileURL(repoA).href, pathToFileURL(repoB).href, pathToFileURL(repoA).href]),
-    );
-
-    const transcriptPath = antigravityTranscriptPath(convId, "antigravity-cli");
-    await mkdir(join(appDataRoot, "brain", convId, ".system_generated", "logs"), { recursive: true });
-    await writeFile(transcriptPath, `${JSON.stringify({ step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-21T02:00:00Z", content: "hi" })}\n`);
-
-    // Keep WAL writer connection open while reading read-only.
-    const header = await antigravitySessionHeader(transcriptPath);
-    assert.deepEqual(header, {
-      harness: "antigravity",
-      nativeSessionId: convId,
-      cwd: repoA,
-      cwds: [repoB],
-      thread: "user",
-    });
-
-    const foundInA = await discoverTranscripts(repoA, ["antigravity"], { headers: true });
-    const foundInB = await discoverTranscripts(repoB, ["antigravity"], { headers: true });
-    const foundInC = await discoverTranscripts(repoC, ["antigravity"], { headers: true });
-    assert.deepEqual(foundInA.map((entry) => entry.nativeSessionId), [convId]);
-    assert.deepEqual(foundInB.map((entry) => entry.nativeSessionId), [convId]);
-    assert.deepEqual(foundInC, []);
-  } finally {
-    db.close();
-  }
+  assert.equal(extractAntigravityUserText("<USER_REQUEST>\n<cohub_session_history>\n[user]\nold\n</cohub_session_history>\n\nnew prompt\n</USER_REQUEST>"), "new prompt");
 }));
 
 test("Antigravity transcript clears stale result across background wakeups until final response settles", () => withEnvironment(async (root) => {
-  const appDataRoot = join(root, "gemini", "antigravity-cli");
+  const appDataRoot = join(root, "home", ".gemini", "antigravity-cli");
   const convId = randomUUID();
-  const transcriptPath = antigravityTranscriptPath(convId, "antigravity-cli");
+  const transcriptPath = antigravityTranscriptPath(convId);
   await mkdir(join(appDataRoot, "brain", convId, ".system_generated", "logs"), { recursive: true });
 
   const writeLines = async (entries: unknown[]) => {
@@ -416,9 +317,9 @@ test("Antigravity transcript clears stale result across background wakeups until
 }));
 
 test("Antigravity transcript clears pending tool ids and result on mid-turn ERROR_MESSAGE", () => withEnvironment(async (root) => {
-  const appDataRoot = join(root, "gemini", "antigravity-cli");
+  const appDataRoot = join(root, "home", ".gemini", "antigravity-cli");
   const convId = randomUUID();
-  const transcriptPath = antigravityTranscriptPath(convId, "antigravity-cli");
+  const transcriptPath = antigravityTranscriptPath(convId);
   await mkdir(join(appDataRoot, "brain", convId, ".system_generated", "logs"), { recursive: true });
 
   const lines = [
@@ -475,10 +376,10 @@ test("Antigravity transcript clears pending tool ids and result on mid-turn ERRO
 }));
 
 test("Antigravity transcript only hydrates transcript_full.jsonl for consumed truncated fields and needed step indices", () => withEnvironment(async (root) => {
-  const appDataRoot = join(root, "gemini", "antigravity-cli");
+  const appDataRoot = join(root, "home", ".gemini", "antigravity-cli");
   const convId = randomUUID();
   const logsDir = join(appDataRoot, "brain", convId, ".system_generated", "logs");
-  const transcriptPath = antigravityTranscriptPath(convId, "antigravity-cli");
+  const transcriptPath = antigravityTranscriptPath(convId);
   const fullPath = join(logsDir, "transcript_full.jsonl");
   await mkdir(logsDir, { recursive: true });
 

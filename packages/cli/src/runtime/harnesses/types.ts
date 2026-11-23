@@ -32,7 +32,7 @@ export type HarnessTurn = {
 export type HarnessRun = { session: NativeSession; resume: ResumeKind; message: RuntimeMessage; host: JsonRpcProcess | null };
 
 export type ThreadKind = "user" | "internal" | "spawned";
-export type SessionHeader = { harness: LocalHarness; nativeSessionId: string; cwd: string; cwds?: string[]; thread: ThreadKind };
+export type SessionHeader = { harness: LocalHarness; nativeSessionId: string; cwd: string; thread: ThreadKind };
 
 /** Native session files: where they live, how Cohub history is written into them, and how archives restore. */
 export type NativeSessionFormat = {

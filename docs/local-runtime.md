@@ -124,18 +124,21 @@ prompt no other user line follows) starts a Turn, keyed by the file's checksum t
 `turn_ended` settles it; tool results, model names and exact times are not recorded there. The ledger
 records the Turn Cohub is running, as for CodeBuddy.
 
-Antigravity runs one `agy acp --stdio` process per Turn over the Agent Client Protocol (JSON-RPC 2.0).
-Discovery initializes an ephemeral ACP session to read the signed-in account's `models` / `configOptions`
-(mapping each model's supported thinking levels) and available `modes`. A new chat or cross-harness handoff
-opens `session/new` (passing projected Cohub history through `_meta.antigravity.systemPrompt.append`); later
-Turns continue with `session/resume`, falling back to history handoff if the native session is no longer
-present. Approval modes map `inherit` to `default`, `auto` to `auto`, `full_access` to `--dangerously-skip-permissions`,
-and `read_only` to `plan` with every `session/request_permission` unconditionally denied. In `inherit` and `auto`
-modes, command and file-edit permission prompts become Cohub approval cards (with per-chat session grants kept
-in Runtime memory); stopping a Turn sends `session/cancel`. Native state spans SQLite and protobuf, so Turns
-stage no archive. Terminal and desktop/IDE chats sync read-only from `~/.gemini/<app-data-dir>/brain/<id>/.system_generated/logs/transcript.jsonl`
-(resolving workspace `cwd` and skipping sub-agents via `conversation_summaries.db`, and reading `transcript_full.jsonl`
-when `truncated_fields` is present).
+Antigravity runs one headless `agy --input-format stream-json --output-format stream-json` process per
+Turn, the CLI's own scripting interface. Discovery checks `--help` for the flags a Turn uses and lists
+`agy models`; effort variants (`gemini-4-neon-high`) become one model whose thinking levels are passed as
+`--effort`. The CLI reports its conversation id before reading a prompt, so the Turn starts on the real
+transcript; later Turns continue with `--conversation`. A new chat or cross-harness handoff puts projected
+Cohub history in a `<cohub_session_history>` block of the first prompt, as does a continued conversation
+Antigravity no longer has. Images are passed as temporary files the agent opens with `read_file`. Headless
+mode cannot ask, so whatever needs approval is denied and a Turn ending on such a denial reports it. Approval
+modes: follow local settings, full access (`--dangerously-skip-permissions`), and read-only, which adds deny
+rules for file writes, commands, MCP and web through `--settings` (keeping the user's own deny rules, since
+that flag replaces the list); deny rules win over every mode. Stopping sends SIGINT. Native state is SQLite
+and protobuf, so Turns stage no archive. Terminal and desktop chats sync read-only from
+`~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl` (and `~/.gemini/antigravity`),
+with the project and sub-agents read from `conversation_summaries.db`; Cohub's own Turn is named by the step
+index its run reported.
 
 Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`（提供审批模式的 Claude Code 未选择模式时沿用本机设置，见下）；只读映射为 `plan`，
 且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则；WorkBuddy 的权限请求一律拒绝，
@@ -158,7 +161,7 @@ Windows 上 Cohub 不经 `cursor-agent.cmd`（会经 cmd.exe 与 PowerShell 转�
 否则按项目名还原为实际目录。`<user_query>`（或后面没有其他用户行的纯文本 prompt）开始一个 Turn，以文件到该行的校验和为键，
 `turn_ended` 结算；该文件不记录工具结果、模型和精确时间。Cohub 正在执行的 Turn 由账本记录。
 
-Antigravity 每个 Turn 启动一个 `agy acp --stdio` 进程（Agent Client Protocol JSON-RPC 2.0）。启动探测通过临时 ACP 会话读取当前账号可用的 `models` / `configOptions`（含每个模型支持的思考等级）与 `modes`。新会话或跨 Harness 接续通过 `session/new`（经 `_meta.antigravity.systemPrompt.append` 带入云端历史摘要）启动，后续 Turn 通过 `session/resume` 续接；本地会话不存在时自动回退历史交接。审批模式把 `inherit` 映射为 `default`、`auto` 映射为 `auto`、`full_access` 映射为 `--dangerously-skip-permissions`、`read_only` 映射为 `plan` 且无条件拒绝全部 `session/request_permission`。在 `inherit` / `auto` 模式下，命令执行与文件修改的权限请求会转为 Cohub 审批卡（本对话内允许仅保存在 Runtime 内存）；停止 Turn 时发送 `session/cancel`。原生状态由 SQLite 与 protobuf 组成，因此不生成归档。终端与桌面/IDE 对话从 `~/.gemini/<app-data-dir>/brain/<id>/.system_generated/logs/transcript.jsonl` 只读同步（经 `conversation_summaries.db` 解析项目目录并跳过子 Agent，遇 `truncated_fields` 时回读 `transcript_full.jsonl`）。
+Antigravity 每个 Turn 启动一个 headless 进程 `agy --input-format stream-json --output-format stream-json`（CLI 自带的脚本接口）。启动检查确认 `--help` 含 Turn 所需参数并读取 `agy models`；同一模型的各档 effort（如 `gemini-4-neon-high`）合并为一个模型，思考等级经 `--effort` 传入。CLI 在读取 prompt 前就报告对话 id，Turn 直接对应真实的会话记录；后续 Turn 用 `--conversation` 续接。新会话、跨 Harness 接续，以及 Antigravity 已不存在的对话，都把云端历史放在首条 prompt 的 `<cohub_session_history>` 块中。图片作为临时文件传入，由 Agent 用 `read_file` 打开。headless 模式无法询问，需要审批的操作一律拒绝，因拒绝而结束的 Turn 会报告被拒绝的工具。审批模式：沿用本机设置、完全访问（`--dangerously-skip-permissions`）、只读；只读经 `--settings` 增加文件写入、命令、MCP 与网页的拒绝规则（该参数会替换拒绝列表，因此保留用户自己的拒绝规则），拒绝规则在任何模式下都优先。停止 Turn 发送 SIGINT。原生状态由 SQLite 与 protobuf 组成，因此不生成归档。终端与桌面端对话从 `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`（及 `~/.gemini/antigravity`）只读同步，项目目录与子 Agent 从 `conversation_summaries.db` 读取；Cohub 自己的 Turn 按其运行报告的步骤序号识别。
 
 ## Native clients / 原生客户端
 
