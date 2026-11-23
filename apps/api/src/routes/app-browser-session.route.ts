@@ -17,6 +17,18 @@ const randomSecret = () => randomBytes(32).toString("base64url");
 const sessionKey = (appId: string, origin: string, handle: string) => `app:browser:${appId}:${origin}:${hash(handle)}`;
 const codeKey = (appId: string, origin: string, challenge: string, code: string) =>
   `app:browser-code:${appId}:${origin}:${challenge}:${hash(code)}`;
+const epochKey = (userUuid: string) => `app:browser-epoch:${userUuid}`;
+
+type StoredSession = { userUuid: string; epoch: string };
+
+/** Ends every storefront session of this account, on every device. */
+export async function revokeAppBrowserSessions(userUuid: string) {
+  await redisCommandClient.set(epochKey(userUuid), randomSecret(), "EX", APP_BROWSER_SESSION_SECONDS);
+}
+
+async function currentEpoch(userUuid: string) {
+  return await redisCommandClient.get(epochKey(userUuid)) ?? "";
+}
 
 type BoundApp = { id: string; spaceId: string; appScopes: string[] };
 
@@ -52,7 +64,11 @@ export function createAppBrowserSessionRouter(resolveApp: (origin: string, id: s
     if (!stored || !(await resolveApp(origin, id))) return c.json({ message: "sign-in expired" }, 401);
     const { userUuid, path } = JSON.parse(stored) as { userUuid: string; path: string };
     const handle = randomSecret();
-    await redisCommandClient.set(sessionKey(id, origin, handle), userUuid, "EX", APP_BROWSER_SESSION_SECONDS);
+    const epoch = await currentEpoch(userUuid);
+    // The epoch must outlive every session that references it.
+    if (epoch) await redisCommandClient.expire(epochKey(userUuid), APP_BROWSER_SESSION_SECONDS);
+    const session: StoredSession = { userUuid, epoch };
+    await redisCommandClient.set(sessionKey(id, origin, handle), JSON.stringify(session), "EX", APP_BROWSER_SESSION_SECONDS);
     return c.json({ session: handle, returnTo: path });
   });
 
@@ -61,8 +77,14 @@ export function createAppBrowserSessionRouter(resolveApp: (origin: string, id: s
     const parsed = session.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ message: "invalid App session" }, 400);
     const { origin, session: handle } = parsed.data;
-    const userUuid = await redisCommandClient.get(sessionKey(id, origin, handle));
+    const key = sessionKey(id, origin, handle);
+    const stored = await redisCommandClient.get(key);
+    const { userUuid, epoch } = (stored ? JSON.parse(stored) : {}) as Partial<StoredSession>;
     if (!userUuid) return c.json({ message: "App session expired" }, 401);
+    if (epoch !== await currentEpoch(userUuid)) {
+      await redisCommandClient.del(key);
+      return c.json({ message: "App session ended" }, 401);
+    }
     const app = await resolveApp(origin, id);
     if (!app) return c.json({ message: "App origin unavailable" }, 403);
     const token = createAppSessionToken({ userUuid, appId: id, spaceId: app.spaceId, appScopes: app.appScopes as Permission[] });

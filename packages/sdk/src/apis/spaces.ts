@@ -1930,19 +1930,28 @@ export class SpaceCommerceApi {
     );
   }
 
-  listReportShops() {
-    return this.transport.request<{ shops: { id: string; name: string }[] }>(
-      `/api/spaces/${this.spaceId}/commerce/report-shops`,
-    );
-  }
-
-  listOrders(input?: { page?: number; limit?: number; shopSpaceId?: string }) {
+  listOrders(input?: { page?: number; limit?: number }) {
     const params = new URLSearchParams();
     if (input?.page) params.set("page", String(input.page));
     if (input?.limit) params.set("limit", String(input.limit));
-    if (input?.shopSpaceId !== undefined) params.set("shopSpaceId", input.shopSpaceId);
     return this.transport.request<{ orders: import("../types.js").SpaceCommerceOrder[]; pagination: { hasMore: boolean; nextPage: number | null }; businessKey: string }>(
       `/api/spaces/${this.spaceId}/commerce/orders${params.toString() ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  /** Shops this operations Space may report on, from the platform order report config. */
+  listReportShops() {
+    return this.transport.request<{ shops: { id: string; name: string }[] }>(
+      `/api/spaces/${this.spaceId}/commerce/reports/shops`,
+    );
+  }
+
+  listReportOrders(shopSpaceId: string, input?: { page?: number; limit?: number }) {
+    const params = new URLSearchParams();
+    if (input?.page) params.set("page", String(input.page));
+    if (input?.limit) params.set("limit", String(input.limit));
+    return this.transport.request<{ orders: import("../types.js").SpaceCommerceOrder[]; pagination: { hasMore: boolean; nextPage: number | null } }>(
+      `/api/spaces/${this.spaceId}/commerce/reports/shops/${encodeURIComponent(shopSpaceId)}/orders${params.toString() ? `?${params.toString()}` : ""}`,
     );
   }
 }

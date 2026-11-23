@@ -1,8 +1,5 @@
-import { sanitizeRedirectPath } from "./auth-redirect-path.ts";
-
-export { sanitizeRedirectPath } from "./auth-redirect-path.ts";
-
 import LogtoClient, { type IdTokenClaims } from "@logto/browser";
+import { sanitizeRedirectPath } from "#lib/auth-redirect-path.ts";
 import {
 	type AuthSessionSnapshot,
 	type AuthTokenRequestOptions,
@@ -15,6 +12,8 @@ import {
 	PUBLIC_LOGTO_APP_ID,
 	PUBLIC_LOGTO_ENDPOINT,
 } from "$app/env/public";
+
+export { sanitizeRedirectPath };
 
 const IS_DEV =
 	(typeof location !== "undefined" && location.hostname.startsWith("dev")) ||

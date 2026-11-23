@@ -2450,6 +2450,9 @@ function orderLabelItemsBySessionTree(
 
 async function handleLogout() {
 	onClose?.();
+	await sdk.user.revokeAppBrowserSessions().catch((error) => {
+		console.warn("[sidebar] Failed to end storefront sign-ins", error);
+	});
 	const commandPaletteRecentKey = `cohub:command-palette:recent:${encodeURIComponent(getCacheUserKey())}`;
 	try {
 		localStorage.removeItem(commandPaletteRecentKey);

@@ -7,7 +7,8 @@ import { db } from "../db/index.js";
 import { parseSessionArchiveFilter } from "@cohub/core/labels";
 import type { SessionArchiveFilter } from "@cohub/protocol/model";
 import { config } from "../config.js";
-import { requireValidId, useAuth, authzDenied } from "../lib/middleware.js";
+import { requireValidId, useAuth, useAccountPrincipal, authzDenied, getExecutionPrincipal } from "../lib/middleware.js";
+import { revokeAppBrowserSessions } from "./app-browser-session.route.js";
 import { ensureCurrentUserProfile, resolveCurrentUserEmail, updateCurrentUserProfile, LogtoUserRequiredError, UsernameChangeTooSoonError, UsernameClearError, UsernameConflictError, UsernameReservedError, validateUsername } from "../user-profiles.js";
 import {
   filterSessionsByPermission,
@@ -189,6 +190,14 @@ router.post("/referrals/code/rotate", async (c) => {
   if (user instanceof Response) return user;
   const code = await rotateReferralCode(user.uuid);
   return c.json({ code: code.code });
+});
+
+router.delete("/app-browser-sessions", async (c) => {
+  const user = useAccountPrincipal(c);
+  if (user instanceof Response) return user;
+  if (getExecutionPrincipal(c)) return c.json({ message: "account sign-in required" }, 403);
+  await revokeAppBrowserSessions(user.uuid);
+  return c.body(null, 204);
 });
 
 router.get("/rules", async (c) => {

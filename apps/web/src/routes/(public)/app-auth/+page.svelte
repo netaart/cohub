@@ -9,6 +9,7 @@ import { AlertTriangle, Loader2, ShieldCheck } from "lucide-svelte";
 import { onDestroy, onMount } from "svelte";
 import { getAuthToken, signInWithRedirectPath } from "#lib/auth.ts";
 import { readAppCheckoutState } from "#lib/components/app/app-checkout-state.ts";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
 import AppAuthorizeDialog from "#lib/features/app/AppAuthorizeDialog.svelte";
 import { isLegacyAppOriginAllowed } from "#lib/features/app/app-origin-allowlist.ts";
 import { createAppBridgeHost } from "#lib/features/app/bridge-host.svelte.ts";
@@ -20,7 +21,7 @@ import { authStore } from "#lib/stores/auth.svelte.ts";
 import { PUBLIC_API_ORIGIN } from "$app/env/public";
 import { page } from "$app/state";
 
-type BrokerState = "loading" | "need-login" | "ready" | "error";
+type BrokerState = "loading" | "need-login" | "confirm" | "ready" | "error";
 
 type AppDetail = {
 	app: Pick<AppRecord, "id" | "spaceId" | "userUuid" | "slug" | "appScopes">;
@@ -44,6 +45,13 @@ let locale: Locale = $derived(getLocale());
 let appDetail = $state<AppDetail | null>(null);
 let host = $state<ReturnType<typeof createAppBridgeHost> | null>(null);
 let originAccepted = false;
+const accountName = $derived(
+	authStore.profile?.displayName ||
+		authStore.profile?.username ||
+		authStore.email ||
+		"",
+);
+let continuing = $state(false);
 
 // The validated origin of the opener window, confirmed from the actual
 // MessageEvent (not just the URL param). Used as targetOrigin for replies.
@@ -95,7 +103,11 @@ async function init() {
 	if (
 		typeof window === "undefined" ||
 		(!redirect && !window.opener) ||
-		(redirect && (!returnPath || !/^[\w-]{43}$/.test(challenge)))
+		// A framed page could trick the viewer into confirming a sign-in.
+		(redirect &&
+			(window.top !== window.self ||
+				!returnPath ||
+				!/^[\w-]{43}$/.test(challenge)))
 	) {
 		fail(m.app_auth_invalid_entry({}, { locale }));
 		return;
@@ -157,35 +169,9 @@ async function init() {
 		return;
 	}
 
-	if (redirect && returnPath) {
-		const response = await fetch(
-			`${PUBLIC_API_ORIGIN ?? ""}/api/apps/${encodeURIComponent(appId)}/browser-session/code`,
-			{
-				method: "POST",
-				headers: {
-					Authorization: `Bearer ${token}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					origin: openerOrigin,
-					challenge,
-					returnTo: returnPath,
-				}),
-			},
-		);
-		if (!response.ok) return fail(m.app_auth_unavailable({}, { locale }));
-		const { code } = (await response.json()) as { code: string };
-		const callback = new URL(
-			APP_BROWSER_SESSION_PATH + "/callback",
-			openerOrigin,
-		);
-		callback.search = new URLSearchParams({
-			app: appId,
-			code,
-			challenge,
-			returnTo: returnPath,
-		}).toString();
-		window.location.replace(callback.href);
+	if (redirect) {
+		await authStore.ensureLoaded();
+		phase = "confirm";
 		return;
 	}
 
@@ -263,6 +249,43 @@ async function handleLogin() {
 	);
 }
 
+async function continueSignIn() {
+	if (!returnPath || continuing) return;
+	continuing = true;
+	const token = await getAuthToken();
+	const response = await fetch(
+		`${PUBLIC_API_ORIGIN ?? ""}/api/apps/${encodeURIComponent(appId)}/browser-session/code`,
+		{
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				origin: openerOrigin,
+				challenge,
+				returnTo: returnPath,
+			}),
+		},
+	).catch(() => null);
+	if (!response?.ok) {
+		continuing = false;
+		return fail(m.app_auth_unavailable({}, { locale }));
+	}
+	const { code } = (await response.json()) as { code: string };
+	const callback = new URL(
+		APP_BROWSER_SESSION_PATH + "/callback",
+		openerOrigin,
+	);
+	callback.search = new URLSearchParams({
+		app: appId,
+		code,
+		challenge,
+		returnTo: returnPath,
+	}).toString();
+	window.location.replace(callback.href);
+}
+
 function cancelLogin() {
 	if (redirect && originAccepted && returnPath)
 		window.location.replace(new URL(returnPath, openerOrigin).href);
@@ -312,6 +335,24 @@ onDestroy(() => {
 				{m.app_auth_sign_in({}, { locale })}
 			</button>
 			<button type="button" class="secondary-key min-h-9 px-3 text-[13px]" onclick={cancelLogin}>{m.common_cancel({}, { locale })}</button>
+		</div>
+	{:else if phase === "confirm"}
+		<div class="broker-center">
+			<UserAvatar
+				name={accountName}
+				avatarUrl={authStore.profile?.avatarUrl}
+				size="lg"
+			/>
+			<p class="broker-login-title">
+				{m.app_auth_storefront_title({ site: new URL(openerOrigin).host }, { locale })}
+			</p>
+			<p class="broker-login-copy">
+				{m.app_auth_storefront_account({ name: accountName }, { locale })}
+			</p>
+			<button type="button" class="broker-login-btn" disabled={continuing} onclick={continueSignIn}>
+				{m.app_auth_storefront_continue({}, { locale })}
+			</button>
+			<button type="button" class="secondary-key min-h-9 px-3 text-[13px]" disabled={continuing} onclick={cancelLogin}>{m.common_cancel({}, { locale })}</button>
 		</div>
 	{:else if phase === "error"}
 		<div class="broker-center">

@@ -541,9 +541,6 @@ $effect(() => {
 
 	<main class="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5 sm:py-6">
 		<div class="mx-auto w-full max-w-4xl space-y-4 sm:space-y-5">
-			{#key spaceId + ":" + (authStore.userUuid ?? "")}
-				{#if authStore.userUuid}<CommerceOrderReport {spaceId} />{/if}
-			{/key}
 			{#if !entitlementLoading && !canManage}
 				<div class="flex items-center gap-2.5 rounded-[8px] border border-brand/30 bg-brand/5 p-3">
 					<Sparkles class="h-4 w-4 shrink-0 text-brand" />
@@ -868,6 +865,9 @@ $effect(() => {
 					</div>
 				</section>
 			{/if}
+			{#key spaceId + ":" + (authStore.userUuid ?? "")}
+				{#if authStore.userUuid}<CommerceOrderReport {spaceId} />{/if}
+			{/key}
 		</div>
 	</main>
 </div>

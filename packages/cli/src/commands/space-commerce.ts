@@ -568,11 +568,11 @@ Examples:
     .action(async (opts: OrdersListOptions) => {
       const { commerce } = await commerceClient(spacesCmd);
       try {
-        const result = await commerce.listOrders({
-          shopSpaceId: opts.shop,
+        const page = {
           page: parseInteger(opts.page, "page", { fallback: 1, min: 1 }),
           limit: parseInteger(opts.limit, "limit", { fallback: 20, min: 1, max: 50 }),
-        });
+        };
+        const result = opts.shop ? await commerce.listReportOrders(opts.shop, page) : await commerce.listOrders(page);
         if (jsonRequested(opts)) return outJson(result);
         printOrders(result.orders);
         if (result.pagination.hasMore) console.log(`\nNext page: ${result.pagination.nextPage}`);

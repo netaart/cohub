@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import { spaces } from "@cohub/db";
 import { inArray } from "drizzle-orm";
 import { config } from "../../config.js";
+import { canonicalSpaceId, loadCommerceOrderReports } from "../../lib/commerce-order-reports.js";
 import { db } from "../../db/index.js";
 import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
 import { isBillingApiError } from "../../lib/billing-api-error.js";
@@ -867,8 +868,13 @@ router.delete("/:id/commerce/product-benefits", async (c) => {
   }
 });
 
-async function authorizedReportShops(c: Context, spaceId: string, user: AuthUser) {
-  const configured = config.commerceOrderReports.get(spaceId) ?? [];
+async function authorizedReportShops(c: Context, rawSpaceId: string, user: AuthUser): Promise<readonly string[]> {
+  const spaceId = canonicalSpaceId(rawSpaceId);
+  if (!spaceId) return [];
+  const reports = await loadCommerceOrderReports(config.platformConfigRoot, (error) => {
+    logger.error("[space-commerce] invalid commerce order reports config", { error });
+  });
+  const configured = reports.get(spaceId) ?? [];
   if (!configured.length) return [];
   const execution = getExecutionPrincipal(c);
   const appSession = getAppSessionPrincipal(c);
@@ -883,7 +889,47 @@ async function authorizedReportShops(c: Context, spaceId: string, user: AuthUser
   return await hasPermission(reader, "space.commerce.view", { spaceId }) ? configured : [];
 }
 
-router.get("/:id/commerce/report-shops", async (c) => {
+async function listShopOrders(c: Context, shopSpaceId: string) {
+  const page = Math.max(1, Number.parseInt(c.req.query("page") ?? "1", 10) || 1);
+  const limit = Math.min(50, Math.max(1, Number.parseInt(c.req.query("limit") ?? "20", 10) || 20));
+  const mapping = await requireSpaceCommerceBusiness(shopSpaceId);
+  const sdk = await createSpaceCommerceSdk();
+  const result = await sdk.admin.orders.list({
+    business_key: mapping.billingBusinessKey,
+    include_count: false,
+    page,
+    limit,
+    sorting: "-created_at",
+  });
+  const buyerProfiles = await buildOrderBuyerProfiles(result.items);
+  return {
+    businessKey: mapping.billingBusinessKey,
+    orders: result.items.map((order) => {
+      const userUuid = resolveOrderBuyerUserUuid(order);
+      return serializeOrder(order, {
+        buyerProfile: userUuid ? (buyerProfiles.get(userUuid) ?? null) : null,
+      });
+    }),
+    pagination: { hasMore: result.pagination.has_more, nextPage: result.pagination.has_more ? page + 1 : null },
+  };
+}
+
+router.get("/:id/commerce/orders", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const spaceId = c.req.param("id");
+  if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
+  if (!(await hasPermission(user, "space.commerce.view", { spaceId }))) return authzDenied(c);
+  try {
+    return c.json(await listShopOrders(c, spaceId));
+  } catch (error) {
+    const response = handleSpaceCommerceRouteError(c, error);
+    if (response) return response;
+    throw error;
+  }
+});
+
+router.get("/:id/commerce/reports/shops", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   const spaceId = c.req.param("id");
@@ -897,39 +943,17 @@ router.get("/:id/commerce/report-shops", async (c) => {
   return c.json({ shops });
 });
 
-router.get("/:id/commerce/orders", async (c) => {
+router.get("/:id/commerce/reports/shops/:shopId/orders", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   const spaceId = c.req.param("id");
+  const shopId = canonicalSpaceId(c.req.param("shopId"));
   if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
-  const shopId = c.req.query("shopSpaceId");
-  if (shopId !== undefined) {
-    c.header("Cache-Control", "private, no-store");
-    if (!requireValidId(shopId) || !(await authorizedReportShops(c, spaceId, user)).includes(shopId)) return authzDenied(c);
-  } else if (!(await hasPermission(user, "space.commerce.view", { spaceId }))) return authzDenied(c);
-  const page = Math.max(1, Number.parseInt(c.req.query("page") ?? "1", 10) || 1);
-  const limit = Math.min(50, Math.max(1, Number.parseInt(c.req.query("limit") ?? "20", 10) || 20));
+  c.header("Cache-Control", "private, no-store");
+  if (!shopId || !(await authorizedReportShops(c, spaceId, user)).includes(shopId)) return authzDenied(c);
   try {
-    const mapping = await requireSpaceCommerceBusiness(shopId ?? spaceId);
-    const sdk = await createSpaceCommerceSdk();
-    const result = await sdk.admin.orders.list({
-      business_key: mapping.billingBusinessKey,
-      include_count: false,
-      page,
-      limit,
-      sorting: "-created_at",
-    });
-    const buyerProfiles = await buildOrderBuyerProfiles(result.items);
-    return c.json({
-      orders: result.items.map((order) => {
-        const userUuid = resolveOrderBuyerUserUuid(order);
-        return serializeOrder(order, {
-          buyerProfile: userUuid ? (buyerProfiles.get(userUuid) ?? null) : null,
-        });
-      }),
-      pagination: { hasMore: result.pagination.has_more, nextPage: result.pagination.has_more ? page + 1 : null },
-      businessKey: mapping.billingBusinessKey,
-    });
+    const { orders, pagination } = await listShopOrders(c, shopId);
+    return c.json({ orders, pagination });
   } catch (error) {
     const response = handleSpaceCommerceRouteError(c, error);
     if (response) return response;

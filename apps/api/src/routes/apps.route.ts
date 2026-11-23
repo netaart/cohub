@@ -587,15 +587,6 @@ async function getPublishedAppPublicIdentity(app: typeof apps.$inferSelect) {
   };
 }
 
-async function getStandaloneAppDetail(app: typeof apps.$inferSelect) {
-  const content = await getPublishedAppContent(app);
-  return {
-    ...wrapAppRecord(wire, serializeApp(app)),
-    space: { id: app.spaceId },
-    content,
-  };
-}
-
 async function getPublicAppDetail(app: typeof apps.$inferSelect) {
   const identity = await getPublishedAppPublicIdentity(app);
   if (!identity) return null;
@@ -655,15 +646,12 @@ async function resolveBoundApp(requestedOrigin: string | undefined, fresh: boole
   if (!appId || (expectedId && expectedId !== appId)) return { error } as const;
   const app = await getAppById(appId);
   if (app?.status !== "published" || requiresSpaceAppAccess(app)) return { error } as const;
-  return { app, binding, customDomain, error: null } as const;
+  const content = await getPublishedAppContent(app);
+  if (content?.kind !== "web" && !(binding && content?.kind === "port")) return { error } as const;
+  return { app, content, customDomain, error: null } as const;
 }
 
-router.route("/", createAppBrowserSessionRouter(async (origin, id) => {
-  const resolved = await resolveBoundApp(origin, true, id);
-  if (!resolved.app) return null;
-  const content = await getPublishedAppContent(resolved.app);
-  return content?.kind === "web" || (resolved.binding && content?.kind === "port") ? resolved.app : null;
-}));
+router.route("/", createAppBrowserSessionRouter(async (origin, id) => (await resolveBoundApp(origin, true, id)).app ?? null));
 
 router.get("/by-origin", async (c) => {
   const requestedOrigin = c.req.query("origin")?.trim() || c.req.header("origin")?.trim();
@@ -672,12 +660,8 @@ router.get("/by-origin", async (c) => {
   const unavailable = (code: "app_origin_not_found" | "app_origin_unavailable") =>
     c.json({ message: code === "app_origin_unavailable" ? "app origin is bound but unavailable" : "app origin not found", code }, 404);
   if (resolved.error) return unavailable(resolved.error);
-  const { app, binding, customDomain } = resolved;
-  const detail = await getStandaloneAppDetail(app);
-  const contentKind = detail?.content?.kind;
-  if (contentKind !== "web" && !(binding && contentKind === "port")) {
-    return unavailable(binding ? "app_origin_unavailable" : "app_origin_not_found");
-  }
+  const { app, content, customDomain } = resolved;
+  const detail = { ...wrapAppRecord(wire, serializeApp(app)), space: { id: app.spaceId }, content };
   if (recordView) recordResolvedAppView(c, app, "web");
   c.header("Cache-Control", recordView || customDomain ? "no-store" : PUBLIC_APP_HTTP_CACHE);
   c.header("Vary", "Origin");

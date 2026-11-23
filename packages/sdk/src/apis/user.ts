@@ -45,6 +45,11 @@ export class UserApi {
     });
   }
 
+  /** Ends this account's storefront sign-ins on every App origin and device. */
+  revokeAppBrowserSessions() {
+    return this.transport.request<void>("/api/me/app-browser-sessions", { method: "DELETE" });
+  }
+
   getRules(customFetch?: Fetch) {
     return this.transport.request<UserRulesResponse>("/api/me/rules", {
       method: "GET",

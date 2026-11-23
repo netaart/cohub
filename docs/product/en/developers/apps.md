@@ -131,9 +131,9 @@ mounted so they can resume instantly.
 
 ## Sign in from a storefront
 
-On a bound custom domain or managed standalone host, call `await client.auth.signIn({ returnTo: location.href })` from the sign-in button. After sign-in the browser returns to that App page, including its query and hash. The host uses a first-party, App-scoped session for up to 14 days. Reloads and new tabs restore the viewer through `client.context()`. Use `client.auth.signOut()` to end that storefront session. Inside Cohub, `signIn()` uses the embedding host's login and return location.
+On a bound custom domain or managed standalone host, call `await client.auth.signIn({ returnTo: location.href })` from the sign-in button. The viewer confirms the Cohub account once, then returns to that App page, including its query and hash. The host uses a first-party, App-scoped session for up to 14 days. Reloads and new tabs restore the viewer through `client.context()`. Use `client.auth.signOut()` to end that storefront session. Signing out of Cohub ends it on every device. Inside Cohub, `signIn()` uses the embedding host's login and return location.
 
-In an operations Space configured for reporting, `client.space(id).commerce.listReportShops()` lists the authorized shops. Pass a returned ID to `commerce.listOrders({ shopSpaceId, page, limit })` to read that shop's history. App Actions verifying an individual purchase can use `client.appCommerce.getOrder(appId, orderId)` with the Action credential. The server checks the bound buyer.
+In an operations Space configured for reporting, `client.space(id).commerce.listReportShops()` lists the authorized shops. Pass a returned ID to `commerce.listReportOrders(shopSpaceId, { page, limit })` to read that shop's history. App Actions verifying an individual purchase can use `client.appCommerce.getOrder(appId, orderId)` with the Action credential. The server checks the bound buyer.
 
 ## Calling your backend
 

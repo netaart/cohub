@@ -22,7 +22,7 @@ async function load() {
 	try {
 		const page = await sdk
 			.space(spaceId)
-			.commerce.listOrders({ shopSpaceId: shop.id, page: nextPage, limit: 20 });
+			.commerce.listReportOrders(shop.id, { page: nextPage, limit: 20 });
 		const seen = new Set(orders.map((order) => order.id));
 		orders = [...orders, ...page.orders.filter((order) => !seen.has(order.id))];
 		nextPage = page.pagination.nextPage;

@@ -161,13 +161,16 @@ Do not commit real `values.yaml` or `secrets.yaml`.
 
 ### Internal shop order reports
 
-Set the optional API environment variable `SPACE_COMMERCE_ORDER_REPORTS` to a JSON object mapping an operations Space UUID to the shop Space UUIDs it may report on. Supply it through the API deployment environment and roll the API when changing the list. An unset value enables no reports.
+In the platform config space, edit `.cohub/commerce/order-reports.yaml` to map an operations Space to the shop Spaces it may report on. Saving a checkpoint publishes it to `/configs/platform`, and the API reloads it without a restart. A missing or invalid file enables no reports; parse errors are logged by the API.
 
-```json
-{"11111111-1111-4111-8111-111111111111":["22222222-2222-4222-8222-222222222222"]}
+```yaml
+schema: cohub.commerce.order-reports.v1
+reports:
+  11111111-1111-4111-8111-111111111111:
+    - 22222222-2222-4222-8222-222222222222
 ```
 
-Operations Space hosts can open **Settings → Commerce** or use the commands below. Each shop has independent order pagination. Sales come directly from the shop's billing business, including historical orders. The mapping grants read access to orders only.
+Members with commerce view access in the operations Space can open **Settings → Commerce** or use the commands below. Each shop paginates independently, and orders come directly from the shop's billing business, including history. The mapping grants read access to orders only.
 
 ```sh
 cohub -s <operations-space-id> spaces commerce orders shops
