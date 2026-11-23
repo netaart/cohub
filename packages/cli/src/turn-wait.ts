@@ -48,7 +48,7 @@ export function parseWaitTimeout(value: string): number {
 type TurnRef = { spaceId: string; sessionId: string; turnId: string };
 
 /** Lowercase hyphenated form, so short or uppercase IDs still match server records. */
-export function canonicalId(value: string): string {
+function canonicalId(value: string): string {
   const id = value.trim().toLowerCase();
   return /^[0-9a-f]{32}$/.test(id) ? `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}` : id;
 }
