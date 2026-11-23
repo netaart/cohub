@@ -66,6 +66,8 @@ type AdmissionInput = {
   sessionId?: string | null;
   turnId?: string | null;
   model: string;
+  /** The declaration's adapter type, matched by `providers` conditions. */
+  provider: string | null;
   usageType: string;
   parameters?: Record<string, unknown>;
 };
@@ -80,7 +82,7 @@ export async function admitGeneration(input: AdmissionInput): Promise<Generation
   const context = { taskRunId: input.taskRunId, userId: input.userId, spaceId: input.spaceId, model: input.model };
   let quote: PricingQuote;
   try {
-    quote = await usagePricing.quote({ userId: input.userId, usageType: input.usageType, model: input.model, modelDiscounts: true });
+    quote = await usagePricing.quote({ userId: input.userId, usageType: input.usageType, model: input.model, provider: input.provider, modelDiscounts: true });
   } catch (error) {
     logger.error("[Billing] failed to price generation before enqueue", { ...context, error });
     throw new GenerationPricingUnavailableError({ cause: error });
@@ -112,7 +114,7 @@ export async function admitGeneration(input: AdmissionInput): Promise<Generation
   try {
     return { ...await admitBalance(input, pricing), pricing };
   } catch (error) {
-    await refundQuota(input.taskRunId, input.userId, quota, "admission_failed");
+    await refundQuota(input.taskRunId, input.userId, quota);
     throw error;
   }
 }
@@ -170,11 +172,8 @@ async function admitBalance(input: AdmissionInput, pricing: GenerationPricingSna
   return { decision, hold: null };
 }
 
-async function refundQuota(taskRunId: string, userId: string, quota: GenerationQuotaUse | null | undefined, reason: string) {
-  await refundGenerationQuota({ billing: billingOperations, taskRunId, userId, quota, reason }).catch((error) => {
-    logger.error("[GenerationQuota] refund failed; manual billing verification required", { taskRunId, userId, quota, reason, error });
-  });
-}
+const refundQuota = (taskRunId: string, userId: string, quota: GenerationQuotaUse | null | undefined) =>
+  refundGenerationQuota({ billing: billingOperations, taskRunId, userId, quota, error: (message, context) => logger.error(message, context) });
 
 /** Undoes an admission whose task never reached the queue. */
 export async function releaseGenerationAdmission(
@@ -184,7 +183,7 @@ export async function releaseGenerationAdmission(
   const { taskRunId, userId, admission } = input;
   await Promise.all([
     admission.hold ? generationReserveHolds.release(taskRunId, admission.hold.payer, reason) : null,
-    refundQuota(taskRunId, userId, admission.pricing.quota, reason),
+    refundQuota(taskRunId, userId, admission.pricing.quota),
   ]);
 }
 
@@ -196,6 +195,6 @@ export async function releaseCancelledGeneration(taskRunId: string): Promise<voi
   const quota = data?.pricing ? parsePricingSnapshot(data.pricing).quota : null;
   await Promise.all([
     hold ? generationReserveHolds.release(taskRunId, hold.payer, "turn_cancelled") : null,
-    task?.userUuid ? refundQuota(taskRunId, task.userUuid, quota, "turn_cancelled") : null,
+    task?.userUuid ? refundQuota(taskRunId, task.userUuid, quota) : null,
   ]);
 }

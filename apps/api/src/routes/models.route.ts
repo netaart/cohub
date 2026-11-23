@@ -19,7 +19,8 @@ import {
 import { loadSpaceModModelLayers } from "@cohub/core/space-mods";
 import { COHUB_BILLING_USAGE_TYPES, resolveGenerationUsageType } from "@cohub/billing";
 import type { ModelOffer } from "@cohub/protocol";
-import { loadPublicGenerationModels } from "../generations/declarations.js";
+import { toPublicGenerationDeclaration } from "@cohub/infra/config-runtime/generation-declarations";
+import { loadGenerationDeclarations } from "../generations/declarations.js";
 import { priceModelListing } from "../model-offers.js";
 import { db } from "../db/index.js";
 import { config } from "../config.js";
@@ -137,13 +138,15 @@ router.get("/", async (c) => {
   try {
     const modelType = c.req.query("modelType");
     if (modelType === MULTIMODAL_MODEL_TYPE) {
-      const { models } = await loadPublicGenerationModels(user.uuid);
-      const offers = await priceModelListing(user.uuid, models, (model) => ({
+      // Price full declarations: `providers` conditions match the adapter type the public view strips.
+      const declarations = await loadGenerationDeclarations(user.uuid);
+      const offers = await priceModelListing(user.uuid, declarations, (model) => ({
         usageType: resolveGenerationUsageType(model.category),
         model: model.model,
+        provider: model.adapter?.type ?? null,
         modelDiscounts: true,
       }));
-      return c.json({ models: models.map((model, index) => ({ ...model, ...offers[index] })) });
+      return c.json({ models: declarations.map((model, index) => ({ ...toPublicGenerationDeclaration(model), ...offers[index] })) });
     }
 
     const spaceId = c.req.query("spaceId")?.trim() || null;

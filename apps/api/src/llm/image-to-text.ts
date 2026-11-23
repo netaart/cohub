@@ -191,6 +191,12 @@ async function mapWithConcurrency<T>(items: T[], concurrency: number, mapper: (i
   }));
 }
 
+/** Whether preparing these messages for the target model would call the image-to-text fallback. */
+export function needsImageToText(messages: CompletionMessage[], targetModel: RuntimeLlmModel, config: ImageToTextConfig | null): boolean {
+  if (!config || targetModel.input.includes("image")) return false;
+  return messages.some((message) => message.content.some((block) => block.type === "image" && !readDescription(block)));
+}
+
 export async function prepareCompletionImagesForModel(input: {
   messages: CompletionMessage[];
   targetModel: RuntimeLlmModel;

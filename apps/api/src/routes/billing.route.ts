@@ -158,21 +158,26 @@ router.get("/credits", async (c) => {
   return c.json(credit);
 });
 
-/** Balances of every quota token the pricing rules can draw on; empty quotas are omitted. */
+/** Quota token → the request parameter one unit covers, for every quota the pricing rules can draw on. */
+async function quotaParameters() {
+  const parameters = new Map<string, string>();
+  for (const rule of (await usagePricing.loadConfig()).rules) {
+    if (rule.enabled && rule.effect.type === "quota" && !parameters.has(rule.effect.tokenType)) parameters.set(rule.effect.tokenType, rule.effect.parameter);
+  }
+  return parameters;
+}
+
+/** Balances of every quota token the pricing rules can draw on. */
 router.get("/quotas", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   if (!billingOperations.status.configured) return c.json({ quotas: [] });
-  const { rules } = await usagePricing.loadConfig();
-  const parameters = new Map<string, string>();
-  for (const rule of rules) {
-    if (rule.enabled && rule.effect.type === "quota" && !parameters.has(rule.effect.tokenType)) parameters.set(rule.effect.tokenType, rule.effect.parameter);
-  }
-  const quotas = await Promise.all([...parameters].map(async ([tokenType, parameter]) => ({
+  const quotas = await Promise.all([...await quotaParameters()].map(async ([tokenType, parameter]) => ({
     ...await billingOperations.getQuotaStatus({ userId: user.uuid, tokenType, grants: true }),
     parameter,
   })));
-  return c.json({ quotas: quotas.filter((quota) => quota.balance > 0 || quota.grants.length > 0) });
+  // Zero balances are kept so clients can tell a spent quota from one not loaded yet.
+  return c.json({ quotas });
 });
 
 const ACTIVITY_LIMIT = 100;
@@ -205,6 +210,7 @@ router.get("/balance-activities", async (c) => {
     offset,
     limit,
     filter: filter as BillingBalanceActivityFilter | undefined,
+    quotaTokenTypes: [...(await quotaParameters()).keys()],
   });
   if (!legacyPage) return c.json({ activities });
   const hasMore = activities.nextCursor !== null && offset + limit < LEGACY_ACTIVITY_MAX_OFFSET;

@@ -68,10 +68,6 @@ export function multiplierLabel(multiplier: number, locale: Locale): string {
 		: `-${Math.round((1 - multiplier) * 100)}%`;
 }
 
-export function offerLabel(offer: ModelOffer, locale: Locale): string {
-	return multiplierLabel(offer.multiplier, locale);
-}
-
 /** "5h left" inside the final day, otherwise "until Nov 23". */
 export function offerDeadline(
 	offer: ModelOffer,

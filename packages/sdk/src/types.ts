@@ -613,6 +613,8 @@ export type BillingBalanceActivity = {
   amountUsd: number;
   status: BillingBalanceActivityStatus;
   createdAt: string;
+  /** Usage paid entirely from a quota balance, in its raw units; `amountUsd` is then 0. */
+  quota?: { tokenType: string; units: number } | null;
 };
 
 export type BillingBalanceActivityFilter = "usage" | "grant" | "refund";

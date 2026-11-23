@@ -27,8 +27,8 @@ const config = parsePricingConfig({
 		},
 		{ key: "paused", enabled: false, when: { models: ["h3"] }, effect: { multiplier: 0 } },
 		{ key: "pro-video", when: { usageTypes: ["generation.video"], benefits: ["pro_plan"] }, effect: { multiplier: 0.4 } },
-		{ key: "daily-video", when: { models: ["h3"], benefits: ["pro_plan"] }, effect: { quota: { tokenType: "video_second", parameter: "duration" } } },
-		{ key: "llm-weekend", when: { usageTypes: ["generation.llm"], payer: "space_wallet" }, effect: { multiplier: 0.8 } },
+		{ key: "daily-video", when: { usageTypes: ["generation.video"], models: ["h3"], benefits: ["pro_plan"] }, effect: { quota: { tokenType: "video_second", parameter: "duration" } } },
+		{ key: "llm-weekend", when: { usageTypes: ["generation.llm"] }, effect: { multiplier: 0.8 } },
 	],
 });
 
@@ -45,8 +45,10 @@ test("pricing config rejects rules that could silently misprice", () => {
 		rule({ effect: { multiplier: 1.5 } }),
 		rule({ effect: { multiplier: 0.5, quota: { tokenType: "s", parameter: "duration" } } }),
 		rule({ effect: { quota: { tokenType: "usd_micro_cent", parameter: "duration" } } }),
-		rule({ effect: { quota: { tokenType: "s", parameter: "duration" } }, when: { payer: "personal" } }),
-		rule({ when: { benefits: ["pro_plan"], payer: "space_wallet" } }),
+		rule({ when: { payer: "personal" } }),
+		rule({ effect: { quota: { tokenType: "s", parameter: "duration" } } }),
+		rule({ effect: { quota: { tokenType: "s", parameter: "maxTokens" } }, when: { usageTypes: ["generation.*"] } }),
+		rule({ effect: { quota: { tokenType: "s", parameter: "maxTokens" } }, when: { usageTypes: ["generation.llm.raw"] } }),
 		rule({ when: { startsAt: "2026-11-20T00:00:00" } }),
 		rule({ when: { startsAt: "2026-11-21T00:00:00Z", endsAt: "2026-11-20T00:00:00Z" } }),
 		rule({ key: "Has Spaces" }),
@@ -90,7 +92,7 @@ test("benefits are only read when a candidate rule needs them", async () => {
 	};
 	const llm = await quotePricing({ config, subject: { usageType: "generation.llm", model: "claude", at: during }, loadBenefits: counted });
 	assert.equal(reads, 0);
-	assert.equal(llm.personal.multiplier, 1);
+	assert.deepEqual(llm.personal, { multiplier: 0.8, source: "rule", key: "llm-weekend" });
 	assert.deepEqual(llm.spaceWallet, { multiplier: 0.8, source: "rule", key: "llm-weekend" });
 	await quotePricing({ config, subject: { usageType: "generation.video", model: "x", at: during }, loadBenefits: counted });
 	assert.equal(reads, 1);

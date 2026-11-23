@@ -152,13 +152,11 @@ const announcedModels = $derived<AnnouncedModel[]>(
 	host.isNewSessionRoute
 		? [
 				...(generationModelsCatalog ?? []).map((model) => ({
-					key: `generation:${model.model}`,
 					title: model.title?.trim() || model.model,
 					offer: model.offer,
 					select: () => host.handleCreateModelSelect(model.model),
 				})),
 				...(host.modelsCatalog ?? []).map((item) => ({
-					key: `llm:${item.provider}/${item.id}`,
 					title:
 						typeof item.model.name === "string" ? item.model.name : item.id,
 					offer: item.offer,

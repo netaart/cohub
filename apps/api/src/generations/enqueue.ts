@@ -74,6 +74,7 @@ export async function enqueueGeneration(input: GenerationRequestInput & {
       sessionId: input.sessionId ?? null,
       turnId: input.turnId ?? null,
       model: input.model,
+      provider: declaration.adapter?.type ?? null,
       usageType,
       parameters,
     });

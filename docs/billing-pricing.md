@@ -18,21 +18,20 @@ rules:
       usageTypes: [generation.video]   # exact, or a prefix such as generation.*
       models: [some-model]
       providers: [some-provider]
-      benefits: [pro_plan]     # any held benefit key qualifies
-      payer: personal          # personal | space_wallet
+      benefits: [pro_plan]     # any held benefit key qualifies; never prices Space wallet charges
       startsAt: 2026-12-01T00:00:00+08:00
       endsAt: 2026-12-04T00:00:00+08:00
     effect:
       multiplier: 0.5          # or: quota: { tokenType, parameter }
 ```
 
-Validation is strict: unknown fields, usage types outside `generation.*`, timestamps without an offset, duplicate keys, and multipliers outside `0..1` reject the whole file.
+Validation is strict: unknown fields, usage types outside `generation.*`, timestamps without an offset, duplicate keys, and multipliers outside `0..1` reject the whole file. Quota rules must list `usageTypes`, none of which may cover `generation.llm`, `generation.llm.raw`, or `generation.decision`: those are settled after the fact and have no admission step to draw quota at.
 
 ## How a usage is priced
 
-1. Rules are matched at the moment the usage happened (the message, completion, decision, or generation request), not when it is charged, so retries and late processing keep the price the user saw.
+1. Generation tasks, raw completions, and decision calls are priced when they are admitted and charged at that price. If benefits a matching rule needs cannot be read at admission, those calls fail with a retryable `pricing_unavailable` (503) before any provider call; a raw completion also prices its image-to-text fallback model at admission. LLM turn messages are priced when each message is billed, normally seconds after it completes, with the time window checked against the message's creation time; if the benefits a charge needs cannot be read then, the billing job retries rather than falling back to a public price.
 2. The lowest multiplier wins; discounts never stack. Per-model benefit discounts (`pro_model_discount_v1`, `max_model_discount_v1` metadata) compete in the same pool for generation tasks.
-3. Each charge is priced for both payers. Rules with `benefits` only price personal charges, so a Space wallet pays the campaign price without personal subscription discounts. A usage that personal benefits make free is never routed to a Space wallet.
+3. Each charge is priced for both payers. Rules with `benefits` only price personal charges, so a Space wallet pays the campaign price without personal subscription discounts; the wallet price is therefore never below the personal price. A usage that personal benefits make free is never routed to a Space wallet.
 4. A quota rule draws on the user's own balance of `tokenType` before any money is charged; one unit covers one unit of the request parameter (for example `duration` seconds). The uncovered share is charged at the discounted price. Quotas apply to generation tasks.
 
 ## Generation tasks
@@ -60,4 +59,5 @@ The business `period_timezone` decides when a day starts and when unused units e
 - `GET /api/models` adds `offer: { multiplier, ruleKey, endsAt, announce }` to each model for the caller's personal price, and `quota: { tokenType, parameter }` to generation models a quota covers. Clients hide an offer at `endsAt` without refetching.
 - `GET /api/billing/quotas` returns the caller's quota balances and grants in raw units.
 - Charges append their pricing to the ledger reason, e.g. `Generation some-model [list=5;x=0.5;quota=6/10]`; list-price charges keep the plain reason.
+- A generation the quota fully covered has no money row; the balance activity feed lists it from the quota draw with `amountUsd: 0` and `quota: { tokenType, units }`. Refunded and partially covered draws are not listed separately.
 - `cohub models ls` shows an Offer column; `cohub generate` reports quota coverage.

@@ -80,7 +80,7 @@ export async function createGenerationSessionExecution(input: {
   const taskRunId = crypto.randomUUID();
   let admission: GenerationAdmission;
   try {
-    admission = await admitGeneration({ taskRunId, userId: input.userId, spaceId: input.spaceId, sessionId: input.sessionId ?? null, model: input.model, usageType, parameters });
+    admission = await admitGeneration({ taskRunId, userId: input.userId, spaceId: input.spaceId, sessionId: input.sessionId ?? null, model: input.model, provider: declaration.adapter?.type ?? null, usageType, parameters });
   } catch (error) {
     if (error instanceof GenerationPricingUnavailableError) throw new GenerationSessionExecutionError(503, "generation_pricing_unavailable", "Generation pricing is temporarily unavailable.");
     if (error instanceof GenerationBillingUnavailableError) throw new GenerationSessionExecutionError(503, "generation_balance_unavailable", error.message);

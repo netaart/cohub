@@ -134,6 +134,7 @@ export {
   parsePricingSnapshot,
   PricingConfigError,
   pricingDiscountFor,
+  pricingNeedsBenefits,
   quotaUnitsRequested,
   quotePricing,
   snapshotMultiplier,

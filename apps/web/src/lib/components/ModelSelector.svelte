@@ -6,6 +6,7 @@ import type {
 } from "@cohub/protocol/generation";
 import type { ModelStatusEntry } from "@cohub/protocol/model/status";
 import { Brain, Check, ChevronDown, Image, Zap } from "lucide-svelte";
+import { minuteClock } from "#lib/clock.svelte.ts";
 import Dialog from "#lib/components/Dialog.svelte";
 import GenerationCategoryIcon from "#lib/components/generation/GenerationCategoryIcon.svelte";
 import GenerationCategoryTabs from "#lib/components/generation/GenerationCategoryTabs.svelte";
@@ -1011,9 +1012,9 @@ const hoverCardPos = $derived.by(() => {
 				</div>
 			{:else}
 				{#each filteredModels as item, index (item.provider + "/" + item.id)}
-					{@const offer = liveOffer(item.offer)}
+					{@const offer = liveOffer(item.offer, minuteClock.now)}
 					{@const costText = formatModelCost(item, locale, offer?.multiplier ?? 1)}
-					{@const deadline = offer ? offerDeadline(offer, locale) : ""}
+					{@const deadline = offer ? offerDeadline(offer, locale, minuteClock.now) : ""}
 					{@const tLevels = thinkingLevels(item)}
 					{@const showThinking = tLevels.length > 1}
 					{@const tMenuKey = thinkingMenuKey(item)}
@@ -1230,8 +1231,8 @@ const hoverCardPos = $derived.by(() => {
 							/>
 						{/snippet}
 						{#snippet row(model)}
-							{@const offer = liveOffer(model.offer)}
-						{@const priceText = formatGenerationPriceText(model, locale, offer?.multiplier ?? 1)}
+							{@const offer = liveOffer(model.offer, minuteClock.now)}
+						{@const priceText = [formatGenerationPriceText(model, locale, offer?.multiplier ?? 1), offer ? offerDeadline(offer, locale, minuteClock.now) : ""].filter(Boolean).join(" \u00b7 ")}
 							<div class="px-3 py-2 transition-colors duration-100 hover:bg-bg-hover/60">
 								<div class="flex items-start gap-2.5">
 									<input

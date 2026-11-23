@@ -28,6 +28,14 @@ function parseModelDiscountSnapshot(value: unknown): GenerationModelDiscountSnap
   return { multiplier: value.multiplier, resolvedAt: value.resolvedAt };
 }
 
+function parseQuota(value: unknown): { tokenType: string; requested: number; covered: number } | null {
+  if (!isRecord(value)) return null;
+  const { tokenType, requested, covered } = value;
+  return typeof tokenType === "string" && Number.isSafeInteger(requested) && Number.isSafeInteger(covered)
+    ? { tokenType, requested: requested as number, covered: covered as number }
+    : null;
+}
+
 function parsePinnedPayer(value: unknown): "personal" | "space_wallet" | null {
   return value === "personal" || value === "space_wallet" ? value : null;
 }
@@ -59,6 +67,7 @@ export function parseGenerationBillingRetryData(data: unknown): GenerationBillin
     adapterType: typeof data.adapterType === "string" ? data.adapterType : null,
     ...(payer ? { payer } : {}),
     ...(typeof data.reason === "string" && data.reason.trim() ? { reason: data.reason.slice(0, 1024) } : {}),
+    ...(parseQuota(data.quota) ? { quota: parseQuota(data.quota) } : {}),
   };
   if (data.schemaVersion === undefined || data.schemaVersion === 1) {
     return {

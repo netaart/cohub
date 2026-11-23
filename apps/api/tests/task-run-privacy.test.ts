@@ -176,6 +176,8 @@ test("generation billing retry pricing is removed from collaborator task views",
         officialCostUsd: 0.04,
         amountUsd: 0.024,
         modelDiscount: { multiplier: 0.6, resolvedAt: "2026-07-13T00:00:00.000Z" },
+        reason: "Generation gpt-image-2 [list=0.04;x=0.6;quota=6/10]",
+        quota: { tokenType: "video_second", requested: 10, covered: 6 },
       },
     },
     result: {
@@ -184,6 +186,7 @@ test("generation billing retry pricing is removed from collaborator task views",
       officialCostUsd: 0.04,
       amountUsd: 0.024,
       discountMultiplier: 0.6,
+      quota: { tokenType: "video_second", requested: 10, covered: 6 },
     },
   };
 

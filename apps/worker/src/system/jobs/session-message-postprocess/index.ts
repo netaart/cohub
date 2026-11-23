@@ -1,4 +1,4 @@
-import { billingOperations, spaceWalletBillingOperations, COHUB_BILLING_TOKEN_TYPES, COHUB_BILLING_USAGE_TYPES } from "@cohub/billing";
+import { billingOperations, spaceWalletBillingOperations, COHUB_BILLING_TOKEN_TYPES, COHUB_BILLING_USAGE_TYPES, normalizePositiveUsd } from "@cohub/billing";
 import { claimMessageWalletBilling } from "@cohub/core/space-wallet";
 import { qualifyAndRewardReferral } from "@cohub/core/referrals";
 import { readImageToTextCalls } from "@cohub/core/sessions";
@@ -17,7 +17,7 @@ import { registerSystemJob } from "../../registry.js";
 import { resolveLlmRequestStats } from "./request-stats.js";
 import { spaceWalletBilling } from "../../../space-wallet-billing.js";
 import { usagePricing } from "../../../usage-pricing.js";
-import { priceUsage } from "@cohub/core/usage-pricing";
+import { priceUsage, type FrozenPricing } from "@cohub/core/usage-pricing";
 import { redisCommandClient } from "../../../redis.js";
 import { stopTurnsOnBillingBlock } from "./billing-stop.js";
 
@@ -43,72 +43,51 @@ const resolveActorUserId = async (message: typeof sessionMessages.$inferSelect) 
   return typeof userId === "string" && userId.trim() ? userId.trim() : null;
 };
 
-const recordBillingUsage = async (input: {
-  spaceId: string | undefined;
-  retryOnly: boolean;
-  userId: string | null;
-  usage: Usage | null;
-  sourceId: string;
-  operationId: string;
-  provider: string;
-  model: string;
-  at: Date;
-}) => {
-  if (!input.userId) return false;
-  const amount = input.usage?.cost?.total;
-  const officialUsd = typeof amount === "number" && Number.isFinite(amount) && amount > 0
-    ? Number(amount.toFixed(8))
-    : 0;
-  if (officialUsd <= 0 || !billingOperations.status.configured) return false;
-  const usageType = COHUB_BILLING_USAGE_TYPES.generationLlm;
-  // Priced at the message's own time so retries and late processing keep the price the user saw.
-  const quote = await usagePricing.quoteCharge(
-    { userId: input.userId, usageType, model: input.model, provider: input.provider, at: input.at },
-    (messageText, context) => logger.warn(messageText, context),
-  );
-  const result = await spaceWalletBilling.recordUsage({
-    spaceId: input.spaceId,
-    retryOnly: input.retryOnly,
-    userId: input.userId,
-    ...priceUsage(quote, officialUsd, `LLM usage ${input.provider}/${input.model}`),
-    tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-    usageType,
-    sourceId: input.sourceId,
-    operationId: input.operationId,
-  });
-  return result.status === "overage";
+type LlmCharge = { officialUsd: number; operationId: string; provider: string; model: string };
+
+/** The LLM calls of a message that cost money: the message itself and its succeeded image-to-text calls. */
+const billableLlmCharges = (message: typeof sessionMessages.$inferSelect, usage: Usage | null): LlmCharge[] => {
+  if ((message.meta as { runtime?: unknown } | null)?.runtime === "local") return [];
+  const charges: LlmCharge[] = [];
+  if (!message.errorMessage && message.stopReason !== "error" && message.stopReason !== "aborted") {
+    charges.push({ officialUsd: normalizePositiveUsd(usage?.cost?.total), operationId: `llm:${message.id}`, provider: message.provider ?? "unknown", model: message.model ?? "unknown" });
+  }
+  for (const call of readImageToTextCalls(message.meta)) {
+    if (call.status !== "succeeded") continue;
+    charges.push({ officialUsd: normalizePositiveUsd(call.usage?.cost?.total), operationId: `llm:image-to-text:${message.id}:${call.sourceKey}`, provider: call.provider, model: call.model });
+  }
+  return charges.filter((charge) => charge.officialUsd > 0);
 };
 
-const recordBilling = async (spaceId: string | undefined, retryOnly: boolean, message: typeof sessionMessages.$inferSelect, userId: string | null, usage: Usage | null) => {
-  if ((message.meta as { runtime?: unknown } | null)?.runtime === "local") return false;
-  let overdrawn = false;
-  if (!message.errorMessage && message.stopReason !== "error" && message.stopReason !== "aborted") {
-    overdrawn = await recordBillingUsage({
-      spaceId,
-      retryOnly,
-      userId,
-      usage,
-      sourceId: message.id,
-      operationId: `llm:${message.id}`,
-      provider: message.provider ?? "unknown",
-      model: message.model ?? "unknown",
-      at: message.createdAt ?? new Date(),
+const llmSubject = (charge: LlmCharge, at: Date) => ({
+  usageType: COHUB_BILLING_USAGE_TYPES.generationLlm,
+  model: charge.model,
+  provider: charge.provider,
+  // Time windows are checked at the message's own time, so late processing keeps a campaign it ran in.
+  at,
+});
+
+const recordBilling = async (input: {
+  spaceId: string | undefined;
+  userId: string;
+  sourceId: string;
+  at: Date;
+  charges: LlmCharge[];
+  price: FrozenPricing;
+}) => {
+  const results = await Promise.all(input.charges.map(async (charge) => {
+    const result = await spaceWalletBilling.recordUsage({
+      spaceId: input.spaceId,
+      userId: input.userId,
+      ...priceUsage(await input.price(llmSubject(charge, input.at)), charge.officialUsd, `LLM usage ${charge.provider}/${charge.model}`),
+      tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
+      usageType: COHUB_BILLING_USAGE_TYPES.generationLlm,
+      sourceId: input.sourceId,
+      operationId: charge.operationId,
     });
-  }
-  const auxiliary = await Promise.all(readImageToTextCalls(message.meta).map((call) => call.status === "succeeded"
-    ? recordBillingUsage({
-        spaceId,
-        retryOnly,
-        userId,
-        usage: call.usage,
-        sourceId: message.id,
-        operationId: `llm:image-to-text:${message.id}:${call.sourceKey}`,
-        provider: call.provider,
-        model: call.model,
-        at: message.createdAt ?? new Date(),
-      })
-    : false));
-  return overdrawn || auxiliary.includes(true);
+    return result.status === "overage";
+  }));
+  return results.includes(true);
 };
 
 const maybeQualifyReferral = async (message: typeof sessionMessages.$inferSelect) => {
@@ -265,8 +244,24 @@ registerSystemJob(SESSION_MESSAGE_POSTPROCESS_JOB, async (job: Job) => {
   const alreadyAttempted = Object.hasOwn(meta, "walletBillingAttempted");
   const walletEligible = meta.walletBillingEligible === true;
   const walletMode = walletEligible && billingOperations.status.configured && spaceWalletBillingOperations.status.configured;
-  const shouldBill = !message.usageAggregatedAt && !alreadyAttempted && (!walletMode || await claimMessageWalletBilling(db, message.id));
-  const overdrawn = shouldBill && await recordBilling(walletEligible ? spaceId : undefined, job.attemptsMade > 0 || job.attemptsStarted > 1, message, userId, usage);
+  const mayBill = !message.usageAggregatedAt && !alreadyAttempted && billingOperations.status.configured;
+  const charges = mayBill && userId ? billableLlmCharges(message, usage) : [];
+  const at = message.createdAt ?? new Date();
+  // Read the benefits these charges need before claiming the wallet charge: a failed read retries the
+  // job instead of mispricing, and a message whose charges need none never waits on billing.
+  const price = userId && charges.length > 0
+    ? await usagePricing.freeze(userId, charges.map((charge) => llmSubject(charge, at)))
+    : null;
+  const shouldBill = price !== null && (!walletMode || await claimMessageWalletBilling(db, message.id));
+  // Winning the wallet claim proves no earlier attempt debited, so the charge is never a retry here.
+  const overdrawn = shouldBill && price !== null && userId !== null && await recordBilling({
+    spaceId: walletEligible ? spaceId : undefined,
+    userId,
+    sourceId: message.id,
+    at,
+    charges,
+    price,
+  });
   if (overdrawn && userId && message.turnId) {
     await stopTurnsOnBillingBlock({ db, redis: redisCommandClient, gate: spaceWalletBilling.gate }, {
       spaceId,

@@ -15,7 +15,6 @@ export type PricingRuleConditions = {
   providers: readonly string[] | null;
   /** Entitlement benefit keys; any match qualifies. Benefit rules never price Space wallet charges. */
   benefits: readonly string[] | null;
-  payer: PricingPayer | null;
   startsAt: number | null;
   endsAt: number | null;
 };
@@ -122,22 +121,15 @@ function isPriceableUsageType(pattern: string) {
 
 function parseConditions(value: unknown, where: string): PricingRuleConditions {
   if (value === undefined || value === null) {
-    return { usageTypes: null, models: null, providers: null, benefits: null, payer: null, startsAt: null, endsAt: null };
+    return { usageTypes: null, models: null, providers: null, benefits: null, startsAt: null, endsAt: null };
   }
   if (!isRecord(value)) throw new PricingConfigError(`${where} must be an object`);
-  assertKnownKeys(value, ["usageTypes", "models", "providers", "benefits", "payer", "startsAt", "endsAt"], where);
+  assertKnownKeys(value, ["usageTypes", "models", "providers", "benefits", "startsAt", "endsAt"], where);
   const usageTypes = stringList(value.usageTypes, `${where}.usageTypes`);
   for (const pattern of usageTypes ?? []) {
     if (!isPriceableUsageType(pattern)) {
       throw new PricingConfigError(`${where}.usageTypes: "${pattern}" is outside ${PRICEABLE_USAGE_ROOT}.*`);
     }
-  }
-  const payer = value.payer;
-  if (payer !== undefined && payer !== null && payer !== "personal" && payer !== "space_wallet") {
-    throw new PricingConfigError(`${where}.payer must be personal or space_wallet`);
-  }
-  if (payer === "space_wallet" && value.benefits !== undefined && value.benefits !== null) {
-    throw new PricingConfigError(`${where}: benefit rules never apply to Space wallet charges`);
   }
   const startsAt = instant(value.startsAt, `${where}.startsAt`);
   const endsAt = instant(value.endsAt, `${where}.endsAt`);
@@ -149,10 +141,20 @@ function parseConditions(value: unknown, where: string): PricingRuleConditions {
     models: stringList(value.models, `${where}.models`),
     providers: stringList(value.providers, `${where}.providers`),
     benefits: stringList(value.benefits, `${where}.benefits`),
-    payer: (payer as PricingPayer | undefined) ?? null,
     startsAt,
     endsAt,
   };
+}
+
+/** Usage settled after the fact (LLM turns, completions, decisions) has no admission step to draw quota at. */
+const UNQUOTABLE_USAGE_TYPES = ["generation.llm", "generation.llm.raw", "generation.decision"];
+
+function assertQuotaUsageTypes(usageTypes: readonly string[] | null, where: string) {
+  if (!usageTypes) throw new PricingConfigError(`${where} is required for quota rules`);
+  for (const pattern of usageTypes) {
+    const blocked = UNQUOTABLE_USAGE_TYPES.find((usageType) => usageTypeMatches([pattern], usageType));
+    if (blocked) throw new PricingConfigError(`${where}: quota does not apply to ${blocked}`);
+  }
 }
 
 function parseEffect(value: unknown, where: string): PricingRuleEffect {
@@ -203,9 +205,7 @@ export function parsePricingConfig(document: unknown): PricingConfig {
     if (raw.announce !== undefined && typeof raw.announce !== "boolean") throw new PricingConfigError(`${where}.announce must be a boolean`);
     const when = parseConditions(raw.when, `${key}.when`);
     const effect = parseEffect(raw.effect, `${key}.effect`);
-    if (effect.type === "quota" && when.payer !== null) {
-      throw new PricingConfigError(`${key}.when.payer does not apply to quota rules; quota always draws on the user's own balance`);
-    }
+    if (effect.type === "quota") assertQuotaUsageTypes(when.usageTypes, `${key}.when.usageTypes`);
     return { key, enabled: raw.enabled !== false, announce: raw.announce === true, when, effect };
   });
   return { rules };
@@ -219,7 +219,7 @@ function usageTypeMatches(patterns: readonly string[], usageType: string) {
   });
 }
 
-/** Everything except benefits and payer, which depend on who is asking and who pays. */
+/** Everything except benefits, which depend on who is asking. */
 function matchesUsage(rule: PricingRule, subject: PricingSubject, at: number) {
   const { when } = rule;
   if (!rule.enabled) return false;
@@ -230,6 +230,19 @@ function matchesUsage(rule: PricingRule, subject: PricingSubject, at: number) {
   if (when.models && !when.models.includes(subject.model)) return false;
   if (when.providers && !(subject.provider && when.providers.includes(subject.provider))) return false;
   return true;
+}
+
+function candidatesFor(config: PricingConfig, subject: PricingSubject, at: Date) {
+  return config.rules.filter((rule) => matchesUsage(rule, subject, at.getTime()));
+}
+
+function needsBenefits(subject: PricingSubject, candidates: readonly PricingRule[]) {
+  return subject.modelDiscounts === true || candidates.some((rule) => rule.when.benefits);
+}
+
+/** Whether pricing this usage would read the user's benefits. */
+export function pricingNeedsBenefits(config: PricingConfig, subject: PricingSubject): boolean {
+  return needsBenefits(subject, candidatesFor(config, subject, subject.at ?? new Date()));
 }
 
 function lowest(current: PricingDiscount, candidate: PricingDiscount) {
@@ -247,10 +260,8 @@ export async function quotePricing(input: {
   loadBenefits: () => Promise<readonly BillingActiveBenefit[]>;
 }): Promise<PricingQuote> {
   const at = input.subject.at ?? new Date();
-  const atMs = at.getTime();
-  const candidates = input.config.rules.filter((rule) => matchesUsage(rule, input.subject, atMs));
-  const needsBenefits = input.subject.modelDiscounts === true || candidates.some((rule) => rule.when.benefits);
-  const benefits = needsBenefits ? await input.loadBenefits() : [];
+  const candidates = candidatesFor(input.config, input.subject, at);
+  const benefits = needsBenefits(input.subject, candidates) ? await input.loadBenefits() : [];
   const held = new Set(benefits.filter((benefit) => benefit.enabled).map((benefit) => benefit.benefitKey));
 
   let personal = NO_DISCOUNT;
@@ -263,8 +274,9 @@ export async function quotePricing(input: {
       continue;
     }
     const discount: PricingDiscount = { multiplier: rule.effect.multiplier, source: "rule", key: rule.key };
-    if (rule.when.payer !== "space_wallet") personal = lowest(personal, discount);
-    if (rule.when.payer !== "personal" && !rule.when.benefits) spaceWallet = lowest(spaceWallet, discount);
+    // Every wallet rule also prices personal charges, so the wallet price is never below the personal one.
+    personal = lowest(personal, discount);
+    if (!rule.when.benefits) spaceWallet = lowest(spaceWallet, discount);
   }
   if (input.subject.modelDiscounts) {
     const modelDiscount = resolveGenerationModelDiscount({ model: input.subject.model, entitlements: benefits });

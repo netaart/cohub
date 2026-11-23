@@ -533,6 +533,8 @@ export type BillingBalanceActivity = {
   amountUsd: number;
   status: BillingBalanceActivityStatus;
   createdAt: string;
+  /** Usage paid entirely from a quota balance, in its raw units; `amountUsd` is then 0. */
+  quota?: { tokenType: string; units: number } | null;
 };
 
 export const BILLING_BALANCE_ACTIVITY_FILTERS = ["usage", "grant", "refund"] as const;
@@ -554,6 +556,8 @@ export type BillingBalanceActivityListInput = BillingUserRef & {
   offset?: number;
   limit?: number;
   filter?: BillingBalanceActivityFilter;
+  /** Quota tokens whose fully covered usage appears in the feed at no charge. */
+  quotaTokenTypes?: readonly string[];
 };
 
 export type BillingCreditGrantScope = "available" | "all" | "none";

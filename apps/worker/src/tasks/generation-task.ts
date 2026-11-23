@@ -13,9 +13,9 @@ import {
   type PricingPayer,
 } from "@cohub/billing";
 import type { Job } from "bullmq";
-import { parseGenerationReserveHold } from "@cohub/core/generation-billing";
+import { parseGenerationReserveHold, refundGenerationQuota } from "@cohub/core/generation-billing";
 import { pricedReason } from "@cohub/core/usage-pricing";
-import { generationReserveHolds, markGenerationDelivered } from "../generation-billing.js";
+import { generationReserveHolds } from "../generation-billing.js";
 import { createGenerationClient, GenerationConfigError } from "@neta-art/generation";
 import { createGenerationDeclarationLoader } from "@cohub/infra/config-runtime/generation-declarations";
 import {
@@ -151,6 +151,7 @@ async function enqueueGenerationBillingRetry(input: {
   sessionId?: string | null;
   payer: GenerationBillingRetryTaskData["payer"];
   reason: string;
+  quota: GenerationUsageBilling["quota"];
 }) {
   const data: GenerationBillingRetryTaskData = {
     schemaVersion: 2,
@@ -164,6 +165,7 @@ async function enqueueGenerationBillingRetry(input: {
     adapterType: input.adapterType ?? null,
     payer: input.payer ?? null,
     reason: input.reason,
+    ...(input.quota ? { quota: input.quota } : {}),
   };
   // Credit consumption remains idempotent via operationId `generation:${taskRunId}`.
   await enqueueTask({
@@ -277,6 +279,7 @@ async function recordGenerationUsageBilling(input: {
       sessionId: input.sessionId,
       payer: input.payer,
       reason: charge.reason,
+      quota,
     }).catch((enqueueError) => {
       console.warn("[Billing] failed to enqueue generation billing retry", { ...context, error: enqueueError });
     });
@@ -294,6 +297,7 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
   if (!userId) throw new Error("Invalid generation task payload: userId is required");
   const data = parseGenerationTaskData(payload.data);
   const taskRunId = context?.taskRunId ?? String(job.id ?? "");
+  let delivered = false;
   const runnable = await markGenerationSessionRunning(taskRunId).catch((error) => {
     console.warn("[GenerationSession] failed to mark turn running", error);
     return null;
@@ -353,8 +357,6 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
       },
     );
 
-    markGenerationDelivered(taskRunId);
-
     const billing = await recordGenerationUsageBilling({
       retryOnly: job.attemptsMade > 0 || job.attemptsStarted > 1,
       userId,
@@ -413,11 +415,16 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
       ...(data.meta ? { meta: data.meta } : {}),
     } satisfies GenerationTaskResult;
     await finalizeGenerationSession({ taskRunId, payload, result: taskResult });
+    delivered = true;
     await settleTurnSpeechTask({ taskRunId, payload, output: result.content }).catch((error) => {
       console.warn("[TurnSpeech] failed to record segment", { taskRunId, error });
     });
     return taskResult;
   } catch (error) {
+    // Quota covers results the user receives; a task that never persisted its output gets it back.
+    if (!delivered) {
+      await refundGenerationQuota({ billing: billingOperations, taskRunId, userId, quota: data.pricing.quota, error: (message, details) => console.error(message, details) });
+    }
     throw normalizeGenerationError(error);
   }
 };

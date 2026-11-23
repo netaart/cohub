@@ -30,7 +30,8 @@ const SUBJECT =
 const PRICING_SUFFIX = / \[list=([\d.]+)((?:;[a-z]+=[^;\]]+)*)\]$/;
 
 export type UsagePricing = {
-	listUsd: number;
+	/** Null for usage a quota fully covered: no money moved and the list price is not recorded. */
+	listUsd: number | null;
 	multiplier: number | null;
 	quota: { covered: number; requested: number } | null;
 };
@@ -40,8 +41,14 @@ function plainReason(description: string | null): string | null {
 }
 
 export function usagePricing(
-	item: Pick<BillingBalanceActivity, "description">,
+	item: Pick<BillingBalanceActivity, "description" | "quota">,
 ): UsagePricing | null {
+	if (item.quota)
+		return {
+			listUsd: null,
+			multiplier: null,
+			quota: { covered: item.quota.units, requested: item.quota.units },
+		};
 	const match = item.description?.match(PRICING_SUFFIX);
 	if (!match) return null;
 	const fields = new Map(
@@ -79,11 +86,13 @@ export function runPricing(items: readonly BillingBalanceActivity[]) {
 	const first = priced[0];
 	if (!first) return null;
 	return {
-		listUsd: -Number(
-			priced
-				.reduce((sum, pricing) => sum + (pricing?.listUsd ?? 0), 0)
-				.toFixed(8),
-		),
+		listUsd: priced.some((pricing) => pricing?.listUsd === null)
+			? null
+			: -Number(
+					priced
+						.reduce((sum, pricing) => sum + (pricing?.listUsd ?? 0), 0)
+						.toFixed(8),
+				),
 		multiplier: priced.every(
 			(pricing) => pricing?.multiplier === first.multiplier,
 		)
@@ -99,7 +108,7 @@ function dayKey(date: Date) {
 
 function runKey(item: BillingBalanceActivity) {
 	if (item.kind !== "usage" || transferActivityKind(item)) return null;
-	return `${item.usageType}|${plainReason(item.description)}|${item.status === "covered" ? "" : "overage"}`;
+	return `${item.usageType}|${plainReason(item.description)}|${item.status === "covered" ? "" : "overage"}|${item.quota ? "quota" : ""}`;
 }
 
 function mergedStatus(

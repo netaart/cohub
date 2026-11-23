@@ -29,15 +29,33 @@ export async function consumeGenerationQuota(input: {
   if (amount <= 0) return unused;
 
   const originalOperationId = consumeOperationId(taskRunId);
-  const consumed = await billing.consumeQuota({
+  // Undo the whole draw: billing cancels open debt first, so this leaves the balance as it was.
+  const voidDraw = () => billing.reverseQuota({
     userId,
     tokenType: quota.tokenType,
+    originalOperationId,
+    operationId: `${originalOperationId}:void`,
     amount,
-    usageType: input.usageType,
-    sourceId: taskRunId,
-    operationId: originalOperationId,
-    reason: `Generation ${input.model}`,
+    reason: "Quota draw voided at admission",
   });
+  let consumed: { overage: number };
+  try {
+    consumed = await billing.consumeQuota({
+      userId,
+      tokenType: quota.tokenType,
+      amount,
+      usageType: input.usageType,
+      sourceId: taskRunId,
+      operationId: originalOperationId,
+      // The ledger lists a generation the quota fully covered by comparing what is left of this draw to it.
+      reason: `Generation ${input.model} [requested=${input.requested}]`,
+    });
+  } catch (error) {
+    // The consume may have committed before its response was lost; a void of a consume that never
+    // happened fails harmlessly.
+    await voidDraw().catch(() => undefined);
+    throw error;
+  }
   if (consumed.overage <= 0) return { ...unused, covered: amount };
   try {
     const reversed = await billing.reverseQuota({
@@ -52,15 +70,7 @@ export async function consumeGenerationQuota(input: {
       input.warn?.("[GenerationQuota] overage reversal returned credit instead of cancelling debt", { taskRunId, userId, tokenType: quota.tokenType, overage: consumed.overage, cancelled: reversed.overageCancelled });
     }
   } catch (error) {
-    // Undo the whole draw: billing cancels open debt first, so this leaves the balance as it was.
-    await billing.reverseQuota({
-      userId,
-      tokenType: quota.tokenType,
-      originalOperationId,
-      operationId: `${originalOperationId}:void`,
-      amount,
-      reason: "Quota draw voided at admission",
-    }).catch((voidError) => {
+    await voidDraw().catch((voidError) => {
       input.warn?.("[GenerationQuota] failed to void a quota draw; manual billing verification required", { taskRunId, userId, tokenType: quota.tokenType, amount, error: voidError });
     });
     throw error;
@@ -68,22 +78,30 @@ export async function consumeGenerationQuota(input: {
   return { ...unused, covered: amount - consumed.overage };
 }
 
-/** Returns a failed or cancelled generation's quota. Idempotent per task. */
+/**
+ * Returns a failed or cancelled generation's quota. Idempotent per task; a failure is logged for manual
+ * verification instead of thrown, since every caller is already on a failure path.
+ */
 export async function refundGenerationQuota(input: {
   billing: QuotaBilling;
   taskRunId: string;
   userId: string;
   quota: GenerationQuotaUse | null | undefined;
-  reason: string;
+  error: Log;
 }): Promise<void> {
   if (!input.quota || input.quota.covered <= 0) return;
   const originalOperationId = consumeOperationId(input.taskRunId);
-  await input.billing.reverseQuota({
-    userId: input.userId,
-    tokenType: input.quota.tokenType,
-    originalOperationId,
-    operationId: `${originalOperationId}:refund`,
-    amount: input.quota.covered,
-    reason: input.reason,
-  });
+  try {
+    await input.billing.reverseQuota({
+      userId: input.userId,
+      tokenType: input.quota.tokenType,
+      originalOperationId,
+      operationId: `${originalOperationId}:refund`,
+      amount: input.quota.covered,
+      // One fixed reason: the API (cancel) and worker (failure) may both refund the same task under one key.
+      reason: "Generation not delivered",
+    });
+  } catch (error) {
+    input.error("[GenerationQuota] refund failed; manual billing verification required", { taskRunId: input.taskRunId, userId: input.userId, quota: input.quota, error });
+  }
 }

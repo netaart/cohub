@@ -170,7 +170,7 @@ $effect(() => onBillingChange(() => void feed.refresh()));
 	</span>
 	<span class="flex shrink-0 flex-col items-end">
 		{@render amount(run.amountUsd, run.status)}
-		{#if pricing}
+		{#if pricing && pricing.listUsd !== null}
 			{@const list = formatBalance(pricing.listUsd, locale)}
 			<s class="font-mono text-[11px] tabular-nums text-text-placeholder" aria-label={m.pricing_original_price({ price: list }, { locale })}>{list}</s>
 		{/if}
@@ -213,9 +213,15 @@ $effect(() => onBillingChange(() => void feed.refresh()));
 							{#if open}
 								<ul class="mb-2 ml-6.5 border-l border-border-subtle pl-3">
 									{#each run.items as item (item.id)}
+										{@const itemPricing = item.kind === "usage" ? runPricing([item]) : null}
 										<li class="flex items-center justify-between gap-3 py-1 text-[11px]">
-											<span class="font-mono tabular-nums text-text-tertiary">{time(item.createdAt)}</span>
-											{@render amount(item.amountUsd, item.status)}
+											<span class="min-w-0 truncate font-mono tabular-nums text-text-tertiary">
+												{time(item.createdAt)}{#if itemPricing && pricingSummary(itemPricing)}<span class="font-sans"> · {pricingSummary(itemPricing)}</span>{/if}
+											</span>
+											<span class="flex shrink-0 items-baseline gap-1.5">
+												{#if itemPricing && itemPricing.listUsd !== null}<s class="font-mono tabular-nums text-text-placeholder">{formatBalance(itemPricing.listUsd, locale)}</s>{/if}
+												{@render amount(item.amountUsd, item.status)}
+											</span>
 										</li>
 									{/each}
 								</ul>

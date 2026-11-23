@@ -41,6 +41,15 @@ test("ledger reads the pricing suffix and keeps the subject clean", () => {
 		quota: null,
 	});
 	assert.equal(runPricing([item, usage("Generation h3")]), null);
+	const covered = {
+		...usage("Generation h3", 0),
+		quota: { tokenType: "video_second", units: 10 },
+	};
+	assert.deepEqual(runPricing([covered]), {
+		listUsd: null,
+		multiplier: null,
+		quota: { covered: 10, requested: 10 },
+	});
 });
 
 test("offers expire on the client and count down in their final day", () => {

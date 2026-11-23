@@ -2,7 +2,6 @@
 import type { ModelOffer } from "@cohub/protocol";
 
 export type AnnouncedModel = {
-	key: string;
 	title: string;
 	offer: ModelOffer | null | undefined;
 	select: () => void;

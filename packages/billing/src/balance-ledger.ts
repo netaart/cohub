@@ -11,6 +11,7 @@ export type LedgerRow = {
   operationId: string | null;
   reason: string | null;
   createdAt: string;
+  quota?: BillingBalanceActivity["quota"];
 };
 
 export type LedgerSource = (query: { to: string | undefined; page: number; limit: number }) => Promise<{
@@ -128,9 +129,10 @@ function usageActivity(id: string, { first, covered, overage }: UsageDraft): Bil
     sourceType: first.sourceType,
     sourceId: first.sourceId,
     operationId: first.operationId,
-    amountUsd: -round(covered + overage),
+    amountUsd: -round(covered + overage) || 0,
     status: covered > 0 && overage > 0 ? "partial" : overage > 0 ? "overage" : "covered",
     createdAt: first.createdAt,
+    ...(first.quota ? { quota: first.quota } : {}),
   };
 }
 
@@ -212,5 +214,5 @@ export async function readLedger(input: {
   }
 
   const items = [...groups].map(([id, group]) => group.kind === "usage" ? usageActivity(id, group.draft) : group.activity);
-  return { items: items.slice(input.offset ?? 0).filter((item) => item.amountUsd !== 0), nextCursor };
+  return { items: items.slice(input.offset ?? 0).filter((item) => item.amountUsd !== 0 || item.quota), nextCursor };
 }

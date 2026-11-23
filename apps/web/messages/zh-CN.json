@@ -1446,7 +1446,6 @@
 	"pricing_offer_until": "至 {date}",
 	"pricing_original_price": "原价 {price}",
 	"pricing_quota_left": "剩 {amount}",
-	"pricing_quota_short": "可抵扣 {covered}，共 {requested}，其余按价计费",
 	"pricing_notice_title": "{model} 限时优惠",
 	"pricing_notice_action": "去试试",
 	"pricing_notice_dismiss": "关闭优惠提示",

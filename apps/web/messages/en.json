@@ -1446,7 +1446,6 @@
 	"pricing_offer_until": "until {date}",
 	"pricing_original_price": "Original price {price}",
 	"pricing_quota_left": "{amount} left",
-	"pricing_quota_short": "Covers {covered} of {requested}; the rest is charged",
 	"pricing_notice_title": "{model} limited-time offer",
 	"pricing_notice_action": "Try it",
 	"pricing_notice_dismiss": "Dismiss offer",

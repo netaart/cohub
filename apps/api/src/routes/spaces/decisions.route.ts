@@ -27,8 +27,8 @@ import { callDecisionUpstream } from "../../decisions/client.js";
 import { countStateImages, prepareDecisionState } from "../../decisions/state.js";
 import { loadDecisionModels } from "../../decisions/models.js";
 import { spaceWalletBilling } from "../../space-wallet-billing.js";
-import { usagePricing } from "../../usage-pricing.js";
-import { priceUsage } from "@cohub/core/usage-pricing";
+import { admitPricing } from "../../usage-pricing.js";
+import { priceUsage, type FrozenPricing } from "@cohub/core/usage-pricing";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
@@ -89,7 +89,7 @@ async function recordDecisionBilling(input: {
   provider: string;
   model: string;
   costUsd: number | null;
-  startedAt: Date;
+  price: FrozenPricing;
 }) {
   // Unlike completions, the charge comes from the cost the upstream reports.
   const officialUsd = normalizePositiveUsd(input.costUsd);
@@ -106,10 +106,7 @@ async function recordDecisionBilling(input: {
   let amountUsd = officialUsd;
   try {
     const usageType = COHUB_BILLING_USAGE_TYPES.generationDecision;
-    const quote = await usagePricing.quoteCharge(
-      { userId: input.userId, usageType, model: input.model, provider: input.provider, at: input.startedAt },
-      (message, context) => logger.warn(message, context),
-    );
+    const quote = await input.price({ usageType, model: input.model, provider: input.provider });
     const priced = priceUsage(quote, officialUsd, `Decision call ${input.provider}/${input.model}`);
     amountUsd = priced.amountUsd;
     const result = await spaceWalletBilling.recordUsage({
@@ -192,7 +189,10 @@ router.post("/", decisionRequestBodyLimit, async (c) => {
     );
   }
 
-  const gate = await billingUsageGate.evaluate({
+  const admitted = await admitPricing(user.uuid, [{ usageType: COHUB_BILLING_USAGE_TYPES.generationDecision, model: model.id, provider: model.provider }]);
+  if (!admitted) return requestErrorResponse(c, 503, "pricing_unavailable", "Pricing is temporarily unavailable. Please try again later.");
+  const { price, free } = admitted;
+  const gate = free ? null : await billingUsageGate.evaluate({
     userId: user.uuid,
     usageKind: "llm.decision",
     source: "decision",
@@ -200,7 +200,7 @@ router.post("/", decisionRequestBodyLimit, async (c) => {
     provider: model.provider,
     spaceId,
   });
-  if (gate.status === "blocked") {
+  if (gate?.status === "blocked") {
     return c.json(serializeBillingBlocked(new BillingAccessBlockedError(gate)), 402);
   }
 
@@ -262,7 +262,7 @@ router.post("/", decisionRequestBodyLimit, async (c) => {
     provider: model.provider,
     model: model.id,
     costUsd,
-    startedAt,
+    price,
   });
 
   const result: SpaceDecisionResult = {

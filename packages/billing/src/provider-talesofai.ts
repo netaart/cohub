@@ -406,6 +406,8 @@ function resolveCreditGrantBenefitName(grant: CreditGrant): string | null {
   );
 }
 
+const QUOTA_REQUESTED = / \[requested=(\d+)\]$/;
+
 function ledgerTransactionRow(row: CreditTransaction): LedgerRow {
   return {
     key: `transaction:${row.id}`,
@@ -1643,6 +1645,7 @@ export function createTalesofaiBillingOperations(
     userId: string;
     tokenType: string;
     filter?: BillingBalanceActivityFilter;
+    quotaTokenTypes?: readonly string[];
   }): LedgerSource[] => {
     const scope = { business_key: businessKey, external_user_id: input.userId, token_type: input.tokenType, include_count: false as const };
     const transactions = (type?: CreditTransaction["type"]): LedgerSource => async ({ to, page, limit }) => {
@@ -1653,15 +1656,35 @@ export function createTalesofaiBillingOperations(
       const result = await sdk.admin.credits.listUsageOverages({ ...scope, created_at_to: to, sorting: "-created_at", page, limit });
       return { hasMore: result.pagination.has_more, items: result.items.map((row) => ledgerOverageRow(row)) };
     };
+    // Usage a quota fully covered has no money row; list it from the quota draw, at no charge.
+    const coveredByQuota = (quotaTokenType: string): LedgerSource => async ({ to, page, limit }) => {
+      const query = { ...scope, token_type: quotaTokenType };
+      const result = await sdk.admin.credits.listTransactions({ ...query, type: "consume", created_at_to: to, sorting: "-created_at", page, limit });
+      const rows = await Promise.all(result.items.map(async (row): Promise<LedgerRow | null> => {
+        const requested = Number(row.reason?.match(QUOTA_REQUESTED)?.[1]);
+        if (!row.operation_id || !Number.isSafeInteger(requested) || requested <= 0) return null;
+        const consumption = await sdk.admin.credits.getConsumption({ ...query, operation_id: row.operation_id });
+        const units = consumption.original_amount - consumption.total_reversed;
+        if (units !== requested) return null;
+        return {
+          ...ledgerTransactionRow(row),
+          amountUsd: 0,
+          reason: row.reason?.replace(QUOTA_REQUESTED, "") ?? null,
+          quota: { tokenType: quotaTokenType, units },
+        };
+      }));
+      return { hasMore: result.pagination.has_more, items: rows.filter((row): row is LedgerRow => row !== null) };
+    };
+    const quotaSources = (input.quotaTokenTypes ?? []).map(coveredByQuota);
     switch (input.filter) {
       case "usage":
-        return [transactions("consume"), overages];
+        return [transactions("consume"), overages, ...quotaSources];
       case "grant":
         return [transactions("grant")];
       case "refund":
         return [transactions("refund"), transactions("reversal")];
       default:
-        return [transactions(), overages];
+        return [transactions(), overages, ...quotaSources];
     }
   };
 
@@ -1676,7 +1699,7 @@ export function createTalesofaiBillingOperations(
     if (input.createCustomer !== false) await ensureCustomer({ userId: input.userId });
     else if (!await getCustomerCreditsOrEmpty({ sdk, businessKey, userId: input.userId })) return list([], null);
     const page = await readLedger({
-      sources: ledgerSources({ userId: input.userId, tokenType, filter: input.filter }),
+      sources: ledgerSources({ userId: input.userId, tokenType, filter: input.filter, quotaTokenTypes: input.quotaTokenTypes }),
       cursor: input.cursor ?? null,
       offset: input.offset,
       limit,

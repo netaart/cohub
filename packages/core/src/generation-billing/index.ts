@@ -164,7 +164,7 @@ export function createGenerationReserveHolds(input: {
     usageType: string;
     amountUsd: number;
     /** What the Space wallet would hold, since personal benefits never discount wallet charges. */
-    walletAmountUsd?: number;
+    walletAmountUsd: number;
   }): Promise<GenerationReserveHoldResult> {
     const context = {
       taskRunId: request.taskRunId,
@@ -175,7 +175,7 @@ export function createGenerationReserveHolds(input: {
     };
     // Set when the Space wallet was tried and its live holds left too little.
     let walletAvailableUsd: number | null = null;
-    const walletAmountUsd = request.walletAmountUsd ?? request.amountUsd;
+    const { walletAmountUsd } = request;
     const held = (payer: GenerationReservePayer, amountUsd: number, balanceUsd: number, otherHeldUsd: number): GenerationReserveHoldResult => {
       info?.("[GenerationReserve] held", { ...context, amountUsd, payerType: payer.type, payerId: payer.id, balanceUsd, otherHeldUsd, walletAvailableUsd });
       return { status: "held", hold: { payer, amountUsd } };
@@ -205,7 +205,8 @@ export function createGenerationReserveHolds(input: {
     }
     const attempt = await tryHold(payer, request.taskRunId, request.amountUsd, balanceUsd);
     if (attempt.held) return held(payer, request.amountUsd, balanceUsd, attempt.otherHeldUsd);
-    const availableUsd = Math.max(walletAvailableUsd ?? 0, attempt.availableUsd);
+    // Report the personal shortfall: the wallet price can differ, so mixing its balance in would misstate it.
+    const availableUsd = attempt.availableUsd;
     info?.("[GenerationReserve] blocked", {
       ...context,
       availableUsd,

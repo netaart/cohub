@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { consumeGenerationQuota, refundGenerationQuota } from "./quota.js";
 
 /** A quota ledger that, like billing, never refuses a consume: the uncovered part becomes overage. */
-function ledger(balance: number, options: { failOverageReversal?: boolean; raceSpend?: number } = {}) {
+function ledger(balance: number, options: { failOverageReversal?: boolean; raceSpend?: number; loseConsumeResponse?: boolean } = {}) {
   const calls: string[] = [];
   let available = balance;
   return {
@@ -19,6 +19,7 @@ function ledger(balance: number, options: { failOverageReversal?: boolean; raceS
         calls.push(`consume ${input.operationId} ${input.amount}`);
         const covered = Math.min(Math.max(available, 0), input.amount);
         available -= input.amount;
+        if (options.loseConsumeResponse) throw new Error("socket hang up");
         return { amount: input.amount, overage: input.amount - covered };
       },
       async reverseQuota(input: { amount: number; operationId: string }) {
@@ -63,11 +64,18 @@ test("a failed overage cancellation voids the whole draw before failing admissio
   assert.ok(fixture.calls.includes("reverse generation-quota:t1:void 6"));
 });
 
+test("a consume whose response is lost is voided before failing admission", async () => {
+  const fixture = ledger(6, { loseConsumeResponse: true });
+  await assert.rejects(draw(fixture, 10), /socket hang up/);
+  assert.equal(fixture.available, 6);
+});
+
 test("refund returns only the covered units under a stable operation id", async () => {
   const fixture = ledger(6);
   const use = await draw(fixture, 10);
-  await refundGenerationQuota({ billing: fixture.billing, taskRunId: "t1", userId: "u", quota: use, reason: "task_failed" });
-  await refundGenerationQuota({ billing: fixture.billing, taskRunId: "t1", userId: "u", quota: { ...use, covered: 0 }, reason: "task_failed" });
+  const error = () => assert.fail("refund should succeed");
+  await refundGenerationQuota({ billing: fixture.billing, taskRunId: "t1", userId: "u", quota: use, error });
+  await refundGenerationQuota({ billing: fixture.billing, taskRunId: "t1", userId: "u", quota: { ...use, covered: 0 }, error });
   assert.equal(fixture.available, 6);
   assert.deepEqual(fixture.calls.at(-1), "reverse generation-quota:t1:refund 6");
 });

@@ -104,6 +104,8 @@ type GenerationBillingRetryTaskDataBase = {
   payer?: GenerationReserveHold["payer"]["type"] | null;
   /** Ledger reason, carrying the pricing facts of the original charge attempt. */
   reason?: string;
+  /** Quota coverage of the original charge, kept on the result the retry rewrites. */
+  quota?: GenerationUsageBilling["quota"];
 };
 
 /** Legacy payloads already queued before model-discount snapshots were introduced. */

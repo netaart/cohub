@@ -19,7 +19,7 @@ const NO_OFFER: PricingModelOffer = { offer: null, quota: null };
 export async function priceModelListing<T>(
   userId: string,
   items: readonly T[],
-  subjectOf: (item: T) => PricingSubject | null,
+  subjectOf: (item: T) => PricingSubject,
 ): Promise<PricingModelOffer[]> {
   const config = await usagePricing.loadConfig();
   let benefits: Promise<readonly BillingActiveBenefit[]> | null = null;
@@ -32,7 +32,6 @@ export async function priceModelListing<T>(
   };
   return Promise.all(items.map(async (item) => {
     const subject = subjectOf(item);
-    if (!subject) return NO_OFFER;
     try {
       return describePricingOffer(config, await quotePricing({ config, subject, loadBenefits }));
     } catch (error) {

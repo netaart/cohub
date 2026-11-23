@@ -66,7 +66,7 @@ import {
 import {
 	formatQuotaAmount,
 	liveOffer,
-	offerLabel,
+	multiplierLabel,
 } from "#lib/model-pricing.ts";
 import { m } from "#lib/paraglide/messages.js";
 import {
@@ -519,9 +519,12 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				: null;
 		const offer = liveOffer(create ? create.offer : llm?.offer, now);
 		if (offer)
-			items.push({ text: offerLabel(offer, getLocale()), brand: true });
+			items.push({
+				text: multiplierLabel(offer.multiplier, getLocale()),
+				brand: true,
+			});
 		const balance = billingQuotasStore.balance(create?.quota?.tokenType);
-		if (create?.quota && balance)
+		if (create?.quota && balance !== null)
 			items.push({
 				text: m.pricing_quota_left(
 					{

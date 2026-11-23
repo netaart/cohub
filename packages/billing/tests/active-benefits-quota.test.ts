@@ -114,3 +114,39 @@ test("quota consume reports the uncovered part and reversal reports cancelled de
 	assert.equal(sent[0]?.token_type, "video_second");
 	assert.equal(sent[1]?.amount, 4);
 });
+
+test("the activity feed lists a fully quota-covered usage at no charge and skips partial or refunded draws", async () => {
+	const at = (minute: number) => `2026-11-21T00:0${minute}:00.000Z`;
+	const tx = (id: string, minute: number, extra: Record<string, unknown>) => ({
+		id, credit_grant_id: null, business_id: "b", customer_id: "c", source_type: "usage", source_id: id,
+		usage_type: "generation.video", operation_id: null, reason: null, created_at: at(minute), ...extra,
+	});
+	const consumptions: Record<string, [number, number]> = {
+		"generation-quota:full": [10, 0],
+		"generation-quota:partial": [6, 0],
+		"generation-quota:refunded": [10, 10],
+	};
+	await withFetch((method, url) => {
+		if (method !== "GET") return null;
+		if (url.pathname === "/v1/customers/user_1/credits") return jsonResponse({ credits: [] });
+		if (url.pathname === "/v1/usage-overages") return jsonResponse({ items: [], pagination: { has_more: false } });
+		if (url.pathname === "/v1/credit-transactions") {
+			const items = url.searchParams.get("token_type") === "video_second"
+				? ["full", "partial", "refunded"].map((id, index) => tx(`q-${id}`, index + 1, {
+						token_type: "video_second", type: "consume", amount: 6,
+						operation_id: `generation-quota:${id}`, reason: "Generation h3 [requested=10]",
+					}))
+				: [tx("paid", 5, { token_type: "usd_micro_cent", type: "consume", amount: 100_000_000, operation_id: "generation:partial", reason: "Generation h3 [list=2;quota=6/10]" })];
+			return jsonResponse({ items, pagination: { has_more: false } });
+		}
+		const consumption = consumptions[decodeURIComponent(url.pathname.replace("/v1/credits/consumptions/", ""))];
+		if (consumption) return jsonResponse({ original_amount: consumption[0], total_reversed: consumption[1] });
+		return null;
+	}, async () => {
+		const list = await operations().listBalanceActivities({ userId: "user_1", createCustomer: false, quotaTokenTypes: ["video_second"] });
+		assert.deepEqual(list.items.map((item) => [item.description, item.amountUsd, item.quota ?? null]), [
+			["Generation h3 [list=2;quota=6/10]", -1, null],
+			["Generation h3", 0, { tokenType: "video_second", units: 10 }],
+		]);
+	});
+});

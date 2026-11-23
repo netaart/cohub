@@ -2,6 +2,7 @@
 import type { PublicGenerationDeclaration } from "@cohub/protocol/generation";
 import { Check, LoaderCircle, RotateCcw, Search } from "lucide-svelte";
 import { untrack } from "svelte";
+import { minuteClock } from "#lib/clock.svelte.ts";
 import Dialog from "#lib/components/Dialog.svelte";
 import GenerationCategoryIcon from "#lib/components/generation/GenerationCategoryIcon.svelte";
 import GenerationCategoryTabs from "#lib/components/generation/GenerationCategoryTabs.svelte";
@@ -60,7 +61,7 @@ const view = $derived(
 
 function quotaLeft(model: PublicGenerationDeclaration): string {
 	const balance = billingQuotasStore.balance(model.quota?.tokenType);
-	return balance
+	return balance !== null
 		? m.pricing_quota_left(
 				{ amount: formatQuotaAmount(balance, model.quota?.parameter, locale) },
 				{ locale },
@@ -146,10 +147,10 @@ function handleKeydown(event: KeyboardEvent) {
 			>
 				{#snippet row(model)}
 					{@const selected = model.model === currentModelId}
-					{@const offer = liveOffer(model.offer)}
+					{@const offer = liveOffer(model.offer, minuteClock.now)}
 					{@const listPrice = offer ? formatGenerationPrice(model.pricing, locale) : ""}
 					{@const offerPrice = offer ? formatGenerationPrice(model.pricing, locale, offer.multiplier) : ""}
-					{@const extras = [offer ? offerDeadline(offer, locale) : "", quotaLeft(model)].filter(Boolean)}
+					{@const extras = [offer ? offerDeadline(offer, locale, minuteClock.now) : "", quotaLeft(model)].filter(Boolean)}
 					<button
 						type="button"
 						class={`group relative flex min-h-12 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-bg-hover ${selected ? "bg-bg-hover/70" : ""}`}
