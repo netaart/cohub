@@ -19,9 +19,6 @@
 	},
 	"linter": {
 		"rules": {
-			"correctness": {
-				"useImportExtensions": "error"
-			},
 			"style": {
 				"useConst": "off"
 			}
