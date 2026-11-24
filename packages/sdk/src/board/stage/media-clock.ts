@@ -1,6 +1,7 @@
 import { Texture, VideoSource } from "pixi.js";
 import { type BoardMediaState, boardMediaRate } from "../model/media-spans.js";
 import { type BoardAssetSource, resolveBoardMediaUrl } from "../model/media-playback.js";
+import type { BoardMediaCue } from "../model/timeline.js";
 
 type FrameVideo = HTMLVideoElement & {
 	requestVideoFrameCallback?: (callback: () => void) => number;
@@ -28,7 +29,14 @@ export type BoardMediaLoop = { id: string; src: string };
 
 export type BoardMediaClock = {
 	/** Returns how far the leading audio is ahead of `now`, in timeline milliseconds. */
-	sync(input: { media: readonly BoardMediaState[]; loops: readonly BoardMediaLoop[]; now: number; scrubbing: boolean; onScreen: (id: string) => boolean }): number | null;
+	sync(input: {
+		media: readonly BoardMediaState[];
+		loops: readonly BoardMediaLoop[];
+		cues: readonly BoardMediaCue[];
+		now: number;
+		scrubbing: boolean;
+		onScreen: (id: string) => boolean;
+	}): number | null;
 	texture(id: string): Texture | null;
 	readonly blocked: boolean;
 	readonly muted: boolean;
@@ -206,7 +214,7 @@ export function createBoardMediaClock(options: {
 		if (Math.abs(element.volume - volume) > 0.001) element.volume = volume;
 		if (rate <= 0) {
 			if (!element.paused) element.pause();
-			if (entry.kind === "video" && Math.abs((entry.pendingSeek ?? element.currentTime) - target) > HOLD_DRIFT_S) seek(entry, target);
+			if (Math.abs((entry.pendingSeek ?? element.currentTime) - target) > HOLD_DRIFT_S) seek(entry, target);
 			return null;
 		}
 		if (element.muted !== silent(entry)) element.muted = silent(entry);
@@ -258,7 +266,7 @@ export function createBoardMediaClock(options: {
 	}
 
 	return {
-		sync({ media, loops, now, scrubbing, onScreen }) {
+		sync({ media, loops, cues, now, scrubbing, onScreen }) {
 			if (destroyed) return null;
 			syncs += 1;
 			const wanted: Array<{ state: BoardMediaState; rate: number; rank: number; loop?: true }> = [];
@@ -284,11 +292,22 @@ export function createBoardMediaClock(options: {
 					wanted.push({ state: { id, kind: "video", src, time: 0, volume: 0, shown: true }, rate: 0, rank: 2.5, loop: true });
 			}
 			for (const id of samples.keys()) if (!seen.has(id)) samples.delete(id);
-			wanted.sort((a, b) => a.rank - b.rank);
+			const picked = wanted.sort((a, b) => a.rank - b.rank).slice(0, options.limit);
+			const ids = new Set(picked.map(({ state }) => state.id));
+			let free = options.limit - picked.length;
+			for (const { id, kind, src, time } of cues) {
+				const known = entries.get(id);
+				if (ids.has(id) || (known?.failed && known.src === src) || (kind === "video" && free <= 0)) continue;
+				if (kind === "video") free -= 1;
+				ids.add(id);
+				seen.add(id);
+				const shown = media.find((state) => state.id === id && state.shown);
+				picked.push({ state: { id, kind, src, time: shown?.time ?? time, volume: 0, shown: false }, rate: 0, rank: Number.POSITIVE_INFINITY });
+			}
 			const kept = new Set<string>();
 			let playing = false;
 			let skew: number | null = null;
-			for (const { state, rate, loop: looping } of wanted.slice(0, options.limit)) {
+			for (const { state, rate, loop: looping } of picked) {
 				let entry = entries.get(state.id);
 				if (entry && (entry.src !== state.src || entry.kind !== state.kind)) {
 					release(state.id);

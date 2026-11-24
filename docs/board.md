@@ -444,9 +444,12 @@ A track drives one property of one target:
 
 A marker with `pause: true` stops playback there until `next`. Writes never interrupt a
 shared playback: edits to the playing animation, its tracks included, show as it runs, and
-only deleting the animation ends it. Viewers load the images of the next 3 seconds of a
-shared playback, past a pause marker it holds at, at the size they grow to, so items fade
-or grow in already loaded.
+only deleting the animation ends it. Viewers load the images and videos of the next 3
+seconds of a shared playback, past a pause marker it holds at, at the size they grow to,
+so items fade or grow in already loaded, and the next few sounds wherever they fall, so a
+seek or `next` that lands on one still plays it from its first word. `boards play` and
+`boards seek` take `--preroll <time>` (up to 5 s): every screen holds the first frame
+that long and loads it, then the clock runs.
 
 A play or read-only view that just opened holds `auto` animations and Board scripts at
 their start until the model objects in view have loaded, at most 1.5 s, so the first
@@ -495,7 +498,8 @@ selecting the segment between two keyframes edits its easing, including a
 the name, duration, delay, play mode, loop, end and camera viewport, and **Key current view** records
 the camera. Viewers get a playback bar instead of the timeline: it hides while playing,
 Space plays and pauses, ←/→ skip 5 seconds and M toggles sound. Moving the view hands
-the camera to the viewer from the shot on screen until **Back to the camera**.
+the camera to the viewer from the shot on screen until **Back to the camera**, which
+also appears for a playback someone else started, or until the next playback.
 
 ### Clips
 

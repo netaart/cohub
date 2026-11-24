@@ -242,7 +242,7 @@ export class BoardClient implements BoardRemote {
   }
 
   /** Shared playback: every viewer follows the same clock. */
-  play(animationId: string, options: { position?: number; timeScale?: number; seed?: string } = {}) {
+  play(animationId: string, options: { position?: number; timeScale?: number; seed?: string; preroll?: number } = {}) {
     return this.control({ commandId: createBoardEntityId(), type: "play", animationId, ...options });
   }
 
@@ -254,8 +254,8 @@ export class BoardClient implements BoardRemote {
     return this.control({ commandId: createBoardEntityId(), type: "resume" });
   }
 
-  seek(position: number) {
-    return this.control({ commandId: createBoardEntityId(), type: "seek", position });
+  seek(position: number, options: { preroll?: number } = {}) {
+    return this.control({ commandId: createBoardEntityId(), type: "seek", position, ...options });
   }
 
   /** Continue past the marker a presentation is holding at. */

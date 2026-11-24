@@ -217,6 +217,8 @@ export type BoardPlaybackSnapshot = {
 };
 
 const commandId = z.string().min(1).max(160);
+export const BOARD_PLAYBACK_PREROLL_MAX_MS = 5000;
+const preroll = z.number().finite().nonnegative().max(BOARD_PLAYBACK_PREROLL_MAX_MS).optional();
 export const BoardPlaybackCommandSchema = z.discriminatedUnion("type", [
 	z.object({
 		commandId,
@@ -225,10 +227,11 @@ export const BoardPlaybackCommandSchema = z.discriminatedUnion("type", [
 		position: z.number().finite().nonnegative().optional(),
 		timeScale: z.number().finite().positive().max(4).optional(),
 		seed: z.string().min(1).max(160).optional(),
+		preroll,
 	}).strict(),
 	z.object({ commandId, type: z.literal("pause") }).strict(),
 	z.object({ commandId, type: z.literal("resume") }).strict(),
-	z.object({ commandId, type: z.literal("seek"), position: z.number().finite().nonnegative() }).strict(),
+	z.object({ commandId, type: z.literal("seek"), position: z.number().finite().nonnegative(), preroll }).strict(),
 	z.object({ commandId, type: z.literal("next") }).strict(),
 	z.object({ commandId, type: z.literal("stop") }).strict(),
 ]);

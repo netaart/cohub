@@ -4,6 +4,7 @@ export * from "@cohub/protocol/board-patch";
 export {
 	BOARD_CAMERA_VIEWPORT,
 	BOARD_MAX_PITCH,
+	BOARD_PLAYBACK_PREROLL_MAX_MS,
 	BOARD_SCHEMA_TARGETS,
 	boardJsonSchema,
 	boardSchemaOverview,

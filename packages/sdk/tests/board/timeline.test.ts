@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBoardEditor } from "../../src/board/editor/index.js";
-import { boardDocumentAt, boardRemoveTime, boardTargetSpan } from "../../src/board/model/index.js";
+import { boardDocumentAt, boardMediaCues, boardRemoveTime, boardTargetSpan } from "../../src/board/model/index.js";
 import { boardDocument } from "./fixtures.js";
 
 function setup() {
@@ -43,4 +43,21 @@ test("removing time over a whole clip keeps it hidden", () => {
 	assert.equal(boardTargetSpan(editor.document, cut, "title"), null);
 	assert.equal(boardDocumentAt({ ...editor.document, animations: { cut } }, "cut", 0).document.items.title?.visible, false);
 	assert.deepEqual(span("title"), { start: 1000, end: 2000 });
+});
+
+test("media cues start where each clip shows, through sequenced animations", () => {
+	const { editor } = setup();
+	editor.placeOnTimeline(["clip"], 500, { duration: 2000 });
+	editor.trimOnTimeline("clip", "start", 1000);
+	const document = {
+		...editor.document,
+		animations: {
+			...editor.document.animations,
+			show: { duration: 6000, delay: 0, loop: false, end: "hold", play: "manual", markers: [], tracks: { cut: { target: "cut", property: "time", composite: "replace", interpolation: "auto", keyframes: [{ at: 2000, value: 0 }, { at: 3000, value: 1000 }] } } },
+			jump: { duration: 9000, delay: 0, loop: false, end: "hold", play: "manual", markers: [], tracks: { cut: { target: "cut", property: "time", composite: "replace", interpolation: "step", keyframes: [{ at: 0, value: 0 }, { at: 8000, value: 2000 }] } } },
+		},
+	} as typeof editor.document;
+	assert.deepEqual(boardMediaCues(editor.document, "cut"), [{ id: "clip", kind: "video", src: "https://cdn.example.com/a.mp4", at: 1000, end: 2500, time: 500 }]);
+	assert.deepEqual(boardMediaCues(document, "show").map(({ at, end, time }) => ({ at, end, time })), [{ at: 3000, end: 4500, time: 500 }]);
+	assert.equal(Math.round(boardMediaCues(document, "jump")[0]?.at ?? 0), 8000);
 });

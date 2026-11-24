@@ -176,6 +176,10 @@ hold it, a bounded number of texture pixels per frame; pictures that arrive afte
 card fade in. Natural media sizes are recorded once per frame after scene synchronization.
 Video decoders (`BoardDeviceBudget.media`) go to audio, then videos on screen, playing ones
 first; a video off screen takes a decoder only when one is free, and catches up on return.
+The playback's media cues (`boardMediaCues`, through nested animations) load paused after
+everything playing, at their first frame or where they show now: the next three sounds
+wherever they fall, outside the budget, and with prefetch on, videos of the next 3 seconds
+while a decoder is free.
 `onLiveChange` reports the live set for other per-card work such as file previews.
 
 Hosts add pictures for their own items through `itemAsset`, which maps an item to
@@ -378,8 +382,11 @@ it: `stage.ts` merges the animation camera with `composeBoardScriptCamera` (scri
 play and read-only views only) and follows the result while the camera policy is
 `follow`. A pan takes control (`takeCameraControl`), keeping the directed angle, until
 the host sets `follow` again or a new playback (a new `playbackId`) starts; a script that
-lets go leaves the editor camera where it was directed. Pitch and bearing come only from
-a director or a link; the editor levels its camera when an editing tool is chosen. Camera exports merge the same two sources in
+lets go leaves the editor camera where it was directed. `stage.cameraDirected` (reported
+through `subscribeScripts`) is true while a playback, the playhead or a script directs
+the camera; hosts offer Back to the camera while it is true and the policy is `free`.
+Pitch and bearing come only from a director or a link; the editor levels its camera when
+an editing tool is chosen. Camera exports merge the same two sources in
 `prepareBoardExport`.
 
 ## Scripts

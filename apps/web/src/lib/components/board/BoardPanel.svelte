@@ -224,13 +224,13 @@ $effect(() => {
 	return media.subscribe(read);
 });
 
-let scriptCamera = $state(false);
+let cameraDirected = $state(false);
 $effect(() => {
 	const stage = scriptStage;
-	scriptCamera = false;
+	cameraDirected = false;
 	if (!stage) return;
 	const read = () => {
-		scriptCamera = stage.scriptCamera;
+		cameraDirected = stage.cameraDirected;
 	};
 	read();
 	return stage.subscribeScripts(read);
@@ -1054,6 +1054,7 @@ const presenting = $derived(editor.frameView?.present ?? false);
 const watching = $derived(
 	animationOpen && !authoring && hasAnimations && !presenting,
 );
+const cameraAway = $derived(cameraDirected && editor.cameraPolicy === "free");
 const promptsDocked = $derived(
 	!presenting && (isMobile ? !watching : authoring),
 );
@@ -1485,7 +1486,7 @@ onDestroy(() => {
 				{m.board_sound_enable({}, { locale })}
 			</button>
 		{/if}
-		{#if scriptCamera && editor.cameraPolicy === "free" && !presenting}
+		{#if cameraAway && !presenting && !(animationOpen && authoring)}
 			<button type="button" class="board-prompt" onclick={() => editor.setCameraPolicy("follow")}>
 				<LocateFixed class="h-3.5 w-3.5" />
 				{m.board_camera_return({}, { locale })}

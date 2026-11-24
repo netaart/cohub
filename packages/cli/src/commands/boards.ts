@@ -13,6 +13,7 @@ import type {
 } from "@neta-art/cohub";
 import {
   BOARD_MAX_PITCH,
+  BOARD_PLAYBACK_PREROLL_MAX_MS,
   BOARD_PRESET_NAMES,
   BOARD_SCHEMA_TARGETS,
   BOARD_SCRIPT_API,
@@ -975,6 +976,15 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
   return boards;
 }
 
+const PREROLL_HELP = `Hold the first frame this long so every screen loads its images and sound first, up to ${BOARD_PLAYBACK_PREROLL_MAX_MS / 1000}s`;
+
+function preroll(value: string | undefined): { preroll?: number } {
+  if (!value) return {};
+  const ms = parseBoardTime(value, "--preroll");
+  if (ms > BOARD_PLAYBACK_PREROLL_MAX_MS) throw new Error(`--preroll is at most ${BOARD_PLAYBACK_PREROLL_MAX_MS / 1000}s.`);
+  return { preroll: ms };
+}
+
 function registerPlaybackCommands(boards: Command): void {
   const run = async (target: string, options: JsonOptions, command: (board: Awaited<ReturnType<typeof boardClient>>) => Promise<BoardPlaybackSnapshot | null>) => {
     try {
@@ -990,21 +1000,24 @@ function registerPlaybackCommands(boards: Command): void {
     .description("Play an animation for everyone viewing the Board")
     .option("--at <time>", "Start position, e.g. 2.5s")
     .option("--speed <factor>", "Playback speed, up to 4")
-    .option("--seed <seed>", "Seed for procedural effects"))
+    .option("--seed <seed>", "Seed for procedural effects")
+    .option("--preroll <time>", PREROLL_HELP))
     .addHelpText("after", `
   cohub boards play plan.board lecture
-  cohub boards play plan.board lecture --at 2.5s --speed 1.5`)
-    .action((target: string, animation: string, options: JsonOptions & { at?: string; speed?: string; seed?: string }) =>
+  cohub boards play plan.board lecture --at 2.5s --speed 1.5
+  cohub boards play plan.board reveal --preroll 1s`)
+    .action((target: string, animation: string, options: JsonOptions & { at?: string; speed?: string; seed?: string; preroll?: string }) =>
       run(target, options, (board) => board.play(animation, {
         ...(options.at ? { position: parseBoardTime(options.at, "--at") } : {}),
         ...(options.speed ? { timeScale: parseNumber(options.speed, "--speed", { min: Number.EPSILON, max: 4 }) } : {}),
         ...(options.seed ? { seed: options.seed } : {}),
+        ...preroll(options.preroll),
       })));
 
   withJson(boards.command("pause <board>").description("Pause playback")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.pause()));
   withJson(boards.command("resume <board>").description("Resume paused playback")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.resume()));
-  withJson(boards.command("seek <board> <time>").description("Move the playhead, e.g. 12.5s"))
-    .action((target: string, time: string, options: JsonOptions) => run(target, options, (board) => board.seek(parseBoardTime(time))));
+  withJson(boards.command("seek <board> <time>").description("Move the playhead, e.g. 12.5s").option("--preroll <time>", PREROLL_HELP))
+    .action((target: string, time: string, options: JsonOptions & { preroll?: string }) => run(target, options, (board) => board.seek(parseBoardTime(time), preroll(options.preroll))));
   withJson(boards.command("next <board>").description("Continue past the marker a presentation holds at")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.next()));
   withJson(boards.command("stop <board>").description("Stop playback")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.stop()));
 }

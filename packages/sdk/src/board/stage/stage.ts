@@ -1,5 +1,6 @@
 import type { BoardPlaybackSnapshot } from "@cohub/protocol";
 import type {
+	BoardMediaCue,
 	BoardScriptInputLog,
 	BoardScriptOutput,
 	BoardScriptPeer,
@@ -205,6 +206,8 @@ export type BoardStage = {
 	snapshotScripts(): Promise<Record<string, BoardScriptSnapshot>>;
 	restoreScript(id: string, snapshot: BoardScriptSnapshot): void;
 	subscribeScripts(listener: () => void): () => void;
+	readonly cameraDirected: boolean;
+	/** @deprecated Use cameraDirected. */
 	readonly scriptCamera: boolean;
 	invalidate(options?: { cards?: boolean; items?: Iterable<string> }): void;
 	isMaterialized(id: string): boolean;
@@ -437,7 +440,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let cancelPrefetch: (() => void) | null = null;
 	let around: BoardAssetPrefetch[] = [];
 	let ahead: BoardAssetPrefetch[] = [];
+	let cues: BoardMediaCue[] = [];
 	let lookedAheadAt = Number.NEGATIVE_INFINITY;
+	let lookedAheadCommand: string | null = null;
 	const staleIds = new Set<string>();
 	let canvasBox: BoardCanvasBox | null = null;
 	let canvasSize = { width: 0, height: 0, resolution: 0 };
@@ -448,9 +453,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let playbackCamera: BoardViewport | null = null;
 	let playbackId: string | null = null;
 	let directed = false;
+	let cameraDirected = false;
 	let scriptCamera = false;
 	const scriptListeners = new Set<() => void>();
-	const notifyScriptCamera = () => {
+	const notifyCamera = () => {
 		for (const listener of scriptListeners) listener();
 	};
 	let cursor = "";
@@ -1221,6 +1227,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		prefetchContext = null;
 		around = [];
 		ahead = [];
+		cues = [];
 		lookedAheadAt = Number.NEGATIVE_INFINITY;
 		assets.prefetch?.([]);
 	}
@@ -1230,9 +1237,15 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	}
 
 	function lookAhead(playback: BoardPlaybackSnapshot | null, now: number, wall: number) {
-		if (!assets.prefetch || (options.prefetch ?? device.prefetch) <= 0 || now - lookedAheadAt < LOOKAHEAD_REFRESH_MS) return;
+		const command = playback?.commandId ?? null;
+		if (now - lookedAheadAt < LOOKAHEAD_REFRESH_MS && command === lookedAheadCommand) return;
 		lookedAheadAt = now;
-		const frames = playback && !editor.playhead ? player.ahead(editor.document, playback, wall) : [];
+		lookedAheadCommand = command;
+		const live = editor.playhead ? null : playback;
+		const prefetching = Boolean(assets.prefetch) && (options.prefetch ?? device.prefetch) > 0;
+		cues = player.cues(editor.document, live, wall, prefetching);
+		if (!prefetching) return;
+		const frames = live ? player.ahead(editor.document, live, wall) : [];
 		const next = frames.length
 			? boardLookaheadPrefetch(frames, (id) => editor.scene.get(id), (frame) => {
 					const camera = editor.cameraPolicy === "follow" && Object.keys(frame.camera).length > 0 ? followCamera(frame.camera, frame, editor.scene) : renderCamera();
@@ -1412,13 +1425,15 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		scripts.animate(frame.scripts);
 		const directing = scripts.camera();
 		const override = directing ? { ...frame.camera, ...directing } : frame.camera;
-		const follows = editor.cameraPolicy === "follow" && Object.keys(override).length > 0;
+		const steered = Object.keys(override).length > 0;
+		const follows = editor.cameraPolicy === "follow" && steered;
 		playbackCamera = follows ? followCamera(override, frame, editor.scene) : null;
 		editor.followCamera(playbackCamera, { settle: directed });
 		directed = Boolean(directing) && follows;
-		if (Boolean(directing) !== scriptCamera) {
+		if (steered !== cameraDirected || Boolean(directing) !== scriptCamera) {
+			cameraDirected = steered;
 			scriptCamera = Boolean(directing);
-			notifyScriptCamera();
+			notifyCamera();
 		}
 		const camera = renderCamera();
 		const level = isBoardViewLevel(camera);
@@ -1443,6 +1458,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		const skew = media.sync({
 			media: boardTimedMedia(renderScene, timedMediaIds()),
 			loops: syncLive(ids, camera, renderScene),
+			cues,
 			now: wall,
 			scrubbing: editor.playhead !== null,
 			onScreen: (id) => (ids ? ids.has(id) : true),
@@ -2048,6 +2064,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 				stop();
 				scriptListeners.delete(listener);
 			};
+		},
+		get cameraDirected() {
+			return cameraDirected;
 		},
 		get scriptCamera() {
 			return scriptCamera;

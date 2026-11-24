@@ -960,7 +960,7 @@ export async function applyBoardPlayback(
 				revision: (current?.revision ?? 0) + 1,
 				status: "playing",
 				position: Math.min(command.position ?? 0, header?.duration ?? 0),
-				effectiveAt: now,
+				effectiveAt: now + (command.preroll ?? 0),
 				timeScale: command.timeScale ?? 1,
 				seed: command.seed ?? command.animationId,
 				commandId: command.commandId,
@@ -973,7 +973,7 @@ export async function applyBoardPlayback(
 			if (command.type === "stop") next = null;
 			else if (command.type === "pause") next = { ...base, status: "paused", position };
 			else if (command.type === "resume") next = { ...base, status: "playing", position };
-			else if (command.type === "seek") next = { ...base, position: Math.min(command.position, header?.duration ?? 0) };
+			else if (command.type === "seek") next = { ...base, position: Math.min(command.position, header?.duration ?? 0), effectiveAt: now + (command.preroll ?? 0) };
 			else {
 				const marker = header?.markers.find((entry) => entry.pause && entry.at > position);
 				next = { ...base, status: "playing", position: marker && current.status === "paused" && position < marker.at ? marker.at + 1e-3 : position + 1e-3 };

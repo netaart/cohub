@@ -158,6 +158,9 @@ cohub boards get <board> --only playback
 - To reveal something still generating, hold at a `pause: true` marker and write it in
   when it is ready, then `next`. Viewers load what follows the marker while it holds,
   so put the reveal right after it rather than seeking past a long wait.
+- Viewers load the next few sounds early, so voices start whole. To start or jump
+  somewhere new with heavy images, add `--preroll 1s` to `play` or `seek`: every screen
+  holds that frame while it loads, then plays in step.
 - Every new `play` brings back viewers who took the camera; `seek` and `next` keep
   their view.
 

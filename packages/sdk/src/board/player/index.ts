@@ -13,6 +13,7 @@ import {
 } from "../model/animation.js";
 import { createBoardEntityId } from "../model/items/id.js";
 import { boardPresetTracks, isBoardPresetName } from "../model/presets.js";
+import { type BoardMediaCue, boardMediaCues } from "../model/timeline.js";
 import { playbackClockAt } from "./playback-clock.js";
 
 export * from "./playback-clock.js";
@@ -23,6 +24,7 @@ const ENTER_STAGGER_MS = 45;
 const ENTER_MAX_ITEMS = 80;
 const AHEAD_MS = 3000;
 const AHEAD_STEP_MS = 250;
+const AHEAD_AUDIO = 3;
 
 export type BoardPlayerFrame = {
 	items: ReadonlyMap<string, BoardItem>;
@@ -39,6 +41,7 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 	let compiled: CompiledBoardAnimations | null = null;
 	let openedAt: number | null = performance.now();
 	let entrance: { ids: string[]; startedAt: number; duration: number } | null = null;
+	let cued: { document: BoardDocument; animationId: string; cues: BoardMediaCue[] } | null = null;
 
 	function compile(next: BoardDocument) {
 		if (document?.animations === next.animations && document?.items === next.items && document?.board.scripts === next.board.scripts && compiled) return compiled;
@@ -134,6 +137,19 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 			}
 			return frames;
 		},
+		cues(current: BoardDocument, playback: BoardPlaybackSnapshot | null, wallNow: number, video: boolean): BoardMediaCue[] {
+			const time = playback && playbackClockAt(playback, current, wallNow).time;
+			if (!playback || time == null) return [];
+			if (cued?.document.animations !== current.animations || cued.document.items !== current.items || cued.animationId !== playback.animationId)
+				cued = { document: current, animationId: playback.animationId, cues: boardMediaCues(current, playback.animationId) };
+			const result = new Map<string, BoardMediaCue>();
+			let sounds = 0;
+			for (const cue of cued.cues) {
+				if (cue.end <= time || result.has(cue.id)) continue;
+				if (cue.kind === "audio" ? sounds++ < AHEAD_AUDIO : video && cue.at - time <= AHEAD_MS) result.set(cue.id, cue);
+			}
+			return [...result.values()];
+		},
 	};
 }
 
@@ -158,13 +174,14 @@ export function nextLocalPlayback(
 				timeScale: command.timeScale ?? 1,
 				seed: command.seed ?? "local",
 				...base,
+				effectiveAt: now + (command.preroll ?? 0),
 			};
 		case "pause":
 			return current ? { ...current, ...base, status: "paused", position } : null;
 		case "resume":
 			return current ? { ...current, ...base, status: "playing", position } : null;
 		case "seek":
-			return current ? { ...current, ...base, position: command.position } : null;
+			return current ? { ...current, ...base, position: command.position, effectiveAt: now + (command.preroll ?? 0) } : null;
 		case "next": {
 			if (!current) return null;
 			const markers = document.animations[current.animationId]?.markers ?? [];

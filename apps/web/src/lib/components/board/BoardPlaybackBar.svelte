@@ -4,7 +4,6 @@ import type { BoardTransportSend } from "@neta-art/cohub/board/player";
 import type { BoardStage } from "@neta-art/cohub/board/stage";
 import {
 	ListOrdered,
-	LocateFixed,
 	Pause,
 	Play,
 	SkipForward,
@@ -48,9 +47,13 @@ const transport = createBoardAnimationTransport({
 	playback: () => playback,
 	send: (command) => onPlayback(command),
 });
-const playLabel = $derived(transport.starting
-	? m.common_loading({}, { locale })
-	: transport.playing ? m.board_pause({}, { locale }) : m.board_play({}, { locale }));
+const playLabel = $derived(
+	transport.starting
+		? m.common_loading({}, { locale })
+		: transport.playing
+			? m.board_pause({}, { locale })
+			: m.board_play({}, { locale }),
+);
 const animation = $derived(transport.animation);
 const duration = $derived(Math.max(1, animation?.duration ?? 1));
 const chapters = $derived(
@@ -67,7 +70,6 @@ const soundLabel = $derived(
 			? m.board_sound_unmute({}, { locale })
 			: m.board_sound_mute({}, { locale }),
 );
-const detached = $derived(reach.camera && editor.cameraPolicy === "free");
 
 let listAnchor = $state<HTMLButtonElement | null>(null);
 let listOpen = $state(false);
@@ -242,11 +244,6 @@ export function contains(target: EventTarget | null): boolean {
 			>
 				{#if silent}<VolumeX class="h-3.5 w-3.5" />{:else}<Volume2 class="h-3.5 w-3.5" />{/if}
 				{#if sound.blocked}<span>{soundLabel}</span>{/if}
-			</button>
-		{/if}
-		{#if detached}
-			<button type="button" class="tool-key" title={m.board_camera_return({}, { locale })} aria-label={m.board_camera_return({}, { locale })} onclick={() => editor.setCameraPolicy("follow")}>
-				<LocateFixed class="h-3.5 w-3.5" />
 			</button>
 		{/if}
 		<button type="button" class="tool-key" title={m.board_close({}, { locale })} aria-label={m.board_close({}, { locale })} onclick={onClose}>

@@ -5,6 +5,7 @@ import {
 	type BoardKeyframe,
 	type BoardTrack,
 } from "@cohub/protocol";
+import { parseBoardMediaSource } from "@cohub/protocol/board-model";
 import { compileBoardTrack, sampleBoardTrack } from "./animation.js";
 import { createBoardEntityId } from "./items/id.js";
 import { sameJson } from "./json.js";
@@ -407,4 +408,70 @@ export function boardInsertTime(document: BoardDocument, animation: BoardAnimati
 		animation.markers.map((marker) => (marker.at > time ? { ...marker, at: marker.at + gap } : marker)),
 		time < animation.duration ? animation.duration + gap : animation.duration,
 	);
+}
+
+export type BoardMediaCue = { id: string; kind: "audio" | "video"; src: string; at: number; end: number; time: number };
+
+const CUES_MAX = 4096;
+const INVERT_STEPS = 24;
+
+function parentClock(track: BoardTrack): (value: number) => number | null {
+	const compiled = compileBoardTrack("", "", track, "animation");
+	const { keyframes } = track;
+	return (value) => {
+		if (!compiled) return null;
+		for (const [index, a] of keyframes.entries()) {
+			if (typeof a.value !== "number") continue;
+			if (a.value === value) return a.at;
+			const b = keyframes[index + 1];
+			if (typeof b?.value !== "number" || (value - a.value) * (value - b.value) >= 0) continue;
+			const rising = b.value > a.value;
+			let low = a.at;
+			let high = b.at;
+			for (let step = 0; step < INVERT_STEPS; step += 1) {
+				const middle = (low + high) / 2;
+				if ((Number(sampleBoardTrack(compiled, middle)) < value) === rising) low = middle;
+				else high = middle;
+			}
+			return high;
+		}
+		return null;
+	};
+}
+
+export function boardMediaCues(document: BoardDocument, animationId: string): BoardMediaCue[] {
+	const memo = new Map<string, BoardMediaCue[]>();
+	const local = (id: string): BoardMediaCue[] => {
+		const known = memo.get(id);
+		if (known) return known;
+		const cues: BoardMediaCue[] = [];
+		memo.set(id, []);
+		const animation = document.animations[id];
+		if (!animation) return cues;
+		const clips = new Set<string>();
+		for (const track of Object.values(animation.tracks)) {
+			if (track.property === "props.time") clips.add(track.target);
+			else if (track.property === "time" && document.animations[track.target]) {
+				const toParent = parentClock(track);
+				const from = track.keyframes.find((keyframe) => typeof keyframe.value === "number")?.value as number | undefined;
+				for (const cue of local(track.target)) {
+					const start = from !== undefined && cue.at < from && cue.end > from ? from : cue.at;
+					const at = toParent(start);
+					if (at !== null) cues.push({ ...cue, at, end: toParent(cue.end) ?? at + cue.end - start, time: cue.time + start - cue.at });
+				}
+			}
+		}
+		for (const target of clips) {
+			const item = document.items[target];
+			if ((item?.type !== "audio" && item?.type !== "video") || !parseBoardMediaSource(item.props.src)) continue;
+			const play = findBoardKeyTrack(animation.tracks, target, "props.time")?.[1];
+			const span = boardTargetSpan(document, animation, target);
+			if (play && span) cues.push({ id: target, kind: item.type, src: item.props.src, at: span.start, end: span.end, time: playValue(document, play, span.start) });
+		}
+		cues.sort((a, b) => a.at - b.at);
+		cues.length = Math.min(cues.length, CUES_MAX);
+		memo.set(id, cues);
+		return cues;
+	};
+	return local(animationId);
 }
