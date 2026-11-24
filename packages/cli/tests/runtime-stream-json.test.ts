@@ -13,6 +13,7 @@ import { NativeRuntime } from "../src/runtime/native/daemon.js";
 import { executeTurn } from "../src/runtime/native/execution.js";
 import { discoverHarnesses, refreshHarnesses } from "../src/runtime/harnesses/index.js";
 import { claudeProjectName } from "../src/runtime/harnesses/claude.js";
+import { streamJsonTranslator } from "../src/runtime/harnesses/stream-json.js";
 import { workbuddyProjectName } from "../src/runtime/harnesses/workbuddy.js";
 import { runtimeProjectionSource } from "./fixtures/runtime-projection-source.js";
 import { archiveStorageFixture } from "./fixtures/runtime-archive-storage.js";
@@ -178,6 +179,22 @@ test("discovery checks the CLI, lists models with a default and skips unusable h
     if (previous === undefined) delete process.env.STREAM_JSON_FIXTURE_HELP; else process.env.STREAM_JSON_FIXTURE_HELP = previous;
     if (previousBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL; else process.env.ANTHROPIC_BASE_URL = previousBaseUrl;
   }
+});
+
+test("Claude Code attributes token counts to calls and charges the turn once", async () => {
+  // Usage-bearing events from the Claude Code 2.1.281 edit capture in dartdavros/skaro.
+  const trace = await readFile(new URL("./fixtures/claude-call-usage.jsonl", import.meta.url), "utf8");
+  const usages = [];
+  const translator = streamJsonTranslator((event) => {
+    if (event.type === "message.commit") usages.push(event.message.usage);
+  }, { provider: "anthropic", model: null });
+  for (const line of trace.trim().split("\n")) translator.push(JSON.parse(line));
+  usages.push(translator.result()?.usage);
+  assert.deepEqual(usages, [
+    { input: 2, cacheRead: 23421, cacheWrite: 6918, output: 93, totalTokens: 30434 },
+    { input: 2, cacheRead: 30339, cacheWrite: 2129, output: 293, totalTokens: 32763 },
+    { input: 2, cacheRead: 32468, cacheWrite: 519, output: 133, totalTokens: 33122, contextTokens: 32989, cost: { total: 0.1041776 } },
+  ]);
 });
 
 test("project directories match the names Claude Code and CodeBuddy give long paths", () => {
