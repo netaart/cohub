@@ -51,7 +51,8 @@ export function createAppBrowserSessionRouter(resolveApp: (origin: string, id: s
     const path = appReturnPath(returnTo, origin);
     if (!path || !(await resolveApp(origin, id))) return c.json({ message: "invalid App destination" }, 403);
     const code = randomSecret();
-    await redisCommandClient.set(codeKey(id, origin, challenge, code), JSON.stringify({ userUuid: user.uuid, path }), "EX", 90);
+    const epoch = await currentEpoch(user.uuid);
+    await redisCommandClient.set(codeKey(id, origin, challenge, code), JSON.stringify({ userUuid: user.uuid, path, epoch }), "EX", 90);
     return c.json({ code });
   });
 
@@ -63,9 +64,10 @@ export function createAppBrowserSessionRouter(resolveApp: (origin: string, id: s
     const key = codeKey(id, origin, hash(verifier), code);
     const stored = await redisCommandClient.getdel(key);
     if (!stored || !(await resolveApp(origin, id))) return c.json({ message: "sign-in expired" }, 401);
-    const { userUuid, path } = JSON.parse(stored) as { userUuid: string; path: string };
+    const { userUuid, path, epoch } = JSON.parse(stored) as { userUuid: string; path: string; epoch: string };
+    // A Cohub sign-out after confirmation cancels the pending sign-in.
+    if (epoch !== await currentEpoch(userUuid)) return c.json({ message: "sign-in expired" }, 401);
     const handle = randomSecret();
-    const epoch = await currentEpoch(userUuid);
     // The epoch must outlive every session that references it.
     if (epoch) await redisCommandClient.expire(epochKey(userUuid), APP_BROWSER_SESSION_SECONDS);
     const session: StoredSession = { userUuid, epoch };

@@ -947,8 +947,6 @@
 	"commerce_bind": "绑定",
 	"commerce_no_bindings": "暂无绑定。将权益绑定到产品，购买后即可获得访问权限。",
 	"commerce_unbind": "解除绑定",
-	"commerce_order_report": "跨店订单报表",
-	"commerce_report_retry": "重新加载订单",
 	"commerce_orders": "订单",
 	"commerce_loading_orders": "正在加载订单…",
 	"commerce_no_orders": "暂无订单。",

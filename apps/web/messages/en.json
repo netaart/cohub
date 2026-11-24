@@ -947,8 +947,6 @@
 	"commerce_bind": "Bind",
 	"commerce_no_bindings": "No bindings yet. Bind a benefit to a product to grant access after purchase.",
 	"commerce_unbind": "Unbind",
-	"commerce_order_report": "Shop order report",
-	"commerce_report_retry": "Retry loading orders",
 	"commerce_orders": "Orders",
 	"commerce_loading_orders": "Loading orders…",
 	"commerce_no_orders": "No orders yet.",

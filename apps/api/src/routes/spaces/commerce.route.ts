@@ -1,12 +1,6 @@
-import { Hono, type Context } from "hono";
-import { spaces } from "@cohub/db";
-import { inArray } from "drizzle-orm";
-import { config } from "../../config.js";
-import { canonicalSpaceId, loadCommerceOrderReports } from "../../lib/commerce-order-reports.js";
-import { db } from "../../db/index.js";
-import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
+import { Hono } from "hono";
 import { isBillingApiError } from "../../lib/billing-api-error.js";
-import { authzDenied, getAppSessionPrincipal, getExecutionPrincipal, requireValidId, useAuth, type AuthUser } from "../../lib/middleware.js";
+import { authzDenied, requireValidId, useAuth } from "../../lib/middleware.js";
 import {
   handleSpaceCommerceRouteError,
   requireSpaceCommerceEntitlement,
@@ -868,92 +862,35 @@ router.delete("/:id/commerce/product-benefits", async (c) => {
   }
 });
 
-async function authorizedReportShops(c: Context, rawSpaceId: string, user: AuthUser): Promise<readonly string[]> {
-  const spaceId = canonicalSpaceId(rawSpaceId);
-  if (!spaceId) return [];
-  const reports = await loadCommerceOrderReports(config.platformConfigRoot, (error) => {
-    logger.error("[space-commerce] invalid commerce order reports config", { error });
-  });
-  const configured = reports.get(spaceId) ?? [];
-  if (!configured.length) return [];
-  const execution = getExecutionPrincipal(c);
-  const appSession = getAppSessionPrincipal(c);
-  if (appSession && appSession.spaceId !== spaceId) return [];
-  if (execution) {
-    if (execution.spaceId !== spaceId || !execution.scopes.includes("space.commerce.view")) return [];
-    // An Action runs as its publisher. Its actual visitor must also be a report reader.
-    if (execution.source === APP_ACTION_EXECUTION_SOURCE &&
-      (!execution.viewerUserId || !(await hasPermission({ uuid: execution.viewerUserId }, "space.commerce.view", { spaceId })))) return [];
-  }
-  const reader = execution ? { uuid: user.uuid } : user;
-  return await hasPermission(reader, "space.commerce.view", { spaceId }) ? configured : [];
-}
-
-async function listShopOrders(c: Context, shopSpaceId: string) {
-  const page = Math.max(1, Number.parseInt(c.req.query("page") ?? "1", 10) || 1);
-  const limit = Math.min(50, Math.max(1, Number.parseInt(c.req.query("limit") ?? "20", 10) || 20));
-  const mapping = await requireSpaceCommerceBusiness(shopSpaceId);
-  const sdk = await createSpaceCommerceSdk();
-  const result = await sdk.admin.orders.list({
-    business_key: mapping.billingBusinessKey,
-    include_count: false,
-    page,
-    limit,
-    sorting: "-created_at",
-  });
-  const buyerProfiles = await buildOrderBuyerProfiles(result.items);
-  return {
-    businessKey: mapping.billingBusinessKey,
-    orders: result.items.map((order) => {
-      const userUuid = resolveOrderBuyerUserUuid(order);
-      return serializeOrder(order, {
-        buyerProfile: userUuid ? (buyerProfiles.get(userUuid) ?? null) : null,
-      });
-    }),
-    pagination: { hasMore: result.pagination.has_more, nextPage: result.pagination.has_more ? page + 1 : null },
-  };
-}
-
 router.get("/:id/commerce/orders", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   const spaceId = c.req.param("id");
   if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
   if (!(await hasPermission(user, "space.commerce.view", { spaceId }))) return authzDenied(c);
+  const page = Math.max(1, Number.parseInt(c.req.query("page") ?? "1", 10) || 1);
+  const limit = Math.min(50, Math.max(1, Number.parseInt(c.req.query("limit") ?? "20", 10) || 20));
   try {
-    return c.json(await listShopOrders(c, spaceId));
-  } catch (error) {
-    const response = handleSpaceCommerceRouteError(c, error);
-    if (response) return response;
-    throw error;
-  }
-});
-
-router.get("/:id/commerce/reports/shops", async (c) => {
-  const user = useAuth(c);
-  if (user instanceof Response) return user;
-  const spaceId = c.req.param("id");
-  if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
-  c.header("Cache-Control", "private, no-store");
-  const ids = await authorizedReportShops(c, spaceId, user);
-  const shops = ids.length
-    ? await db.select({ id: spaces.id, name: spaces.name }).from(spaces)
-        .where(inArray(spaces.id, [...ids])).orderBy(spaces.name, spaces.id)
-    : [];
-  return c.json({ shops });
-});
-
-router.get("/:id/commerce/reports/shops/:shopId/orders", async (c) => {
-  const user = useAuth(c);
-  if (user instanceof Response) return user;
-  const spaceId = c.req.param("id");
-  const shopId = canonicalSpaceId(c.req.param("shopId"));
-  if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
-  c.header("Cache-Control", "private, no-store");
-  if (!shopId || !(await authorizedReportShops(c, spaceId, user)).includes(shopId)) return authzDenied(c);
-  try {
-    const { orders, pagination } = await listShopOrders(c, shopId);
-    return c.json({ orders, pagination });
+    const mapping = await requireSpaceCommerceBusiness(spaceId);
+    const sdk = await createSpaceCommerceSdk();
+    const result = await sdk.admin.orders.list({
+      business_key: mapping.billingBusinessKey,
+      include_count: false,
+      page,
+      limit,
+      sorting: "-created_at",
+    });
+    const buyerProfiles = await buildOrderBuyerProfiles(result.items);
+    return c.json({
+      orders: result.items.map((order) => {
+        const userUuid = resolveOrderBuyerUserUuid(order);
+        return serializeOrder(order, {
+          buyerProfile: userUuid ? (buyerProfiles.get(userUuid) ?? null) : null,
+        });
+      }),
+      pagination: { hasMore: result.pagination.has_more, nextPage: result.pagination.has_more ? page + 1 : null },
+      businessKey: mapping.billingBusinessKey,
+    });
   } catch (error) {
     const response = handleSpaceCommerceRouteError(c, error);
     if (response) return response;
