@@ -149,11 +149,13 @@ export function aggregateAppViewStats(input: {
   };
 }
 
-const selectAppTotalViews = (appId: string) =>
+const selectAppTotalViews = (appId: string, source: AppViewSource | null) =>
   db
     .select({ totalViews: sql<string>`coalesce(sum(${appViewStatsHourly.viewCount}), 0)` })
     .from(appViewStatsHourly)
-    .where(eq(appViewStatsHourly.appId, appId));
+    .where(source
+      ? and(eq(appViewStatsHourly.appId, appId), eq(appViewStatsHourly.source, source))
+      : eq(appViewStatsHourly.appId, appId));
 
 /**
  * All-time views stay cheap without a derived column: the rollups already
@@ -162,7 +164,8 @@ const selectAppTotalViews = (appId: string) =>
  * the count no staler than the data itself.
  */
 const APP_TOTAL_VIEWS_CACHE_TTL_SECONDS = 60;
-const appTotalViewsCacheKey = (appId: string) => `api:app-view-total:${appId}`;
+const appTotalViewsCacheKey = (appId: string, source: AppViewSource | null) =>
+  source ? `api:app-view-total:${source}:${appId}` : `api:app-view-total:${appId}`;
 
 /** Only a non-negative safe integer is a trustworthy cache entry. */
 export function parseCachedTotalViews(value: string | null): number | null {
@@ -176,12 +179,25 @@ export function parseCachedTotalViews(value: string | null): number | null {
  * times out must never fail an app detail response. Returns `null` when the
  * total is unknown (as opposed to a determined `0`).
  */
-export async function getAppTotalViews(
+export function getAppTotalViews(
   appId: string,
   redis?: AppViewStatsRedisClient,
 ): Promise<number | null> {
+  return readAppTotalViews(appId, null, redis);
+}
+
+/** The Cohub bar shows only web views. */
+export function getAppWebViews(appId: string): Promise<number | null> {
+  return readAppTotalViews(appId, "web");
+}
+
+async function readAppTotalViews(
+  appId: string,
+  source: AppViewSource | null,
+  redis?: AppViewStatsRedisClient,
+): Promise<number | null> {
   const client = redis ?? await resolveAppViewStatsRedis();
-  const cacheKey = appTotalViewsCacheKey(appId);
+  const cacheKey = appTotalViewsCacheKey(appId, source);
   if (client.status === "ready") {
     try {
       const cachedTotal = parseCachedTotalViews(await client.get(cacheKey));
@@ -193,7 +209,7 @@ export async function getAppTotalViews(
 
   let totalViews: number;
   try {
-    const [row] = await selectAppTotalViews(appId);
+    const [row] = await selectAppTotalViews(appId, source);
     totalViews = toCount(row?.totalViews);
   } catch (error) {
     const now = Date.now();
