@@ -1,4 +1,5 @@
 import LogtoClient, { type IdTokenClaims } from "@logto/browser";
+import { sanitizeRedirectPath } from "#lib/auth-redirect-path.ts";
 import {
 	type AuthSessionSnapshot,
 	type AuthTokenRequestOptions,
@@ -11,6 +12,8 @@ import {
 	PUBLIC_LOGTO_APP_ID,
 	PUBLIC_LOGTO_ENDPOINT,
 } from "$app/env/public";
+
+export { sanitizeRedirectPath };
 
 const IS_DEV =
 	(typeof location !== "undefined" && location.hostname.startsWith("dev")) ||
@@ -163,42 +166,6 @@ export function clearAuthJustCompleted() {
 		sessionStorage.removeItem(AUTH_JUST_COMPLETED_KEY);
 	} catch {
 		// ignore
-	}
-}
-
-const isAuthEndpointPath = (pathname: string) =>
-	pathname === "/callback" ||
-	pathname.startsWith("/callback/") ||
-	pathname === "/app-auth" ||
-	pathname.startsWith("/app-auth/");
-
-/**
- * Keep post-login destinations same-app and off auth endpoints.
- * Accepts relative paths (`/foo?x=1#h`) or same-origin absolute URLs.
- * Rejects protocol-relative (`//…`), backslashes, and open redirects.
- */
-export function sanitizeRedirectPath(path?: string | null): string {
-	if (!path) return "/";
-	const trimmed = path.trim();
-	if (!trimmed) return "/";
-
-	try {
-		// Relative app path: "/spaces/new?x=1#section"
-		if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
-			if (trimmed.includes("\\")) return "/";
-			const url = new URL(trimmed, "http://local.invalid");
-			if (isAuthEndpointPath(url.pathname)) return "/";
-			return `${url.pathname}${url.search}${url.hash}` || "/";
-		}
-
-		// Absolute URL — only same-origin when running in the browser.
-		if (typeof window === "undefined") return "/";
-		const url = new URL(trimmed, window.location.origin);
-		if (url.origin !== window.location.origin) return "/";
-		if (isAuthEndpointPath(url.pathname)) return "/";
-		return `${url.pathname}${url.search}${url.hash}` || "/";
-	} catch {
-		return "/";
 	}
 }
 
@@ -593,7 +560,7 @@ export const completeSignInCallback = async (
 	});
 
 const createRedirectState = (redirectPath?: string) => {
-	const searchParams = new URLSearchParams();
+	const searchParams = new URLSearchParams({ nonce: crypto.randomUUID() });
 	if (redirectPath) {
 		searchParams.set("redirect_path", sanitizeRedirectPath(redirectPath));
 	}
@@ -687,17 +654,24 @@ export const isSigningOut = () => signingOut;
  */
 export const signOut = async (): Promise<void> => {
 	if (typeof window === "undefined") return;
+	signingOut = true;
+	// Sign-out must still succeed locally when the API is unreachable.
+	await import("#lib/sdk.ts")
+		.then(({ sdk }) => sdk.user.revokeAppBrowserSessions())
+		.catch((error) => {
+			console.warn("[auth] Failed to end storefront sign-ins", error);
+		});
 	if ((await readyHost()) && hostOwnsCredentials()) {
 		try {
 			await callHost("auth.signOut");
 			// Match the browser, whose Logto sign-out lands on the home.
 			window.location.replace("/");
 		} catch (error) {
+			signingOut = false;
 			console.error("[auth] Native host failed to sign out", error);
 		}
 		return;
 	}
-	signingOut = true;
 	const postLogoutRedirectUri = `${window.location.origin}/`;
 	try {
 		await getLogtoClient().signOut(postLogoutRedirectUri);

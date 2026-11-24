@@ -27,6 +27,8 @@ export type AppSessionPayload = {
   scopes: Permission[];
   /** @deprecated Legacy single-grant id; grants are resolved server-side now. */
   appViewerGrantId?: string;
+  /** Set on storefront tokens; they die with the account's storefront sign-ins. */
+  browserEpoch?: string;
   iat: number;
   exp: number;
 };
@@ -56,6 +58,7 @@ export function createAppSessionToken(input: {
   /** Display-only snapshot of the scopes consented by this mint's authorize call. */
   viewerScopes?: Permission[];
   ttlSeconds?: number;
+  browserEpoch?: string;
   /** Injectable for tests; production uses the configured APP_ENCRYPTION_KEY. */
   secret?: string;
 }) {
@@ -72,6 +75,7 @@ export function createAppSessionToken(input: {
     workScopes: appScopes,
     viewerScopes,
     scopes: normalizePermissionScopes([...appScopes, ...viewerScopes]),
+    ...(input.browserEpoch === undefined ? {} : { browserEpoch: input.browserEpoch }),
     iat: now,
     exp: now + (input.ttlSeconds ?? APP_SESSION_TTL_SECONDS),
   };
@@ -81,7 +85,12 @@ export function createAppSessionToken(input: {
   return `${signingInput}.${signature}`;
 }
 
-export function verifyAppSessionToken(token: string, secret?: string): AppSessionPrincipal | null {
+/** Whether this is an App session token we signed, live or expired. */
+export function isSignedAppSessionToken(token: string, secret?: string): boolean {
+  return readSignedAppSessionPayload(token, secret) !== null;
+}
+
+function readSignedAppSessionPayload(token: string, secret?: string): AppSessionPayload | null {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   const [headerPart, payloadPart, signaturePart] = parts as [string, string, string];
@@ -98,7 +107,12 @@ export function verifyAppSessionToken(token: string, secret?: string): AppSessio
   if (payload.typ !== "app_session") return null;
   if (!payload.userUuid || !payload.appId || !payload.spaceId) return null;
   if (!Array.isArray(payload.scopes) || !Array.isArray(payload.appScopes) || !Array.isArray(payload.viewerScopes)) return null;
-  if (payload.exp * 1000 <= Date.now()) return null;
+  return payload;
+}
+
+export function verifyAppSessionToken(token: string, secret?: string): AppSessionPrincipal | null {
+  const payload = readSignedAppSessionPayload(token, secret);
+  if (!payload || payload.exp * 1000 <= Date.now()) return null;
   const appScopes = normalizeAppPublisherScopes(payload.appScopes);
   const viewerScopes = normalizePermissionScopes(payload.viewerScopes);
   return {

@@ -230,3 +230,24 @@ test("offline access is refused for account permissions", async () => {
   await core.handleMessage(request({ target: { kind: "account" }, scopes: ["user.space.list"], offline: true }));
   assert.equal(replies.at(-1)?.code, "invalid_request");
 });
+
+test("only broker tokens are marked to end with the account's web sign-out", async () => {
+  for (const surface of ["broker", "page"] as const) {
+    const bodies: unknown[] = [];
+    globalThis.fetch = (async (_url, init) => {
+      bodies.push(init?.body ? JSON.parse(String(init.body)) : undefined);
+      return Response.json({ token: "token" });
+    }) as typeof fetch;
+    const core = createAppBridgeCore({
+      app: { id: "app", spaceId: "author-space", slug: "app", userUuid: "author", appScopes: [] },
+      apiOrigin: "https://api.test", reply: () => {},
+      getCheckoutState: () => ({ status: null, orderId: null }),
+      getAccessToken: async () => "user-token",
+      getViewerUuid: async () => "viewer",
+      requestSignIn: async () => {},
+      authorizationContext: { surface },
+    });
+    await core.handleMessage({ data: { type: "cohub.app.token", requestId: "t" } } as MessageEvent);
+    assert.deepEqual(bodies, [surface === "broker" ? { broker: true } : undefined]);
+  }
+});

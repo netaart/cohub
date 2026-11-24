@@ -20,6 +20,7 @@ import { describeUserAccessTokenFailure } from "./auth-failure.js";
 import { recordAuthTrace } from "./auth-observability.js";
 import { verifyPreviewSessionToken, type PreviewSessionPrincipal } from "./preview-sessions.js";
 import { verifyAppSessionToken, type AppSessionPrincipal } from "./app-sessions.js";
+import { isAppBrowserTokenLive } from "./lib/app-browser-epoch.js";
 import { assertRequiredConfig, config } from "./config.js";
 
 import router from "./routes/index.js";
@@ -144,6 +145,15 @@ app.use(async (c, next) => {
     }
 
     const appSession = verifyAppSessionToken(token);
+    if (appSession && !(await isAppBrowserTokenLive(appSession))) {
+      recordAuthTrace(trace.getActiveSpan(), {
+        credentialPresent: true,
+        principalType: "anonymous",
+        outcome: "rejected",
+        failureCategory: "ended_app_session",
+      });
+      return c.json({ message: "App session ended" }, 401);
+    }
     if (appSession) {
       c.set("appSession", appSession);
       c.set("principal", { type: "app_session", appSession });

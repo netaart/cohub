@@ -314,9 +314,10 @@ ctx.on("gesture", ({ data }) => {
 });
 ```
 
-`ctx.view` is null until a view event arrives. Exports and `boards profile` send the
-area they draw: the animation camera for camera exports, otherwise the region at the
-output's pixels, so code that switches passes by zoom or view draws there as it does
+`ctx.view` is null until a view event arrives, and only a script with a `viewchange`
+listener receives one, live, in `boards simulate` and in exports alike. Exports and
+`boards profile` send what they draw: the camera of `--camera` and `--view` exports, at
+its pitch and bearing, otherwise the region at the output's pixels, so code that switches passes by zoom or view draws there as it does
 live. They have no user events. The embedding stage may provide a `safeRect` callback to
 exclude its chrome, then call `stage.invalidate()` when that area changes. Without
 an override, the safe rectangle is the stage surface. Neither view state nor
@@ -344,7 +345,8 @@ clockwise) for a low or turned view (see [Pitch and bearing](board.md#pitch-and-
 animation camera one by one, a later script in document order wins a field, and `null`
 lets go. The camera follows in play and read-only
 views, and in `--camera` exports. While editing it never moves, so authors keep their
-view. When the viewer pans or zooms, they take the camera until **Back to the camera**;
+view. When the viewer pans or zooms, they take the camera, at its angle, until **Back to the camera**
+or the next playback;
 when the script lets go, the view stays where it was. `ctx.view` reports the camera the
 viewer sees, with `pitch` and `bearing` while it tips or turns; pointer events keep
 reporting the Board point under the pointer; `boards simulate --mode play` reports the directed camera and

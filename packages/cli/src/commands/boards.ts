@@ -43,7 +43,7 @@ import type { BoardSimulationRender } from "../board-simulate.js";
 import { settleBoardPatch } from "../board-media.js";
 import { formatBoardTime, parseBoardTime, parseBoardTimes } from "../board-time.js";
 import { createClient, createRealtimeClient } from "../client.js";
-import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
+import { error, handleHttp, json as outJson, jsonRequested, ok, printable, table } from "../output.js";
 import { resolveSpace } from "../space.js";
 import { registerBoardExampleCommands } from "./boards/examples.js";
 import { registerBoardAuthoringCommands } from "./boards/authoring.js";
@@ -234,6 +234,8 @@ function parseExportRegion(options: ExportOptions): BoardExportRegion {
 
 const BOARD_EXPORT_FORMATS: BoardNodeExportFormat[] = ["png", "jpeg", "webp"];
 const BOARD_VIDEO_FORMATS = ["mp4", "webm"] as const;
+const SIMULATE_LOG_LINES = 40;
+const BOARD_GET_SECTIONS = ["board", "items", "animations", "playback"];
 
 type BoardVideoExportFormat = (typeof BOARD_VIDEO_FORMATS)[number];
 
@@ -522,6 +524,8 @@ Shaders are compiled with a local Chrome, Chromium or Edge when one is found, be
 the steps run; their errors join the scripts' errors and stop the run.
 Each tap and drag reports where it landed (a script's hit region, a selection handle,
 an item, or empty board) and what took it (a script, move, resize, rotate, select box).
+Scripts' console.log, warn and error lines print with their time (all of them in --json
+"logs", up to 200 per script instance).
 
 Examples:
   cohub boards simulate farm.board '{"steps":[{"wait":"2s"}]}' -o farm.png
@@ -562,6 +566,8 @@ Examples:
         for (const press of result.presses) console.log(`  step ${press.step + 1}: ${describePress(press)}`);
         if (result.camera) console.log(`  camera: ${JSON.stringify(result.camera)}`);
         if (result.broadcasts.length) console.log(`  ${result.broadcasts.length} broadcast${result.broadcasts.length === 1 ? "" : "s"}: ${[...new Set(result.broadcasts.map(({ owner, type }) => `${owner} "${type}"`))].join(", ")}`);
+        for (const { id, time, text } of result.logs.slice(0, SIMULATE_LOG_LINES)) console.log(printable(`  > ${formatBoardTime(time)} ${id}: ${text}`));
+        if (result.logs.length > SIMULATE_LOG_LINES) console.log(`  > ${result.logs.length - SIMULATE_LOG_LINES} more lines in --json`);
         for (const [id, message] of Object.entries(result.errors)) console.log(`  ! ${id}: ${message.split("\n")[0]}`);
         for (const warning of result.warnings) console.log(`  ! ${warning}`);
         if (result.shaders && !result.shaders.compiled)
@@ -697,7 +703,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
 
   boards.command("get <board>")
     .description("Print the Board document as JSON")
-    .option("--only <sections>", "board, items, animations (comma-separated)")
+    .option("--only <sections>", "board, items, animations, playback (comma-separated); the header and playback always print")
     .option("--items <ids>", "Only these items")
     .option("--within <frame-id>", "A frame and everything inside it")
     .option("--rect <rect>", "Items intersecting x,y,width,height")
@@ -710,12 +716,13 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
   cohub boards get plan.board
   cohub boards get plan.board --within s2
   cohub boards get plan.board --only board
+  cohub boards get plan.board --only playback
   cohub boards get plan.board --since 12
   cohub boards get plan.board --checkpoint <checkpoint-id>`)
     .action(async (target: string, options: { only?: string; items?: string; within?: string; rect?: string; animations?: string; limit?: string; cursor?: string; since?: string; checkpoint?: string }) => {
       try {
         const only = list(options.only);
-        if (only?.some((section) => section !== "board" && section !== "items" && section !== "animations")) throw new Error("--only takes board, items, animations, or a combination.");
+        if (only?.some((section) => !BOARD_GET_SECTIONS.includes(section))) throw new Error(`--only takes ${BOARD_GET_SECTIONS.join(", ")}, or a combination.`);
         const sections = only ? new Set(only) : null;
         if (options.checkpoint) {
           const unsupported = (["rect", "limit", "cursor", "since"] as const).filter((name) => options[name] !== undefined);
@@ -724,7 +731,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
           return outJson(selectCheckpointBoard(saved, { sections, items: list(options.items), within: options.within, animations: list(options.animations) }));
         }
         const input: BoardReadInput = {
-          ...(only ? { only: only.filter((section): section is NonNullable<BoardReadInput["only"]>[number] => section !== "board") as BoardReadInput["only"] } : {}),
+          ...(only ? { only: only.filter((section): section is NonNullable<BoardReadInput["only"]>[number] => section === "items" || section === "animations") } : {}),
           ...(list(options.items) ? { items: list(options.items) } : {}),
           ...(options.within ? { within: options.within } : {}),
           ...(options.rect ? { rect: parseRect(options.rect) } : {}),

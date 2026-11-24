@@ -16,7 +16,7 @@ import type {
 import { BOARD_SCRIPT_EXPORT_ENV, type BoardScriptInputLog, boardScriptSenseStates } from "../model/script-senses.js";
 import type { BoardScriptHost } from "../render/renderers/board-renderer-registry.js";
 import { createNodeBoardRenderer, exportBoardImageBytes, type BoardNodeRenderer } from "../export/node/index.js";
-import { createNodeBoardScriptRuntime } from "../export/node/scripts.js";
+import { type BoardScriptLog, createNodeBoardScriptRuntime } from "../export/node/scripts.js";
 import { type BoardScriptDevice, createBoardScriptController } from "../stage/script-controller.js";
 
 export type BoardScriptHarnessMode = "edit" | "play" | "view";
@@ -54,6 +54,8 @@ export type BoardScriptHarnessPress = { down: BoardScriptHarnessHit; taken: stri
 export type BoardScriptHarnessPeer = Partial<BoardScriptPeer> & { name: string };
 
 export type BoardScriptHarnessBroadcast = { owner: string; type: string; data: unknown };
+
+export type BoardScriptHarnessLog = BoardScriptLog & { time: number };
 
 function harnessPeer(peer: BoardScriptHarnessPeer): BoardScriptPeer {
   return {
@@ -107,6 +109,7 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
   let runtime: ReturnType<typeof createNodeBoardScriptRuntime> | null = null;
   let peers: readonly BoardScriptPeer[] = [];
   const broadcasts: BoardScriptHarnessBroadcast[] = [];
+  const logs: BoardScriptHarnessLog[] = [];
   const editor: BoardEditor = createBoardEditor({
     document: options.document,
     readonly: options.mode === "view",
@@ -141,7 +144,7 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     requestFrame() {},
     requestScriptFrame() {},
     createHost: (callbacks) => {
-      runtime = createNodeBoardScriptRuntime(renderer, { readModule: options.readModule, timeoutMs: options.timeoutMs, callbacks });
+      runtime = createNodeBoardScriptRuntime(renderer, { readModule: options.readModule, timeoutMs: options.timeoutMs, onLog: (log) => logs.push({ ...log, time: Math.round(clock) }), callbacks });
       return runtime;
     },
   });
@@ -302,6 +305,9 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     },
     get broadcasts(): readonly BoardScriptHarnessBroadcast[] {
       return broadcasts;
+    },
+    get logs(): readonly BoardScriptHarnessLog[] {
+      return logs;
     },
     async peers(next: readonly BoardScriptHarnessPeer[]) {
       peers = next.map(harnessPeer);

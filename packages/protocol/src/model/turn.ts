@@ -140,6 +140,8 @@ export type StoredToolCall = {
   } | null;
 };
 
+export const SESSION_TURN_SIGNED_URL_LIMIT = 50;
+
 export type MessageToolCallsFile = {
   version: 1;
   spaceId: string;

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { access, link, open, rename, unlink } from "node:fs/promises";
+import { constants, createReadStream } from "node:fs";
+import { access, link, open, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 export const BOARD_TRANSACTION_INPUT_MAX_BYTES = 16 * 1024 * 1024;
@@ -24,13 +24,13 @@ export function parseBoardJsonObject(
   return value as Record<string, unknown>;
 }
 
-async function readStdinBounded(maxBytes: number): Promise<string> {
+async function readBounded(stream: AsyncIterable<Buffer | string>, maxBytes: number, source: string): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of process.stdin) {
+  for await (const chunk of stream) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += bytes.byteLength;
-    if (size > maxBytes) throw new Error(`stdin exceeds the ${maxBytes} byte input limit`);
+    if (size > maxBytes) throw new Error(`${source} exceeds the ${maxBytes} byte input limit`);
     chunks.push(bytes);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -40,23 +40,14 @@ export async function readBoardJsonObject(
   source: string,
   maxBytes = BOARD_DOMAIN_INPUT_MAX_BYTES,
 ): Promise<Record<string, unknown>> {
-  if (source === "-") return parseBoardJsonObject(await readStdinBounded(maxBytes), "stdin");
+  if (source === "-") return parseBoardJsonObject(await readBounded(process.stdin, maxBytes, "stdin"), "stdin");
+  if ((await stat(source)).isFIFO()) return parseBoardJsonObject(await readBounded(createReadStream(source), maxBytes, source), source);
   const handle = await open(source, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
     const info = await handle.stat();
-    if (!info.isFile()) throw new Error(`${source} must be a regular file`);
+    if (!info.isFile()) throw new Error(`${source} must be a file or a pipe`);
     if (info.size > maxBytes) throw new Error(`${source} exceeds the ${maxBytes} byte input limit`);
-    const chunks: Buffer[] = [];
-    const buffer = Buffer.allocUnsafe(Math.max(1, Math.min(64 * 1024, maxBytes + 1)));
-    let size = 0;
-    for (;;) {
-      const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, null);
-      if (bytesRead === 0) break;
-      size += bytesRead;
-      if (size > maxBytes) throw new Error(`${source} exceeds the ${maxBytes} byte input limit`);
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
-    }
-    return parseBoardJsonObject(Buffer.concat(chunks).toString("utf8"), source);
+    return parseBoardJsonObject(await readBounded(handle.createReadStream({ autoClose: false }), maxBytes, source), source);
   } finally {
     await handle.close();
   }

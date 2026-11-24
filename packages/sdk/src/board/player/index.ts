@@ -21,6 +21,8 @@ export * from "./transport.js";
 const ENTER_ANIMATION = "\u0000enter";
 const ENTER_STAGGER_MS = 45;
 const ENTER_MAX_ITEMS = 80;
+const AHEAD_MS = 3000;
+const AHEAD_STEP_MS = 250;
 
 export type BoardPlayerFrame = {
 	items: ReadonlyMap<string, BoardItem>;
@@ -118,6 +120,19 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 				playbackTime,
 				running,
 			};
+		},
+		ahead(current: BoardDocument, playback: BoardPlaybackSnapshot | null, wallNow: number): BoardPlayerFrame[] {
+			if (!playback) return [];
+			const animations = compile(current);
+			const header = animations.animations.get(playback.animationId)?.header;
+			const start = header && playbackClockAt(playback, current, wallNow).time;
+			if (!header || start == null) return [];
+			const frames: BoardPlayerFrame[] = [];
+			for (let time = start + AHEAD_STEP_MS; time <= Math.min(start + AHEAD_MS, header.duration); time += AHEAD_STEP_MS) {
+				const evaluation = evaluateBoardAnimations(animations, new Map([[playback.animationId, time]]), options);
+				frames.push({ ...evaluation, time, playbackTime: time, running: true });
+			}
+			return frames;
 		},
 	};
 }

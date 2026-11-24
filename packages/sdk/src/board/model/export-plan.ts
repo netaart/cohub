@@ -1,6 +1,6 @@
 
 import { arrowBindings, type BoardDocument, parseBoardDocument } from "@cohub/protocol";
-import { effectBounds, itemBounds, type Rect, rectsIntersect, unionRects } from "./geometry.js";
+import { type BoardViewport, effectBounds, itemBounds, type Rect, rectsIntersect, unionRects } from "./geometry.js";
 import { arrowPathBounds, resolveSceneArrow } from "./arrow-geometry.js";
 import type { BoardScene, BoardSceneItem } from "./scene.js";
 import { boardDepthItemOutline, boardDepthOf, boardDepthRoots } from "./depth.js";
@@ -172,9 +172,10 @@ export function planBoardExport(input: BoardExportPlanInput): BoardExportPlan | 
   };
 }
 
-export function boardExportView(plan: Pick<BoardExportPlan, "world" | "scale" | "width" | "height">): BoardScriptView {
+export function boardExportView(plan: Pick<BoardExportPlan, "world" | "scale" | "width" | "height">, camera?: BoardViewport): BoardScriptView {
   const { world, scale, width, height } = plan;
-  return { camera: { x: -world.x * scale, y: -world.y * scale, zoom: scale }, width, height, safeRect: { x: 0, y: 0, width, height } };
+  const { x, y, zoom, pitch, bearing } = camera ?? { x: -world.x * scale, y: -world.y * scale, zoom: scale };
+  return { camera: { x, y, zoom, ...(pitch ? { pitch } : {}), ...(bearing ? { bearing } : {}) }, width, height, safeRect: { x: 0, y: 0, width, height } };
 }
 
 function withLiftedInto(scene: BoardScene, items: BoardSceneItem[], world: Rect, scale: number): BoardSceneItem[] {

@@ -35,11 +35,21 @@ const {parentPort, workerData} = require('node:worker_threads');
 const {createContext, Script, SourceTextModule, SyntheticModule} = require('node:vm');
 const {createCanvas, GlobalFonts} = require(workerData.canvasModule);
 (${initializeBoardFonts.toString()})(GlobalFonts, workerData.fonts);
+const CATCH_UP_MS = 1000;
+const LOG_LINES = 200;
+const LOG_CHARS = 2000;
+const text = (value) => {
+ if (typeof value === 'string') return value;
+ if (value && typeof value === 'object' && typeof value.message === 'string') return value.stack ?? value.message;
+ try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+};
 const instances = new Map();
 const graphs = new Map();
 const calls = new Map();
 let callId = 0;
-const update = new Script('__runtime.update(JSON.parse(__inputJson)); for (const event of JSON.parse(__eventsJson, (_key, value) => value && Array.isArray(value.$f32) ? new Float32Array(value.$f32) : value)) __runtime.event(event, __time); __runtime.step(__time)');
+const update = new Script('__runtime.update(JSON.parse(__inputJson)); for (const event of JSON.parse(__eventsJson, (_key, value) => value && Array.isArray(value.$f32) ? new Float32Array(value.$f32) : value)) __runtime.event(event, __time)');
+const step = new Script('__runtime.step(__time)');
+const clock = new Script('__runtime.time');
 const draw = new Script('__runtime.draw(__drawing)');
 const output = new Script('JSON.stringify(__runtime.output())');
 const snapshot = new Script('JSON.stringify(__runtime.snapshot())');
@@ -52,7 +62,9 @@ function release(id) {
  }
 }
 async function create(data) {
- const context = createContext({console:{log(){},warn(){},error(){}},structuredClone},{codeGeneration:{strings:false,wasm:false}});
+ let printed=0;
+ const print=level=>(...values)=>{if(printed++<LOG_LINES) parentPort.postMessage({kind:'log',id:data.input.id,level,text:values.map(text).join(' ').slice(0,LOG_CHARS)});};
+ const context = createContext({console:{log:print('log'),info:print('log'),debug:print('log'),warn:print('warn'),error:print('error')},structuredClone},{codeGeneration:{strings:false,wasm:false}});
  new Script("const __name=(value,name)=>Object.defineProperty(value,'name',{value:name,configurable:true})").runInContext(context);
  const sources = graphs.get(data.src);
  if(!sources) throw new Error('Module graph is unavailable.');
@@ -114,7 +126,9 @@ parentPort.on('message',async data=>{
   }
   const context=entry.context;
   context.__inputJson=JSON.stringify(data.input);context.__eventsJson=JSON.stringify(data.events??[],(_key,value)=>value instanceof Float32Array?{$f32:Array.from(value)}:value);context.__time=data.time;
-  update.runInContext(context,{timeout:workerData.timeout});entry.time=data.time;
+  update.runInContext(context,{timeout:workerData.timeout});
+  for(let at=clock.runInContext(context)+CATCH_UP_MS;at<data.time;at+=CATCH_UP_MS) {context.__time=at;step.runInContext(context,{timeout:workerData.timeout});}
+  context.__time=data.time;step.runInContext(context,{timeout:workerData.timeout});entry.time=data.time;
   await new Promise(resolve=>setImmediate(resolve));
   let png;
   if(entry.draw && data.draw!==false && !(entry.shader && data.shaders)) {
@@ -183,11 +197,14 @@ type SampleRequest = {
   shaders?: boolean;
 };
 
+export type BoardScriptLog = { id: string; level: "log" | "warn" | "error"; text: string };
+
 export type BoardNodeScriptOptions = {
   readModule(src: string): Promise<string>;
   concurrency?: number;
   timeoutMs?: number;
   readTimeoutMs?: number;
+  onLog?: (log: BoardScriptLog) => void;
 };
 
 function createNodeScriptLanes(
@@ -252,9 +269,10 @@ function createNodeScriptLanes(
     };
     worker.on("error", stopped);
     worker.on("exit", () => stopped(new Error("Script worker stopped.")));
-    worker.on("message", (message: { kind: string; id?: string; call?: number; name?: string; input?: unknown }) => {
+    worker.on("message", (message: { kind: string; id?: string; call?: number; name?: string; input?: unknown; level?: BoardScriptLog["level"]; text?: string }) => {
       const key = `${worker.threadId}:${message.call}`;
       if (message.kind === "dirty") options.onDirty?.(message.id ?? "");
+      if (message.kind === "log") options.onLog?.({ id: message.id ?? "", level: message.level ?? "log", text: message.text ?? "" });
       if (message.kind === "settled") {
         calls.get(key)?.();
         calls.delete(key);

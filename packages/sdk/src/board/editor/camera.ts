@@ -113,7 +113,7 @@ export function createCameraModule(ctx: EditorContext) {
 	function takeCameraControl(): boolean {
 		if (state.cameraPolicy !== "follow" || !followed) return false;
 		stop();
-		move(editing() ? levelBoardView(followed) : followed);
+		move(followed);
 		followed = null;
 		setCameraPolicy("free");
 		return true;

@@ -57,7 +57,7 @@ export function createBoardTransport(options: {
 
 	function acceptPlay() {
 		if (!pending?.acceptedPlaybackId) return;
-		if (playback?.playbackId !== pending.acceptedPlaybackId || playback.status === "stopped") {
+		if (playback?.playbackId !== pending.acceptedPlaybackId) {
 			clearPending();
 			return;
 		}

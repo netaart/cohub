@@ -71,6 +71,15 @@ export function truncateText(value: unknown, maxLength: number): string {
   return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+export function printable(text: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+export function excerptColumn(key: string, label: string, maxLength = 60): Column {
+  return { key, label, format: (value) => truncateText(value, maxLength) };
+}
+
 function cellText(column: Column, row: Row): string {
   const raw = row[column.key];
   if (column.format) return column.format(raw, row);

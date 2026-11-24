@@ -264,6 +264,9 @@ export function createScriptRuntime(
     get animated() {
       return frames.size > 0 || module.animated === true;
     },
+    get time() {
+      return time;
+    },
     update(next: ScriptRuntimeInput) {
       const env = JSON.stringify(input.env) === JSON.stringify(next.env) ? null : next.env;
       input = next;
@@ -330,7 +333,7 @@ export function createScriptRuntime(
         time = t;
         frame = { ...frame, t, dt: 0 };
       }
-      if (event.type === "viewchange") view = event.data as BoardScriptView;
+      if (event.type === "viewchange" && handlers.get("viewchange")?.size) view = event.data as BoardScriptView;
       if (event.type === "peerschange") peers = event.data as BoardScriptContext["peers"];
       if (event.type === "browser:video") {
         videoFrame?.close?.();

@@ -55,6 +55,7 @@ export * from "./public-files.js";
 export * from "./desktop-command.js";
 export * from "./app.js";
 export * from "./app-origin.js";
+export * from "./app-browser-session.js";
 export * from "./app-domains.js";
 export * from "./app-surface.js";
 export * from "./app-runtime.js";

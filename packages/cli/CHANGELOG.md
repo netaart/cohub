@@ -1,5 +1,18 @@
 # @neta-art/cohub-cli
 
+## 10.35.0
+
+### Minor Changes
+
+- 385aca9: `cohub boards examples` is now five starters, each teaching one kind of Board: `diagram` (was `basic` and `workflow`), `slides` (was `slides` and `lesson`), `custom` (now the sparks script, with params, a hit region and shared effects), `rain` and `arena`; `tilt`, `senses`, `sparks` and `depth` are gone. Unknown examples fail with a clean error. Board help groups the commands by task, and `sequence`, `path`, `schema`, `history` and `play` gain usage examples. The SDK drops `BOARD_SCRIPT_DRAWING_EXAMPLE`, `BOARD_SCRIPT_SENSES_EXAMPLE` and `BOARD_SCRIPT_TILT_EXAMPLE`; `BOARD_SCRIPT_SPARKS_EXAMPLE` declares a `count` parameter.
+- 4553241: Board shows survive live writes: editing the playing animation, tracks included, no longer stops a shared playback (only deleting it does), and the `stopped` playback status is gone. A viewer who pans during a tipped shot keeps its angle, and every new playback brings viewers back to its camera. The stage loads the images of the next 3 seconds of a playback, past a pause marker it holds at, at the size they grow to. Exports give scripts the camera they draw, pitch and bearing included, and reach far frames without a script timeout; `ctx.view` is set only for `viewchange` listeners everywhere. `boards simulate` reports scripts' console lines (`logs` in `--json`), `boards get --only playback` reads just the playback, `-i` accepts pipes such as `<(…)`, and `spaces turns intermediate --tool-calls` adds every tool call's full input and result. The SDK adds `turns.intermediate.listToolCalls()`, signing archived tool calls in batches.
+
+### Patch Changes
+
+- Updated dependencies [385aca9]
+- Updated dependencies [4553241]
+  - @neta-art/cohub@13.28.0
+
 ## 10.34.0
 
 ### Minor Changes

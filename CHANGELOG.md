@@ -4,6 +4,20 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.108 — 2026-11-24
+
+- **Google Play release track**: Android now ships a signed AAB from a dedicated `playRelease` flavor with cloud Spaces and system file picking but no on-device Runtime, screen control, or all-files access; release automation builds, verifies and checksums both the APK and the bundle, asserting prohibited permissions and services are absent.
+- **Instant App Links after deploys**: `/.well-known/assetlinks.json` is served `no-store` and bypasses the edge cache, and Play's legacy and hybrid signing fingerprints plus `get_login_creds` are published, so Play installs complete sign-in right after a web release.
+- **Live Board shows keep playing**: playback snapshots written as `stopped` are read as no playback, deleting an animation clears playback instead of stalling the stage, and playback switches to a follow camera and prefetches upcoming items up to 3s ahead at the size they will be drawn.
+- **Five Board starters**: `cohub boards examples` now offers `diagram`, `slides`, `custom`, `rain` and `arena`, replacing `basic`, `workflow`, `lesson`, `tilt`, `senses`, `sparks` and `depth`; unknown names fail cleanly, Board help groups commands by task, and the SDK drops the removed `BOARD_SCRIPT_*_EXAMPLE` exports while `BOARD_SCRIPT_SPARKS_EXAMPLE` declares a `count` parameter.
+- **Tool-call tracing in the CLI**: `cohub spaces turns intermediate <sessionId> <turnId> --tool-calls` prints each call's command, result and duration, resolving archived tool-call files in batches of 50 signed URLs; turn tables now clip long excerpts and escape control characters for safe terminal output.
+- **Script logs in Board simulation**: `cohub boards simulate` reports `console.log`, `warn` and `error` output with timestamps (up to 200 lines per instance in `--json`), advances long time jumps in 1s deterministic catch-up steps, and the script harness exposes the same log stream.
+
+### Bug Fixes
+
+- Board reads no longer resurrect a `stopped` playback snapshot left by older writes, which could make an active show render nothing.
+- Decisions requests for Jev models now transcodes WebP and oversized images to JPEG or PNG within Jev's 1568px cap and 256px minimum instead of sending unsupported payloads.
+
 ## v2.107 — 2026-11-23
 
 - **Config-driven pricing rules and quotas**: operators publish a hot-reloaded `pricing.yaml` (per usage type, model, provider, benefit, and date window) that applies multipliers or draws quota tokens, with the price frozen at admission so queued work keeps its price and quota refunded on failure, cancel, or never-enqueued tasks. Model listings carry the caller's `offer` and `quota`, `billing.getQuotas()` returns quota balances, and model pickers, the composer, the balance ledger, public pricing, and `cohub models ls` / `cohub generate` show discounted prices, original prices, and quota coverage.

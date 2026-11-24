@@ -821,8 +821,16 @@ export function createBoardAssetManager(
 			if (!entry.texture) evict(key, entry);
 			else scheduleTrim();
 		},
-		prefetch(requests) {
+		prefetch(input) {
 			if (disposed) return;
+			const merged = new Map<string, BoardAssetPrefetch>();
+			for (const request of input) {
+				const key = managedAssetKey(request.item);
+				if (!key || !Number.isFinite(request.edge)) continue;
+				const known = merged.get(key);
+				if (!known || known.edge < request.edge) merged.set(key, known ? { item: known.item, edge: request.edge } : request);
+			}
+			const requests = [...merged.values()];
 			const next = new Set<string>();
 			let room = budget.maxBytes * PREFETCH_POOL_SHARE;
 			for (const entry of entries.values()) if (entry.refs <= 0) room -= footprintOf(entry.texture);

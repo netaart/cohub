@@ -240,7 +240,9 @@ async function findBoard(db: Executor, boardId: string, lock = false) {
 }
 
 function playbackOf(value: unknown): BoardPlaybackSnapshot | null {
-	return value && typeof value === "object" ? (value as BoardPlaybackSnapshot) : null;
+	if (!value || typeof value !== "object") return null;
+	// Writes used to leave playback "stopped", which plays nothing: read it as no playback.
+	return (value as { status?: unknown }).status === "stopped" ? null : (value as BoardPlaybackSnapshot);
 }
 
 export async function readBoard(
@@ -379,7 +381,7 @@ async function readChanges(db: Executor, boardId: string, since: number, version
 
 export type BoardApplyOutcome = {
 	result: BoardApplyResult;
-	written?: { baseVersion: number; after: BoardDelta; playback?: BoardPlaybackSnapshot | null };
+	written?: { baseVersion: number; after: BoardDelta; playback?: null };
 };
 
 export type BoardWriteInput = {
@@ -487,12 +489,8 @@ export async function applyBoardInTransaction(
 	const version = board.version + 1;
 	await writeDelta(tx, board.id, applied.after, state, version, now);
 
-	let playback = playbackOf(board.playback);
-	let playbackChanged = false;
-	if (playback && changed.animations.includes(playback.animationId)) {
-		playback = applied.after.animations?.[playback.animationId] === null ? null : { ...playback, status: "stopped", revision: playback.revision + 1, effectiveAt: now.getTime(), commandId: `write:${mutationId}` };
-		playbackChanged = true;
-	}
+	const playing = playbackOf(board.playback);
+	const ended = playing !== null && applied.after.animations?.[playing.animationId] === null;
 
 	const result: BoardApplyResult = { mutationId, status: "applied", replayed: false, version, changed, diagnostics: applied.diagnostics };
 	await tx.insert(boardTransactions).values({
@@ -514,12 +512,12 @@ export async function applyBoardInTransaction(
 			version,
 			updatedAt: now,
 			...(applied.after.board ? { settings: applied.after.board, title: applied.after.board.title ?? board.title } : {}),
-			...(playbackChanged ? { playback: playback as unknown as JsonRecord | null } : {}),
+			...(ended ? { playback: null } : {}),
 		})
 		.where(eq(boards.id, board.id));
 	return {
 		result,
-		written: { baseVersion: board.version, after: applied.after, ...(playbackChanged ? { playback } : {}) },
+		written: { baseVersion: board.version, after: applied.after, ...(ended ? { playback: null } : {}) },
 	};
 }
 

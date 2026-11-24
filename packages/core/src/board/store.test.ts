@@ -226,7 +226,7 @@ test("since reads only the changes, and the whole Board when they are unavailabl
 	assert.ok((await readBoard(db, { boardId, read: { since: 3, only: undefined } })).changes);
 });
 
-test("shared playback follows the clock and stops when its timeline changes", async () => {
+test("shared playback keeps playing through edits to its timeline and ends with it", async () => {
 	const { db, boardId } = await board({
 		items: { t: { type: "text", props: { text: "x" } } },
 		animations: { intro: { duration: 1000, markers: [{ at: 500, pause: true }], tracks: { fade: { target: "t", property: "opacity", keyframes: [{ at: 0, value: 0 }] } } } },
@@ -235,10 +235,12 @@ test("shared playback follows the clock and stops when its timeline changes", as
 	assert.equal(playing?.status, "playing");
 	const again = await applyBoardPlayback(db, { boardId, command: { commandId: "p1", type: "play", animationId: "intro" } });
 	assert.equal(again?.playbackId, playing?.playbackId);
-	const outcome = await applyBoard(db, { boardId, actorId, apply: { patch: { animations: { intro: { duration: 2000 } } } } });
-	assert.equal(outcome.written?.playback?.status, "stopped");
-	const stopped = await applyBoardPlayback(db, { boardId, command: { commandId: "p2", type: "stop" } });
-	assert.equal(stopped, null);
+	const edited = await applyBoard(db, { boardId, actorId, apply: { patch: { animations: { intro: { duration: 2000, tracks: { glow: { target: "t", property: "opacity", keyframes: [{ at: 0, value: 1 }] } } } } } } });
+	assert.equal(edited.written?.playback, undefined);
+	assert.deepEqual((await readBoard(db, { boardId })).playback, playing);
+	const removed = await applyBoard(db, { boardId, actorId, apply: { patch: { animations: { intro: null } }, cascade: true } });
+	assert.equal(removed.written?.playback, null);
+	assert.equal((await readBoard(db, { boardId })).playback, null);
 });
 
 test("snapshots capture the document", async () => {

@@ -1,8 +1,10 @@
 import {
+	APP_BROWSER_SESSION_PATH,
 	isCohubAppHostname,
 	isHostnameWithin,
 	parseCohubAppHostTemplate,
 } from "@cohub/protocol";
+import { serveAppBrowserSession } from "./app-browser-session.ts";
 import { proxyPortApp } from "./port-app-proxy.ts";
 import {
 	detailFailureResponse,
@@ -53,12 +55,17 @@ export function serveStandaloneHostRequest(input: {
 }): Promise<Response> | null {
 	const hostname = input.url.hostname;
 	const template = parseCohubAppHostTemplate(input.template);
-	if (template && isCohubAppHostname(hostname, template)) {
-		return serveStandaloneApp(input);
-	}
+	const managed = template && isCohubAppHostname(hostname, template);
 	const siteZones = parseSiteHostSuffixes(input.siteHostSuffixes);
-	if (siteZones.length === 0) return null;
-	if (siteZones.some((zone) => isHostnameWithin(hostname, zone))) return null;
+	if (
+		!managed &&
+		(!siteZones.length ||
+			siteZones.some((zone) => isHostnameWithin(hostname, zone)))
+	)
+		return null;
+	if (input.url.pathname.startsWith(APP_BROWSER_SESSION_PATH + "/"))
+		return serveAppBrowserSession(input);
+	if (managed) return serveStandaloneApp(input);
 	return serveCustomDomain({
 		...input,
 		portPolicy: {

@@ -4,7 +4,7 @@ import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
 import type { SpacePublicEndpoints } from "@cohub/protocol/ports";
 import type { SandboxSetupInfo } from "@cohub/protocol/sandbox";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
+import { SESSION_TURN_SIGNED_URL_LIMIT, SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
 import type {
   PublicFileCreateUploadInput,
   PublicFileCreateUploadResponse,
@@ -813,6 +813,7 @@ class SessionTurnsClient {
   readonly intermediate: {
     get: (turnId: string, messagesObjectKey?: string | null, options?: { fetch?: Fetch; signal?: AbortSignal }) => Promise<TurnIntermediateMessagesFile | null>;
     getToolCalls: (turnId: string, message: StoredIntermediateMessage, options?: { fetch?: Fetch; signal?: AbortSignal }) => Promise<MessageToolCallsFile | null>;
+    listToolCalls: (turnId: string, messages: readonly StoredIntermediateMessage[], options?: { fetch?: Fetch; signal?: AbortSignal }) => Promise<Map<string, MessageToolCallsFile>>;
   };
 
   constructor(
@@ -822,7 +823,8 @@ class SessionTurnsClient {
   ) {
     this.intermediate = {
       get: (turnId, messagesObjectKey, options) => this.getIntermediate(turnId, messagesObjectKey, options),
-      getToolCalls: (turnId, message, options) => this.getToolCalls(turnId, message, options),
+      getToolCalls: async (turnId, message, options) => (await this.listToolCalls(turnId, [message], options)).get(message.id) ?? null,
+      listToolCalls: (turnId, messages, options) => this.listToolCalls(turnId, messages, options),
     };
   }
 
@@ -837,22 +839,27 @@ class SessionTurnsClient {
     return fetchTurnObject<TurnIntermediateMessagesFile>(url, options?.fetch, options?.signal);
   }
 
-  private async getToolCalls(turnId: string, message: StoredIntermediateMessage, options?: { fetch?: Fetch; signal?: AbortSignal }) {
-    if (!message.toolCallsObjectKey) {
+  private async listToolCalls(turnId: string, messages: readonly StoredIntermediateMessage[], options?: { fetch?: Fetch; signal?: AbortSignal }) {
+    const files = new Map<string, MessageToolCallsFile>();
+    const archived: Array<{ id: string; key: string }> = [];
+    for (const message of messages) {
+      if (message.toolCallsObjectKey) {
+        archived.push({ id: message.id, key: message.toolCallsObjectKey });
+        continue;
+      }
       const toolCalls = extractToolCalls(message.content);
-      return toolCalls.length === 0 ? null : {
-        version: 1 as const,
-        spaceId: this.spaceId,
-        sessionId: this.sessionId,
-        turnId,
-        messageId: message.id,
-        toolCalls,
-      };
+      if (toolCalls.length) files.set(message.id, { version: 1, spaceId: this.spaceId, sessionId: this.sessionId, turnId, messageId: message.id, toolCalls });
     }
-    const { urls } = await this.signedUrls(turnId, [message.toolCallsObjectKey], options);
-    const url = urls[message.toolCallsObjectKey];
-    if (!url) throw new Error("Missing signed URL for tool calls");
-    return fetchTurnObject<MessageToolCallsFile>(url, options?.fetch, options?.signal);
+    for (let start = 0; start < archived.length; start += SESSION_TURN_SIGNED_URL_LIMIT) {
+      const batch = archived.slice(start, start + SESSION_TURN_SIGNED_URL_LIMIT);
+      const { urls } = await this.signedUrls(turnId, batch.map(({ key }) => key), options);
+      await Promise.all(batch.map(async ({ id, key }) => {
+        const url = urls[key];
+        if (!url) throw new Error("Missing signed URL for tool calls");
+        files.set(id, await fetchTurnObject<MessageToolCallsFile>(url, options?.fetch, options?.signal));
+      }));
+    }
+    return files;
   }
 
   listPaginated(

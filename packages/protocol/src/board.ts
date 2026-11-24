@@ -201,7 +201,7 @@ export type BoardHistoryPage = {
 };
 
 
-export type BoardPlaybackStatus = "playing" | "paused" | "stopped";
+export type BoardPlaybackStatus = "playing" | "paused";
 
 export type BoardPlaybackSnapshot = {
 	playbackId: string;

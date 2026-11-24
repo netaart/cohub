@@ -376,10 +376,10 @@ screen space as a level camera would place them.
 The camera a viewer sees is the editor's own, unless an animation or a script directs
 it: `stage.ts` merges the animation camera with `composeBoardScriptCamera` (scripts in
 play and read-only views only) and follows the result while the camera policy is
-`follow`. A pan takes control (`takeCameraControl`) until the host sets `follow` again;
-a script that lets go leaves the editor camera where it was directed. Pitch and bearing
-come only from a director or a link; the editor levels its camera when an editing tool is
-chosen or it takes control while editing. Camera exports merge the same two sources in
+`follow`. A pan takes control (`takeCameraControl`), keeping the directed angle, until
+the host sets `follow` again or a new playback (a new `playbackId`) starts; a script that
+lets go leaves the editor camera where it was directed. Pitch and bearing come only from
+a director or a link; the editor levels its camera when an editing tool is chosen. Camera exports merge the same two sources in
 `prepareBoardExport`.
 
 ## Scripts

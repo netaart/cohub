@@ -151,8 +151,15 @@ Playback is shared by every viewer, and a marker with `pause: true` holds until 
 ```bash
 cohub boards play <board> lecture --at 2.5s
 cohub boards next <board>        # also pause, resume, seek <time>, stop
-cohub boards watch <board>       # stream changes and playback
+cohub boards watch <board> --json  # stream changes and playback
+cohub boards get <board> --only playback
 ```
+
+- To reveal something still generating, hold at a `pause: true` marker and write it in
+  when it is ready, then `next`. Viewers load what follows the marker while it holds,
+  so put the reveal right after it rather than seeking past a long wait.
+- Every new `play` brings back viewers who took the camera; `seek` and `next` keep
+  their view.
 
 ## Check and export
 

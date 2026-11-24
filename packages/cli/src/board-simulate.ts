@@ -3,6 +3,7 @@ import type { BoardDocument, BoardScriptBrowserEvent, BoardScriptCamera } from "
 import type {
   BoardScriptHarness,
   BoardScriptHarnessBroadcast,
+  BoardScriptHarnessLog,
   BoardScriptHarnessMode,
   BoardScriptHarnessPeer,
   BoardScriptHarnessPointer,
@@ -211,6 +212,7 @@ export type BoardSimulationResult<Rendered = never> = {
   errors: Record<string, string>;
   presses: BoardSimulationPress[];
   broadcasts: BoardScriptHarnessBroadcast[];
+  logs: BoardScriptHarnessLog[];
   camera?: BoardScriptCamera;
   warnings: string[];
   shaders?: { count: number; compiled: boolean };
@@ -345,7 +347,7 @@ export async function runBoardSimulation<Rendered = never>(options: {
     const presses: BoardSimulationPress[] = [];
     if (early && Object.keys(early.errors).length) {
       return {
-        time: Math.round(current.time), commits: 0, changes: {}, errors: { ...initial.errors, ...early.errors }, presses, broadcasts: [],
+        time: Math.round(current.time), commits: 0, changes: {}, errors: { ...initial.errors, ...early.errors }, presses, broadcasts: [], logs: [...current.logs],
         warnings: ["Stopped before the steps: fix the shader errors first."],
         shaders: { count: initial.shaders.length, compiled: early.compiled },
       };
@@ -429,6 +431,7 @@ export async function runBoardSimulation<Rendered = never>(options: {
       errors,
       presses,
       broadcasts: [...current.broadcasts],
+      logs: [...current.logs],
       ...(current.camera ? { camera: current.camera } : {}),
       warnings,
       ...(shaders.length ? { shaders: { count: shaders.length, compiled } } : {}),

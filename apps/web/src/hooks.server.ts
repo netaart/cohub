@@ -45,5 +45,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 		response.headers.set("cache-control", PUBLIC_NOT_FOUND_CACHE_CONTROL);
 	}
 
+	// The storefront sign-in confirmation must never be framed.
+	if (event.route.id === "/(public)/app-auth")
+		response.headers.set("content-security-policy", "frame-ancestors 'none'");
+
 	return response;
 };

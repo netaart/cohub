@@ -19,7 +19,7 @@ export function recordAuthTrace(
     credentialPresent: boolean;
     principalType: AuthPrincipalType;
     outcome: AuthTraceOutcome;
-    failureCategory?: "invalid_user_token";
+    failureCategory?: "invalid_user_token" | "ended_app_session";
   },
 ) {
   if (!span) return;

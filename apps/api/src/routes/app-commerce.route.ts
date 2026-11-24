@@ -412,6 +412,8 @@ router.get(`/${resource}/:id/commerce/orders/:orderId`, async (c) => {
   const resolved = await getPublishedAppOrDeny(appId, user.uuid);
   if ("error" in resolved) return c.json({ message: resolved.error }, 404);
   if ((resolved.app.appVisibility ?? "public") === "space" && !(await hasPermission(user, "space.view", { spaceId: resolved.app.spaceId }))) return authzDenied(c);
+  const viewerUserId = resolveCommerceViewerUserId(getExecutionPrincipal(c), appId, user.uuid);
+  if (!viewerUserId) return authzDenied(c);
   try {
     const businessKey = await requireSpaceCommerceBusinessKey(resolved.app.spaceId);
     const sdk = await createSpaceCommerceSdk();
@@ -419,7 +421,7 @@ router.get(`/${resource}/:id/commerce/orders/:orderId`, async (c) => {
       business_key: businessKey,
       order_id: orderId,
     });
-    if (order.external_user_id !== user.uuid) return authzDenied(c);
+    if (order.external_user_id !== viewerUserId) return authzDenied(c);
     return c.json({ order: serializeOrder(order) });
   } catch (error) {
     const response = handleAppCommerceRouteError(c, error);

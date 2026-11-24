@@ -506,6 +506,8 @@ export function createAppBridgeCore(
 			? { surface: "background" as const }
 			: { surface: "page" as const });
 	const onStateChange = config.onStateChange;
+	// Tokens leaving Cohub through the broker end with the account's web sign-out.
+	const broker = authorizationContext.surface === "broker";
 
 	let appToken: string | null = null;
 	let tokenViewer: string | null | undefined;
@@ -831,7 +833,8 @@ export function createAppBridgeCore(
 			`${apiOrigin}/api/apps/${app.id}/session`,
 			{
 				method: "POST",
-				headers: { Authorization: `Bearer ${userToken}` },
+				headers: { Authorization: `Bearer ${userToken}`, ...(broker ? { "Content-Type": "application/json" } : {}) },
+				...(broker ? { body: JSON.stringify({ broker: true }) } : {}),
 			},
 		);
 		if (!response.ok) throw new Error("Failed to create app session.");
@@ -880,6 +883,7 @@ export function createAppBridgeCore(
 					...(options?.consent ? { consent: options.consent } : {}),
 					...(options?.offline ? { offline: true } : {}),
 					...(incremental ? { scopeMode: "extend" } : {}),
+					...(broker ? { broker: true } : {}),
 				}),
 				},
 			);
@@ -1402,6 +1406,15 @@ export function createAppBridgeCore(
 					context: isLegacyWork ? toLegacyWorkContext(context) : context,
 				}, true);
 				await resumeAuthorization();
+			}
+			if (data.type === "cohub.app.sign-in") {
+				if (!(await getAccessToken())) {
+					await config.requestSignIn(typeof location === "undefined" ? "/" : location.pathname + location.search + location.hash);
+				}
+				replyForRequest(data.requestId, { type: "cohub.app.sign-in.result", handled: true }, true);
+			}
+			if (data.type === "cohub.app.sign-out") {
+				replyForRequest(data.requestId, { type: "cohub.app.sign-out.result", handled: false }, true);
 			}
 			if (data.type === "cohub.app.token" || data.type === "cohub.work.token") {
 				const token = await ensureBaseToken(Boolean(data.forceRefresh));

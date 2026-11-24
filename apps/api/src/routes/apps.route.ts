@@ -1,4 +1,6 @@
 import { Hono, type Context } from "hono";
+import { createAppBrowserSessionRouter } from "./app-browser-session.route.js";
+import { holdAppBrowserEpoch } from "../lib/app-browser-epoch.js";
 import { bodyLimit } from "hono/body-limit";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { spaces, apps, appPromotions, appPromotionStatsHourly, appVersions, appViewerGrants, appViewStatsHourly, userProfiles } from "@cohub/db";
@@ -587,15 +589,6 @@ async function getPublishedAppPublicIdentity(app: typeof apps.$inferSelect) {
   };
 }
 
-async function getStandaloneAppDetail(app: typeof apps.$inferSelect) {
-  const content = await getPublishedAppContent(app);
-  return {
-    ...wrapAppRecord(wire, serializeApp(app)),
-    space: { id: app.spaceId },
-    content,
-  };
-}
-
 async function getPublicAppDetail(app: typeof apps.$inferSelect) {
   const identity = await getPublishedAppPublicIdentity(app);
   if (!identity) return null;
@@ -635,9 +628,7 @@ const publicVersionSummary = (
   createdAt: version.createdAt?.toISOString() ?? null,
 });
 
-router.get("/by-origin", async (c) => {
-  const requestedOrigin = c.req.query("origin")?.trim() || c.req.header("origin")?.trim();
-  const recordView = c.req.query("view") === "1";
+async function resolveBoundApp(requestedOrigin: string | undefined, fresh: boolean, expectedId?: string) {
   const hostTemplate = config.appStandaloneHostTemplate;
   const templateAppId = hostTemplate
     ? resolveCohubAppOrigin(requestedOrigin, hostTemplate)
@@ -647,23 +638,32 @@ router.get("/by-origin", async (c) => {
   const customDomain = templateAppId ? null : parseHttpsOriginHostname(requestedOrigin);
   // `fresh=1` (the auth broker) decides authorization, so it never trusts a cached answer.
   const binding = customDomain
-    ? await resolveCustomDomainBinding(customDomain, { fresh: c.req.query("fresh") === "1" })
+    ? await resolveCustomDomainBinding(customDomain, { fresh })
     : null;
   // A bound origin that cannot be served right now is still that App's origin;
   // the distinct code keeps the auth broker from treating it as unbound.
-  const unavailable = () => c.json({ message: "app origin is bound but unavailable", code: "app_origin_unavailable" }, 404);
-  if (binding && !binding.active) return unavailable();
-  const appId = templateAppId ?? binding?.appId ?? null;
-  if (!appId) return c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
+  if (binding && !binding.active) return { error: "app_origin_unavailable" } as const;
+  const appId = templateAppId ?? binding?.appId;
+  const error = binding ? "app_origin_unavailable" : "app_origin_not_found";
+  if (!appId || (expectedId && expectedId !== appId)) return { error } as const;
   const app = await getAppById(appId);
-  if (app?.status !== "published" || requiresSpaceAppAccess(app)) {
-    return binding ? unavailable() : c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
-  }
-  const detail = await getStandaloneAppDetail(app);
-  const contentKind = detail?.content?.kind;
-  if (contentKind !== "web" && !(binding && contentKind === "port")) {
-    return binding ? unavailable() : c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
-  }
+  if (app?.status !== "published" || requiresSpaceAppAccess(app)) return { error } as const;
+  const content = await getPublishedAppContent(app);
+  if (content?.kind !== "web" && !(binding && content?.kind === "port")) return { error } as const;
+  return { app, content, customDomain, error: null } as const;
+}
+
+router.route("/", createAppBrowserSessionRouter(async (origin, id) => (await resolveBoundApp(origin, true, id)).app ?? null));
+
+router.get("/by-origin", async (c) => {
+  const requestedOrigin = c.req.query("origin")?.trim() || c.req.header("origin")?.trim();
+  const recordView = c.req.query("view") === "1";
+  const resolved = await resolveBoundApp(requestedOrigin, c.req.query("fresh") === "1");
+  const unavailable = (code: "app_origin_not_found" | "app_origin_unavailable") =>
+    c.json({ message: code === "app_origin_unavailable" ? "app origin is bound but unavailable" : "app origin not found", code }, 404);
+  if (resolved.error) return unavailable(resolved.error);
+  const { app, content, customDomain } = resolved;
+  const detail = { ...wrapAppRecord(wire, serializeApp(app)), space: { id: app.spaceId }, content };
   if (recordView) recordResolvedAppView(c, app, "web");
   c.header("Cache-Control", recordView || customDomain ? "no-store" : PUBLIC_APP_HTTP_CACHE);
   c.header("Vary", "Origin");
@@ -1391,19 +1391,31 @@ router.post("/:id/session", async (c) => {
   const app = await getAppById(id);
   if (app?.status !== "published") return c.json({ message: "app not found" }, 404);
   if (requiresSpaceAppAccess(app) && !(await hasPermission(user, "space.view", { spaceId: app.spaceId }))) return authzDenied(c);
+  const body = await c.req.json().catch(() => null) as { broker?: unknown } | null;
   const token = createAppSessionToken({
     userUuid: user.uuid,
     appId: app.id,
     spaceId: app.spaceId,
     appScopes: app.appScopes as Permission[],
+    ...(await brokerTokenEpoch(user, body?.broker === true)),
   });
   return c.json({ token, expiresIn: APP_SESSION_TTL_SECONDS, ...wrapAppRecord(wire, serializeApp(app)) });
 });
 
-function buildAppAuthorizationPayload(
+/**
+ * Tokens the sign-in broker hands to a page outside Cohub end with the
+ * account's web sign-out on every device. Tokens for Apps embedded in Cohub
+ * follow that Cohub session instead.
+ */
+async function brokerTokenEpoch(user: AuthUser, broker: boolean) {
+  return broker ? { browserEpoch: await holdAppBrowserEpoch(user.uuid) } : {};
+}
+
+async function buildAppAuthorizationPayload(
   app: typeof apps.$inferSelect,
   user: AuthUser,
   grant: typeof appViewerGrants.$inferSelect,
+  broker: boolean,
 ) {
   const scopes = normalizePermissionScopes(grant.scopes as string[]);
   return {
@@ -1413,6 +1425,7 @@ function buildAppAuthorizationPayload(
       spaceId: app.spaceId,
       appScopes: app.appScopes as Permission[],
       viewerScopes: scopes,
+      ...(await brokerTokenEpoch(user, broker)),
     }),
     expiresIn: APP_SESSION_TTL_SECONDS,
     grant: {
@@ -1436,7 +1449,8 @@ router.post("/:id/authorize", async (c) => {
   if (requiresSpaceAppAccess(app) && !(await hasPermission(user, "space.view", { spaceId: app.spaceId }))) {
     return c.json({ message: "app is not accessible in this space", code: "app_not_accessible" }, 403);
   }
-  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown; scopeMode?: unknown; consent?: unknown; offline?: unknown } | null;
+  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown; scopeMode?: unknown; consent?: unknown; offline?: unknown; broker?: unknown } | null;
+  const broker = body?.broker === true;
   // Hosts send `consent` with `silent`, so an older API falls back to renew-only.
   const parsed = parseAppAuthorizeRequest(body, ALLOWED_VIEWER_SCOPES);
   if ("message" in parsed) return c.json(parsed, 400);
@@ -1474,7 +1488,7 @@ router.post("/:id/authorize", async (c) => {
     if (existing?.revokedAt) return c.json({ message: "grant was revoked; viewer consent is required again", code: "consent_required" }, 403);
     const renewed = await renewViewerGrant({ existing, requested, offline });
     if (renewed) {
-      return c.json(buildAppAuthorizationPayload(app, user, renewed));
+      return c.json(await buildAppAuthorizationPayload(app, user, renewed, broker));
     }
     if (offline || user.uuid !== app.userUuid) {
       return c.json({ message: "grant is no longer active; viewer consent is required again", code: "consent_required" }, 403);
@@ -1515,7 +1529,7 @@ router.post("/:id/authorize", async (c) => {
   }
   if (!grant) return c.json({ message: "failed to create grant" }, 500);
 
-  return c.json(buildAppAuthorizationPayload(app, user, grant));
+  return c.json(await buildAppAuthorizationPayload(app, user, grant, broker));
 });
 
 // ── Viewer grants: list + revoke (the viewer's own consents) ─────────────────
