@@ -1,7 +1,7 @@
 name: Android
 
 # dev: PRs and main build a dev APK, signed and published to the CDN when the
-# secrets are available. release: vX.Y.Z tags build the prod APK.
+# secrets are available. release: vX.Y.Z tags build the prod APK and Play bundle.
 on:
   pull_request:
     paths:
@@ -28,6 +28,11 @@ on:
       - 'packages/protocol/src/host-bridge.ts'
       - '.github/workflows/android.yml'
   workflow_dispatch:
+    inputs:
+      play_version:
+        description: Build a signed Play bundle with this X.Y.Z version (optional)
+        type: string
+        required: false
 
 concurrency:
   group: android-${{ github.ref }}
@@ -44,7 +49,7 @@ env:
 jobs:
   dev:
     name: Test, lint, assemble
-    if: github.ref_type != 'tag'
+    if: github.ref_type != 'tag' && !inputs.play_version
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -144,7 +149,7 @@ jobs:
         run: |
           # AGP 9 only creates unit tests for the tested build type (debug by
           # default), so :app:testReleaseUnitTest no longer exists.
-          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease --continue \
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:lintPlayRelease :app:bundlePlayRelease --continue \
             -PcohubEnv=dev \
             -PcohubVersionCode="$VERSION_CODE" \
             -PcohubVersionSuffix="-dev.${VERSION_CODE}+${SHA}"
@@ -280,8 +285,8 @@ jobs:
             }
 
   release:
-    name: Release APK
-    if: github.ref_type == 'tag'
+    name: Release APK and Play bundle
+    if: github.ref_type == 'tag' || inputs.play_version != ''
     runs-on: ubuntu-latest
     environment: android-release
     permissions:
@@ -334,14 +339,16 @@ jobs:
 
       - name: Resolve version
         id: version
+        env:
+          PLAY_VERSION: ${{ inputs.play_version }}
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] ||
-             (( BASH_REMATCH[2] >= 1000 || BASH_REMATCH[3] >= 1000 )); then
-            echo "::error::Expected a stable release tag like v1.23.0, got $GITHUB_REF_NAME"
+          name="${PLAY_VERSION:-${GITHUB_REF_NAME#v}}"
+          if [[ ! "$name" =~ ^(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]] ||
+             (( BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 1000 + BASH_REMATCH[3] > 2100000000 )); then
+            echo "::error::Invalid Android release version"
             exit 1
           fi
-          name="${GITHUB_REF_NAME#v}"
           {
             echo "name=$name"
             echo "code=$(( BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 1000 + BASH_REMATCH[3] ))"
@@ -370,7 +377,7 @@ jobs:
           # defaults to debug: there is no :app:testReleaseUnitTest anymore.
           # The tests are build-type agnostic, so run them once and lint the
           # variant we actually ship.
-          ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease \
+          ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:lintPlayRelease :app:bundlePlayRelease \
             -PcohubEnv=prod \
             -PcohubVersionName="$VERSION_NAME" \
             -PcohubVersionCode="$VERSION_CODE"
@@ -384,15 +391,69 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "dist/$FILE"
           (cd dist && sha256sum "$FILE" > "$FILE.sha256")
 
+      - name: Verify and collect Play bundle
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+          COHUB_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          manifest="app/build/intermediates/merged_manifests/playRelease/processPlayReleaseManifest/AndroidManifest.xml"
+          python3 - "$manifest" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          name = "{http://schemas.android.com/apk/res/android}name"
+          permissions = {item.get(name) for item in root.findall("uses-permission")}
+          services = {item.get(name) for item in root.findall("./application/service")}
+          prohibited = {
+              "MANAGE_EXTERNAL_STORAGE",
+              "FOREGROUND_SERVICE",
+              "FOREGROUND_SERVICE_SPECIAL_USE",
+              "FOREGROUND_SERVICE_MEDIA_PROJECTION",
+              "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+              "WRITE_SECURE_SETTINGS",
+              "BIND_ACCESSIBILITY_SERVICE",
+          }
+          assert permissions.isdisjoint({f"android.permission.{permission}" for permission in prohibited})
+          assert not any(service and service.endswith((".display.ControlService", ".runtime.RuntimeService")) for service in services)
+          PY
+          bundle="dist/cohub-$VERSION.aab"
+          cp app/build/outputs/bundle/playRelease/app-playRelease.aab "$bundle"
+          python3 - "$bundle" <<'PY'
+          import sys
+          from zipfile import ZipFile
+
+          with ZipFile(sys.argv[1]) as bundle:
+              assert not any(item.endswith(("/libcohub_sandboxd.so", "/libcohub_node.so", "/libcohub_cli.so", "/assets/cli.zip"))
+                             for item in bundle.namelist())
+          PY
+          jarsigner -verify -strict -keystore "$COHUB_ANDROID_KEYSTORE" -storepass:env COHUB_ANDROID_KEYSTORE_PASSWORD "$bundle" cohub
+          (cd dist && sha256sum "cohub-$VERSION.aab" > "cohub-$VERSION.aab.sha256")
+
+      - name: Upload manual Play bundle
+        if: inputs.play_version != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-${{ steps.version.outputs.name }}-play
+          path: |
+            apps/android/dist/*.aab
+            apps/android/dist/*.aab.sha256
+          if-no-files-found: error
+
       - name: Attach to GitHub Release
+        if: "!inputs.play_version"
         uses: softprops/action-gh-release@v3
         with:
           files: |
             apps/android/dist/${{ steps.version.outputs.file }}
             apps/android/dist/${{ steps.version.outputs.file }}.sha256
+            apps/android/dist/*.aab
+            apps/android/dist/*.aab.sha256
           fail_on_unmatched_files: true
 
       - name: Publish to CDN
+        if: "!inputs.play_version"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.PUBLIC_ASSET_OSS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_ASSET_OSS_SECRET_ACCESS_KEY }}

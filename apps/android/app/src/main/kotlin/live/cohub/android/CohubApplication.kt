@@ -47,10 +47,10 @@ class CohubApplication : Application() {
                 apiResource = BuildConfig.LOGTO_API_RESOURCE,
             ),
             onAccountChanged = { previous, current ->
-                runtime.accountChanged()
+                if (!BuildConfig.PLAY_BUILD) runtime.accountChanged()
                 if (previous is Account.SignedIn && current !is Account.SignedIn) {
                     display?.stop()
-                    runtime.stopAll()
+                    if (!BuildConfig.PLAY_BUILD) runtime.stopAll()
                     lastPage.clear()
                     LauncherShortcuts.clear(this)
                 }
@@ -69,7 +69,7 @@ class CohubApplication : Application() {
     val lastPage: LastPage by lazy { LastPage(this) }
 
     val display: DeviceDisplay? by lazy {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) DeviceDisplay(this, scope, PhoneControl(this, scope), ::stopTurn) else null
+        if (!BuildConfig.PLAY_BUILD && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) DeviceDisplay(this, scope, PhoneControl(this, scope), ::stopTurn) else null
     }
 
     private suspend fun stopTurn(activity: Activity) = withContext(Dispatchers.IO) {

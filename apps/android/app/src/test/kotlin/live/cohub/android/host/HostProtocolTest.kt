@@ -65,6 +65,17 @@ class HostProtocolTest {
     }
 
     @Test
+    fun `runtime remains available without display control`() {
+        val capabilities = HostCapabilities.advertised(runtime = true, files = true, display = false)
+        assertTrue(HostCapabilities.RUNTIME in capabilities)
+        assertTrue(HostCapabilities.WORKSPACE in capabilities)
+        assertTrue(HostCapabilities.WORKSPACE_FILES in capabilities)
+        assertFalse(HostCapabilities.DISPLAY in capabilities)
+        assertFalse(HostCapabilities.DISPLAY_PRESENTING in capabilities)
+        assertFalse(HostCapabilities.DISPLAY_FLOAT in capabilities)
+    }
+
+    @Test
     fun `workspace names match the protocol tables`() {
         assertEquals("workspace.call", HostProtocol.Methods.WORKSPACE_CALL)
         assertEquals("app.about", HostProtocol.Methods.APP_ABOUT)

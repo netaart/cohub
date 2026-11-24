@@ -89,6 +89,7 @@ android {
         buildConfigField("String", "LOGTO_API_RESOURCE", "\"$logtoApiResource\"")
         buildConfigField("String", "OAUTH_REDIRECT_URI", "\"$webOrigin$oauthRedirectPath\"")
         buildConfigField("boolean", "WEB_DEBUGGING", "${cohubEnv == "dev"}")
+        buildConfigField("boolean", "PLAY_BUILD", "false")
         buildConfigField("String", "CLI_VERSION", "\"$cliVersion\"")
         buildConfigField("String", "COMMIT", "\"$commit\"")
     }
@@ -121,6 +122,11 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = ciSigning
+        }
+        create("playRelease") {
+            initWith(getByName("release"))
+            matchingFallbacks += "release"
+            buildConfigField("boolean", "PLAY_BUILD", "true")
         }
     }
 
@@ -275,6 +281,7 @@ val stageCli = tasks.register<StageCli>("stageCli") {
 
 androidComponents {
     onVariants { variant ->
+        if (variant.buildType == "playRelease") return@onVariants
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildSandboxd, BuildSandboxd::outputDirectory)
         variant.sources.jniLibs?.addGeneratedSourceDirectory(stageCli, StageCli::jniLibs)
         variant.sources.assets?.addGeneratedSourceDirectory(stageCli, StageCli::assets)

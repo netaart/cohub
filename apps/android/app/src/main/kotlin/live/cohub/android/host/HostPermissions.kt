@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import live.cohub.android.BuildConfig
 
 class HostPermissions(
     private val activity: ComponentActivity,
@@ -51,7 +52,7 @@ class HostPermissions(
         "camera" -> askFor(Manifest.permission.CAMERA).let { runtimeState(Manifest.permission.CAMERA) }
         "notifications" -> requestNotifications()
         "files" -> if (requestStorage()) GRANTED else PROMPT
-        "background" -> requestUnrestricted()
+        "background" -> if (BuildConfig.PLAY_BUILD) throw IllegalArgumentException("This permission cannot be requested") else requestUnrestricted()
         else -> throw IllegalArgumentException("This permission cannot be requested")
     }
 
@@ -69,6 +70,7 @@ class HostPermissions(
     }
 
     fun openSettings(kind: String): Boolean {
+        if (BuildConfig.PLAY_BUILD && kind in setOf("files", "background", "control")) return false
         val intent = when (kind) {
             "files" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, packageUri)
