@@ -1142,6 +1142,11 @@ export class AppRuntimeApi {
     this.serverGrants = true;
     if (result.data.status === "granted") {
       if (typeof response.token !== "string" || !response.token) throw new AppRuntimeError("invalid_response", "Authorization token is missing.");
+      // An older host or API drops the flag; never report offline access it did not grant.
+      const offline = new Set(result.data.grant.offlineScopes ?? []);
+      if (parsed.data.offline && !parsed.data.scopes.every((scope) => offline.has(scope))) {
+        throw new AppRuntimeError("unsupported", "This host does not support offline access.");
+      }
       this.token = response.token;
       this.writeStoredToken(this.token);
     }

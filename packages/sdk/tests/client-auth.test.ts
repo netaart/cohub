@@ -89,3 +89,26 @@ test("public token access follows the existing execution-token fallback", async 
   t.after(() => client.dispose());
   assert.equal(await client.auth.getAccessToken(), "execution-token");
 });
+
+test("offline authorization fails clearly when the host does not confirm offline access", async (t) => {
+  let offlineScopes: string[] | undefined;
+  t.mock.method(ParentBridgeTransport.prototype, "request", async (message: Record<string, unknown>) => {
+    if (message.type === "cohub.app.context") return { context: { capabilities: { authorization: 2, serverGrants: true } } };
+    return {
+      token: "authorized-token",
+      result: {
+        status: "granted",
+        requestedTarget: { kind: "space", spaceId: "shop" },
+        target: { kind: "space", spaceId: "shop", name: null },
+        resolution: "requested",
+        grant: { id: "grant", spaceId: "shop", scopes: ["space.view"], expiresAt: null, ...(offlineScopes ? { offlineScopes } : {}) },
+      },
+    };
+  });
+  const client = new CohubClient({ app: { mode: "bridge" }, fetch: async () => Response.json({}) });
+  t.after(() => client.dispose());
+  const request = { target: { kind: "space" as const, spaceId: "shop" }, scopes: ["space.view" as const], offline: true };
+  await assert.rejects(client.auth.authorize(request), { code: "unsupported" });
+  offlineScopes = ["space.view"];
+  assert.equal((await client.auth.authorize(request)).status, "granted");
+});

@@ -1095,6 +1095,7 @@
 	"space_app_access_granted_by": "{name} 授权",
 	"space_app_access_revoke": "撤销长期访问",
 	"space_app_access_revoke_failed": "撤销长期访问失败。",
+	"space_app_access_load_failed": "无法加载应用长期访问。",
 	"space_no_invite_links": "暂无邀请链接。",
 	"space_create_invite": "创建邀请链接",
 	"space_valid_for": "有效时长",

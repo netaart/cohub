@@ -816,8 +816,12 @@ export function registerApps(program: Command): void {
           ...(opts.extend ? { scopeMode: "extend" as const } : {}),
           ...(opts.offline ? { offline: true } : {}),
         });
+        const offline = result.grant.offlineScopes ?? [];
+        if (opts.offline && !opts.scope.every((scope) => offline.includes(scope as Permission))) {
+          return error("Offline access was not granted", "The API does not support offline access yet");
+        }
         if (jsonRequested(opts)) return outJson(result);
-        ok(`Granted ${result.grant.scopes.join(", ")} on space ${result.grant.spaceId}`);
+        ok(`Granted ${result.grant.scopes.join(", ")} on space ${result.grant.spaceId}${offline.length ? ` (offline: ${offline.join(", ")})` : ""}`);
       } catch (e: unknown) {
         failSpaceTarget(e);
       }

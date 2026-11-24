@@ -1,11 +1,11 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { apps, appViewerGrants, userProfiles } from "@cohub/db";
-import { readOfflineScopes, withOfflineScopes } from "@cohub/core/apps";
+import { hasOfflineScopes, readOfflineScopes, withOfflineScopes } from "@cohub/core/apps";
 import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
 import { db } from "../../db/index.js";
 import { authzDenied, getExecutionPrincipal, requireValidId, useAccountPrincipal } from "../../lib/middleware.js";
-import { hasPermission } from "../../permissions.js";
+import { getRoleForSpaceUser, hasPermission } from "../../permissions.js";
 import { fallbackPublicUserProfile } from "../../user-profiles.js";
 
 /** Apps a member gave offline access to this Space: what they may do while nobody is present. */
@@ -14,7 +14,7 @@ const router = new Hono();
 const offlineGrants = (spaceId: string) => and(
   eq(appViewerGrants.spaceId, spaceId),
   isNull(appViewerGrants.revokedAt),
-  sql`jsonb_array_length(coalesce(${appViewerGrants.meta} -> 'offlineScopes', '[]'::jsonb)) > 0`,
+  hasOfflineScopes,
 );
 
 router.get("/", async (c) => {
@@ -23,7 +23,8 @@ router.get("/", async (c) => {
   if (user instanceof Response) return user;
   const spaceId = c.req.param("id");
   if (!spaceId || !requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
-  if (!(await hasPermission(user, "member.view", { spaceId }))) return authzDenied(c);
+  // Members see every App's access; anyone else sees only what they granted.
+  const member = (await getRoleForSpaceUser(spaceId, user.uuid)) !== null;
   const rows = await db
     .select({
       grantId: appViewerGrants.id,
@@ -36,7 +37,7 @@ router.get("/", async (c) => {
     .from(appViewerGrants)
     .innerJoin(apps, eq(apps.id, appViewerGrants.appId))
     .leftJoin(userProfiles, eq(userProfiles.userUuid, appViewerGrants.viewerUserUuid))
-    .where(offlineGrants(spaceId))
+    .where(and(offlineGrants(spaceId), member ? undefined : eq(appViewerGrants.viewerUserUuid, user.uuid)))
     .orderBy(desc(appViewerGrants.updatedAt));
   return c.json({
     items: rows.map((row) => ({

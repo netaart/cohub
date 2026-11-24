@@ -1095,6 +1095,7 @@
 	"space_app_access_granted_by": "Granted by {name}",
 	"space_app_access_revoke": "Revoke offline access",
 	"space_app_access_revoke_failed": "Couldn't revoke offline access.",
+	"space_app_access_load_failed": "Couldn't load offline App access.",
 	"space_no_invite_links": "No invite links.",
 	"space_create_invite": "Create invite link",
 	"space_valid_for": "Valid for",

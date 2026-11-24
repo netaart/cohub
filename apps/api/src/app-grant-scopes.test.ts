@@ -58,12 +58,11 @@ test("only an offline consent changes offline scopes, and revocation clears them
   assert.deepEqual(resolveOfflineGrantScopes({ requested: ["session.view"], offline: false, existing: { ...offline, revokedAt: new Date(500) } }), []);
 });
 
-test("offline consent renews silently after the interactive grant expires, until revoked", () => {
-  const expired = { scopes: ["file.view"], revokedAt: null, expiresAt: new Date(500), meta: null };
-  const offline = { ...expired, meta: { offlineScopes: ["file.view"] } };
-  assert.equal(canRenewGrantSilently({ existing: expired, requested: ["file.view"], offline: false, now: 1000 }), false);
-  assert.equal(canRenewGrantSilently({ existing: offline, requested: ["file.view"], offline: false, now: 1000 }), true);
+test("silent renewal never uses offline consent to restore or widen the interactive grant", () => {
+  const offline = { scopes: ["file.view"], revokedAt: null, expiresAt: new Date(2000), meta: { offlineScopes: ["file.view", "file.edit"] } };
   assert.equal(canRenewGrantSilently({ existing: offline, requested: ["file.view"], offline: true, now: 1000 }), true);
-  assert.equal(canRenewGrantSilently({ existing: { ...expired, expiresAt: new Date(2000) }, requested: ["file.view"], offline: true, now: 1000 }), false, "a 14-day grant cannot become offline silently");
+  assert.equal(canRenewGrantSilently({ existing: offline, requested: ["file.edit"], offline: false, now: 1000 }), false, "no widening");
+  assert.equal(canRenewGrantSilently({ existing: offline, requested: ["file.view"], offline: false, now: 3000 }), false, "no revival");
+  assert.equal(canRenewGrantSilently({ existing: { ...offline, meta: null }, requested: ["file.view"], offline: true, now: 1000 }), false, "a 14-day grant cannot become offline silently");
   assert.equal(canRenewGrantSilently({ existing: { ...offline, revokedAt: new Date(800) }, requested: ["file.view"], offline: false, now: 1000 }), false);
 });

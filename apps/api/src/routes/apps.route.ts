@@ -284,7 +284,7 @@ async function findUngrantableScopes(user: AuthUser, scopes: Permission[], space
   return spaceScopes.filter((scope) => !scopeListHasPermission(held, scope));
 }
 
-/** Extends a grant the viewer already consented to for these scopes; never revives. */
+/** Extends a live grant that still covers the requested scopes; never revives or widens. */
 async function renewViewerGrant(input: {
   existing: typeof appViewerGrants.$inferSelect | undefined;
   requested: Permission[];
@@ -294,12 +294,7 @@ async function renewViewerGrant(input: {
   if (!existing || !canRenewGrantSilently(input)) return null;
   const [renewed] = await db
     .update(appViewerGrants)
-    .set({
-      // Offline consent covers interactive use too, so it can restore expired scopes.
-      scopes: resolveAppGrantScopes({ requested: input.requested, mode: "extend", existing }),
-      expiresAt: new Date(Date.now() + APP_VIEWER_GRANT_TTL_SECONDS * 1000),
-      updatedAt: new Date(),
-    })
+    .set({ expiresAt: new Date(Date.now() + APP_VIEWER_GRANT_TTL_SECONDS * 1000), updatedAt: new Date() })
     .where(eq(appViewerGrants.id, existing.id))
     .returning();
   return renewed ?? null;
@@ -1446,6 +1441,10 @@ router.post("/:id/authorize", async (c) => {
   const parsed = parseAppAuthorizeRequest(body, ALLOWED_VIEWER_SCOPES);
   if ("message" in parsed) return c.json(parsed, 400);
   const { requested, extend, hostConsent, offline } = parsed;
+  // Lasting consent comes from the viewer's own sign-in, never from a delegated execution.
+  if (offline && getExecutionPrincipal(c)) {
+    return c.json({ message: "offline access needs the viewer's own sign-in", code: "account_required" }, 403);
+  }
   const targetSpaceId = typeof body?.spaceId === "string" && body.spaceId.trim() ? body.spaceId.trim() : app.spaceId;
   if (!requireValidId(targetSpaceId)) return c.json({ message: "space not found", code: "space_not_found" }, 404);
   // A caller-supplied target must exist — the per-scope permission gate skips
@@ -1477,7 +1476,7 @@ router.post("/:id/authorize", async (c) => {
     if (renewed) {
       return c.json(buildAppAuthorizationPayload(app, user, renewed));
     }
-    if (user.uuid !== app.userUuid) {
+    if (offline || user.uuid !== app.userUuid) {
       return c.json({ message: "grant is no longer active; viewer consent is required again", code: "consent_required" }, 403);
     }
   }

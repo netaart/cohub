@@ -15,6 +15,7 @@ const {
 
 const locale = $derived(getLocale());
 let items = $state<SpaceAppAccessItem[]>([]);
+let loadFailed = $state(false);
 let error = $state("");
 let revoking = $state<string | null>(null);
 let loadVersion = 0;
@@ -25,12 +26,12 @@ $effect(() => {
 
 async function load(target: string) {
 	const version = ++loadVersion;
+	loadFailed = false;
 	try {
 		const result = await sdk.space(target).appAccess.list();
 		if (version === loadVersion) items = result.items;
 	} catch {
-		// Members without access to this list see nothing extra.
-		if (version === loadVersion) items = [];
+		if (version === loadVersion) loadFailed = true;
 	}
 }
 
@@ -40,18 +41,20 @@ async function revoke(item: SpaceAppAccessItem) {
 	try {
 		await sdk.space(spaceId).appAccess.revoke(item.grantId);
 		items = items.filter((entry) => entry.grantId !== item.grantId);
-	} catch (err) {
-		error =
-			err instanceof Error && err.message
-				? err.message
-				: m.space_app_access_revoke_failed({}, { locale });
+	} catch {
+		error = m.space_app_access_revoke_failed({}, { locale });
 	} finally {
 		revoking = null;
 	}
 }
 </script>
 
-{#if items.length > 0}
+{#if loadFailed}
+	<div class="flex items-center justify-between gap-3 py-6 text-[12px] text-error-soft">
+		<span>{m.space_app_access_load_failed({}, { locale })}</span>
+		<button type="button" onclick={() => void load(spaceId)} class="inline-flex h-7 items-center rounded-[5px] px-2 text-[11px] text-text-secondary transition-colors hover:bg-bg-hover">{m.common_retry({}, { locale })}</button>
+	</div>
+{:else if items.length > 0}
 	<div class="py-6">
 		<h2 class="text-[13px] font-medium text-text-primary">
 			{m.space_app_access({}, { locale })}

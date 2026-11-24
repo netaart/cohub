@@ -489,8 +489,11 @@ await client.auth.authorize({
 - Members see it under **Space settings → Access** and with
   `cohub spaces app-access ls`. The granting member or a host can revoke it
   there; revoking the whole grant also ends it.
-- App sessions in the browser never use offline access, so other visitors of
-  your App cannot reach that Space through it.
+- Only Actions run in your App's home Space use it; browser App sessions and
+  Space Hooks running your Action elsewhere do not.
+- Any visitor can run your Actions. Before touching a granted Space, check
+  that `execution.viewerUserId` may act on it (for example, the member who
+  granted it).
 
 ## Surfaces and forms
 

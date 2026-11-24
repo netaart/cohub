@@ -70,9 +70,9 @@ export function resolveOfflineGrantScopes(input: {
 }
 
 /**
- * A silent refresh may renew a grant without a dialog when the viewer already
- * consented: a live grant covering the scopes, or offline access covering them
- * (consented until revoked). An offline request needs the latter.
+ * A silent refresh only renews what the viewer already consented to: a live
+ * grant covering the scopes, plus offline coverage for an offline request.
+ * Offline consent never restores or widens the interactive grant.
  */
 export function canRenewGrantSilently(input: {
   existing: StoredGrant | undefined;
@@ -82,10 +82,8 @@ export function canRenewGrantSilently(input: {
 }): boolean {
   const { existing } = input;
   if (!existing || existing.revokedAt) return false;
-  const covers = (held: Permission[]) => input.requested.every((scope) => scopeListHasPermission(held, scope));
-  if (covers(readOfflineScopes(existing.meta))) return true;
-  if (input.offline) return false;
-  const live = !existing.expiresAt || existing.expiresAt.getTime() > (input.now ?? Date.now());
+  if (existing.expiresAt && existing.expiresAt.getTime() <= (input.now ?? Date.now())) return false;
   // Implication-aware coverage: a full-access grant silently covers a later read-only request.
-  return live && covers(normalizePermissionScopes(existing.scopes));
+  const covers = (held: Permission[]) => input.requested.every((scope) => scopeListHasPermission(held, scope));
+  return covers(normalizePermissionScopes(existing.scopes)) && (!input.offline || covers(readOfflineScopes(existing.meta)));
 }

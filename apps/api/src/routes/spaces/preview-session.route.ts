@@ -10,7 +10,8 @@ router.post("/:id/preview-session", async (c) => {
   if (user instanceof Response) return user;
   const spaceId = c.req.param("id");
   if (!spaceId || !requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
-  if (!(await hasPermission(user, "file.view", { spaceId }))) return authzDenied(c);
+  // The preview token outlives this request, so offline App access cannot mint it.
+  if (!(await hasPermission(user, "file.view", { spaceId }, { offlineAccess: false }))) return authzDenied(c);
   const token = createPreviewSessionToken({ userUuid: user.uuid, spaceId });
   return c.json({ token, expiresIn: PREVIEW_SESSION_TTL_SECONDS });
 });

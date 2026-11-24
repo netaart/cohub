@@ -49,9 +49,9 @@ const authorize = (body: object) => {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ spaceId: shop, ...body }),
   });
 };
-const action = (id = appId, source = "app_action") => ({
-  uuid: "publisher",
-  execution: { spaceId: home, scopes: [], source, appId: id },
+const action = (id = appId, source = "app_action", spaceId = home, uuid = "publisher") => ({
+  uuid,
+  execution: { spaceId, scopes: [], source, appId: id },
 });
 const canRead = (subject = action()) => hasPermission(subject, "space.commerce.view", { spaceId: shop });
 
@@ -66,6 +66,8 @@ test("an App's Actions use offline access on another Space until it is revoked",
   assert.equal(await hasPermission(action(), "space.edit", { spaceId: shop }), false);
   assert.equal(await canRead(action(home)), false, "another App");
   assert.equal(await canRead(action(appId, "cron")), false, "not an App Action");
+  assert.equal(await canRead(action(appId, "app_action", shop)), false, "a Space Hook running the Action elsewhere");
+  assert.equal(await hasPermission(action(), "space.commerce.view", { spaceId: shop }, { offlineAccess: false }), false, "cannot mint lasting credentials");
 
   assert.equal((await authorize({ scopes: ["space.view"], scopeMode: "extend" })).status, 200);
   assert.equal(await canRead(), true, "a later interactive consent keeps offline access");
@@ -82,6 +84,12 @@ test("an App's Actions use offline access on another Space until it is revoked",
 
 test("offline access needs explicit consent for permissions the viewer holds", async () => {
   assert.equal((await authorize({ scopes: ["space.commerce.view"], offline: true, silent: true })).status, 403);
+  principal = { type: "execution", execution: { type: "execution", spaceId: shop, source: "agent", actorUserId: "owner", viewerUserId: null, appId: null, appVersionId: null, action: null, taskRunId: null, sessionId: null, turnId: null, scopes: [], expiresAt: Date.now() + 10000 } } as unknown as RequestPrincipal;
+  const delegated = await api.request(`/apps/${appId}/authorize`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ spaceId: shop, scopes: ["space.commerce.view"], offline: true }),
+  });
+  assert.equal(delegated.status, 403, "a delegated execution cannot consent for its actor");
   assert.equal((await authorize({ scopes: ["space.commerce.view"], offline: true, consent: "host" })).status, 400);
   principal = { type: "user", user: { uuid: "stranger" } };
   const denied = await api.request(`/apps/${appId}/authorize`, {
@@ -95,7 +103,7 @@ test("Space members see offline access and the granter or a host can end it", as
   assert.equal((await authorize({ scopes: ["space.commerce.view"], offline: true })).status, 200);
   const as = (uuid: string) => { principal = { type: "user", user: { uuid } }; };
   as("stranger");
-  assert.equal((await api.request(`/spaces/${shop}/app-access`)).status, 403);
+  assert.deepEqual(await (await api.request(`/spaces/${shop}/app-access`)).json(), { items: [] });
   as("owner");
   const { items } = await (await api.request(`/spaces/${shop}/app-access`)).json() as { items: Array<{ grantId: string; app: { id: string }; scopes: string[] }> };
   assert.deepEqual(items.map((item) => [item.app.id, item.scopes]), [[appId, ["space.commerce.view"]]]);
@@ -106,4 +114,19 @@ test("Space members see offline access and the granter or a host can end it", as
   assert.equal((await end()).status, 204);
   assert.equal(await canRead(), false);
   assert.equal((await end()).status, 404);
+});
+
+test("an App published by a builder uses a host's offline access on its own Space", async () => {
+  await client.exec(`INSERT INTO v2.space_members (space_id, user_id, role, created_by, updated_by) VALUES ('${shop}', 'builder', 'builder', 'owner', 'owner')`);
+  const shopApp = await insert(`INSERT INTO v2.apps (space_id, user_uuid, slug, status, target_type, target_ref)
+    VALUES ('${shop}', 'builder', 'shop-sync', 'published', 'directory', 'shop-sync') RETURNING id`);
+  const run = () => action(shopApp, "app_action", shop, "builder");
+  assert.equal(await canRead(run()), false);
+  principal = { type: "user", user: { uuid: "owner" } };
+  const granted = await api.request(`/apps/${shopApp}/authorize`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ spaceId: shop, scopes: ["space.commerce.view"], offline: true }),
+  });
+  assert.equal(granted.status, 200);
+  assert.equal(await canRead(run()), true);
 });

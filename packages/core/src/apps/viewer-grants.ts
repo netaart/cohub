@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { apps, appViewerGrants } from "@cohub/db";
 import {
@@ -126,21 +126,23 @@ export function withOfflineScopes(meta: unknown, scopes: readonly Permission[]):
 }
 
 /**
- * What a published App's Actions may do on a Space through offline access:
- * the union over its unrevoked grants there, each capped by what its viewer
- * can still do on that Space right now.
+ * Unrevoked offline grants a published App's Actions may draw on for a Space.
+ * Only Action runs in the App's home Space qualify: a Space Hook elsewhere runs
+ * the same Action in someone else's sandbox and environment. Callers cap each
+ * row by what its viewer can do on the resource at use time.
  */
-export async function resolveOfflineAppScopesAtUseTime(input: {
+export async function listOfflineAppGrants(input: {
   db: DrizzlePermissionDb;
   appId: string;
   spaceId: string;
-}): Promise<Permission[]> {
+  executionSpaceId: string;
+}): Promise<{ viewerUserUuid: string; scopes: Permission[] }[]> {
   const [app] = await input.db
     .select({ status: apps.status, spaceId: apps.spaceId, appScopes: apps.appScopes })
     .from(apps)
     .where(eq(apps.id, input.appId))
     .limit(1);
-  if (!delegatedAppAuthorization(app, input.spaceId).active) return [];
+  if (!app || app.spaceId !== input.executionSpaceId || !delegatedAppAuthorization(app, input.spaceId).active) return [];
   const rows = await input.db
     .select({ viewerUserUuid: appViewerGrants.viewerUserUuid, meta: appViewerGrants.meta })
     .from(appViewerGrants)
@@ -148,14 +150,12 @@ export async function resolveOfflineAppScopesAtUseTime(input: {
       eq(appViewerGrants.appId, input.appId),
       eq(appViewerGrants.spaceId, input.spaceId),
       isNull(appViewerGrants.revokedAt),
+      hasOfflineScopes,
     ));
-  const store = createDrizzlePermissionStore(input.db);
-  const granted: Permission[] = [];
-  for (const row of rows) {
-    const held = readOfflineScopes(row.meta);
-    if (held.length === 0) continue;
-    const access = await resolvePermissionAccess({ store, user: { uuid: row.viewerUserUuid }, context: { spaceId: input.spaceId } });
-    granted.push(...intersectPermissionScopes(held, access.permissions));
-  }
-  return normalizePermissionScopes(granted);
+  return rows
+    .map((row) => ({ viewerUserUuid: row.viewerUserUuid, scopes: readOfflineScopes(row.meta) }))
+    .filter((row) => row.scopes.length > 0);
 }
+
+/** SQL filter for grant rows that carry offline scopes. */
+export const hasOfflineScopes = sql`jsonb_array_length(coalesce(${appViewerGrants.meta} -> 'offlineScopes', '[]'::jsonb)) > 0`;
