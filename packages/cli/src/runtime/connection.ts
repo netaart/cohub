@@ -44,7 +44,12 @@ export type Execution = {
   detached?: boolean;
   /** Only replays a saved result for its connection; it does no local work and ends with that connection. */
   recovery?: boolean;
+  /** Streams the rest of a running Turn on the connection that resumed it. */
+  attach?: (deliver: Deliver) => void;
 };
+
+/** Sends one event of a request if the transport can take it now. */
+type Deliver = (requestId: string, event: RuntimeExecutionEvent) => boolean;
 
 export type RuntimeConnectionOptions = {
   spaceId: string;
@@ -303,6 +308,18 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
     socket.send(data);
   };
   const closeTransport = () => socket.close();
+  // Streaming is best-effort. A detached transport must not cancel local model or tool work;
+  // durable commits and the final result are replayed after reconnect.
+  const deliver: Deliver = (requestId, event) => {
+    if (disconnected.signal.aborted || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > RUNTIME_MAX_FRAME_BYTES) return false;
+    try {
+      send({ type: "runtime.event", requestId, event });
+      return true;
+    } catch (error) {
+      if (!disconnected.signal.aborted && socket.readyState === WebSocket.OPEN) throw error;
+      return false;
+    }
+  };
   /** What the Gateway holds for this connection. */
   let registered: RuntimeCapabilities | null = null;
   let capabilitiesFrame = false;
@@ -668,6 +685,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
       if (previous) {
         if (previous.sessionId !== frame.input.sessionId || previous.turnId !== frame.input.turnId || previous.harness !== frame.input.harness) throw new Error("Runtime execution identity changed");
         log("info", "runtime.execution_resumed", { detached: previous.detached === true, settled: Boolean(previous.result) }, executionContext(connectionId, frame.input));
+        previous.attach?.(deliver);
         await previous.promise;
         await replaySaved(frame.requestId, frame.input, context, frame.requestId);
         return;
@@ -732,16 +750,33 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
       };
       active.set(frame.requestId, execution);
       const durableEvents: RuntimeExecutionEvent[] = [];
+      let live = deliver;
+      let resumed = false;
+      let committed = 0;
+      // Messages this transport holds from their start or a full replacement; a delta of any other would leave a gap.
+      let synced = new Set<number>();
+      /** Commits leave in order; one the transport could not take goes out with the next event. */
+      const flush = () => {
+        for (let event = durableEvents[committed]; event; event = durableEvents[committed]) {
+          // Counted before sending: a commit the transport rejects is not offered to it again.
+          committed += 1;
+          if (!live(frame.requestId, event)) { committed -= 1; return; }
+        }
+      };
       const emit = (value: RuntimeExecutionEvent) => {
         if (value.type === "message.commit") durableEvents.push(value);
-        // Streaming is best-effort. A detached transport must not cancel local model or tool work;
-        // durable commits and the final result are replayed after reconnect.
-        if (disconnected.signal.aborted || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > RUNTIME_MAX_FRAME_BYTES) return;
-        try {
-          send({ type: "runtime.event", requestId: frame.requestId, event: value });
-        } catch (error) {
-          if (!disconnected.signal.aborted && socket.readyState === WebSocket.OPEN) throw error;
-        }
+        // The connection that resumed a Turn previews it; the result is replayed in full once it ends.
+        if (resumed && (value.type === "turn.end" || value.type === "turn.error")) return;
+        flush();
+        if (value.type === "message.commit") return;
+        if (value.type === "text.delta" && !synced.has(value.ordinal)) return;
+        if (value.type === "content.replace" && !synced.has(value.ordinal) && !live(frame.requestId, { type: "message.start", ordinal: value.ordinal })) return;
+        if (live(frame.requestId, value) && (value.type === "message.start" || value.type === "content.replace")) synced.add(value.ordinal);
+      };
+      execution.attach = (next) => {
+        if (execution.result) return;
+        live = next; resumed = true; synced = new Set();
+        flush();
       };
       execution.promise = (async () => {
         try {

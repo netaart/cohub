@@ -88,6 +88,33 @@ for (const retryPersistence of [false, true]) test(`terminal events are serializ
   } finally { await close(server); }
 });
 
+test("Agent reconnect budget covers one outage, not every drop of a long Turn", { timeout: 10_000 }, async () => {
+  const { server, url } = await listen();
+  const connectionId = crypto.randomUUID();
+  const starts: boolean[] = [];
+  server.on("connection", (socket) => {
+    const send = (frame: unknown) => socket.send(JSON.stringify(frame));
+    send({ type: "runtime.ready", connectionId });
+    socket.on("message", (raw) => {
+      const frame = JSON.parse(raw.toString());
+      if (frame.type === "turn.start") {
+        starts.push(frame.resumeOnly === true);
+        // Two connections outlive the budget before dropping; the third ends the Turn.
+        if (starts.length < 3) setTimeout(() => socket.terminate(), 150);
+        else send({ type: "runtime.event", requestId: frame.requestId, event: { type: "turn.end", resume: "new", message: { ordinal: 0, content: [], stopReason: "stop" } } });
+      }
+      if (frame.type === "turn.ack") send({ type: "runtime.event", requestId: frame.requestId, event: { type: "turn.acknowledged" } });
+    });
+  });
+  const turn = input();
+  try {
+    await exchangeRuntimeTurn({ input: turn, signal: AbortSignal.timeout(8000), endpoint: async () => `${url}?connection=${connectionId}`, reconnectMs: 100,
+      event: async (event, send, requestId) => { if (event.type === "turn.end") send({ type: "turn.ack", requestId, turnId: turn.turnId, revision: "completed" }); },
+    });
+    assert.deepEqual(starts, [false, true, true]);
+  } finally { await close(server); }
+});
+
 test("Agent refuses a ready frame for a different registered connection before dispatch", { timeout: 5000 }, async () => {
   const { server, url } = await listen();
   let dispatched = 0;

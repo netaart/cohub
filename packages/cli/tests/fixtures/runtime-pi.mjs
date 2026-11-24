@@ -47,6 +47,15 @@ async function runTurn(content) {
   const answer = history.includes("historical") ? "history retained" : "new session";
   await emit("message_update", { assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "你好 " } });
   await emit("message_update", { assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: answer } });
+  if (text.includes("tool step")) {
+    // An intermediate reply the Runtime commits while the Turn goes on.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const step = { role: "assistant", content: [{ type: "text", text: "step" }], provider: "fixture", model: "test", stopReason: "toolUse" };
+    append({ type: "message", message: step });
+    await emit("message_end", { message: step });
+    await emit("turn_end", { message: step, toolResults: [] });
+    await emit("message_start", { message: { role: "assistant" } });
+  }
   await new Promise((resolve) => {
     let done = false;
     const finish = async (stopReason) => {

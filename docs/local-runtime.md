@@ -693,6 +693,11 @@ receipt is released. A receipt whose result was lost is rebuilt from the native 
 Turn's Cohub marker; an unfinished or interrupted Turn is never guessed complete. Only Turns the
 server still considers active require explicit confirmation. Native files are never deleted.
 
+A dropped connection does not stop a Turn. The Agent resumes it for up to 60 seconds after each
+drop; on the new connection the Runtime hands over the messages committed meanwhile and streams
+again, and the Turn's end still replays its whole result. Only an outage that outlasts those 60
+seconds becomes uncertain.
+
 Transport uncertainty is surfaced immediately on the active Session. Reconnect and
 bounded queue retries can still recover a saved result; an explicit missing-result response
 keeps the Session in attention until Runtime reconnects or a manager confirms it stopped.

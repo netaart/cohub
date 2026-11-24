@@ -26,12 +26,14 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
   const handshakeMs = options.handshakeMs ?? 15_000;
   const heartbeatMs = options.heartbeatMs ?? 10_000;
   const ackMs = options.ackMs ?? 15_000;
+  const reconnectMs = options.reconnectMs ?? 60_000;
   let started = false;
   let completed = false;
   let disconnectedAt: number | null = null;
   let finalError: unknown = null;
   for (;;) {
     let acknowledged = false;
+    let attachedAt = 0;
     let socket: WebSocket | null = null;
     let chain = Promise.resolve();
     let settled = false;
@@ -93,7 +95,10 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
                 const { spaceId, sessionId, turnId, harness } = options.input;
                 send({ type: "turn.recover", requestId, execution: { spaceId, sessionId, turnId, harness }, traceContext: options.input.traceContext });
                 phaseTimer = setTimeout(() => finish(new RuntimeExecutionUncertainError("Runtime result is not available yet")), ackMs);
-              } else send({ type: "turn.start", requestId, resumeOnly: started, input: options.input });
+              } else {
+                send({ type: "turn.start", requestId, resumeOnly: started, input: options.input });
+                attachedAt = Date.now();
+              }
               started = true;
               if (options.signal.aborted) onAbort();
               return;
@@ -127,8 +132,10 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
         throw finalError;
       }
       if (!started) throw error;
+      // The budget covers one outage: a connection that outlived it ended the previous one.
+      if (attachedAt && Date.now() - attachedAt >= reconnectMs) disconnectedAt = null;
       disconnectedAt ??= Date.now();
-      if (Date.now() - disconnectedAt >= (options.reconnectMs ?? 60_000)) {
+      if (Date.now() - disconnectedAt >= reconnectMs) {
         if (completed) return; // Durable completion must not be downgraded because an ack was lost.
         throw new RuntimeExecutionUncertainError("Runtime disconnected; original execution is not replayed and requires reconciliation", { cause: error });
       }

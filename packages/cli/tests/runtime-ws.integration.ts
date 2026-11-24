@@ -63,6 +63,7 @@ for (const mode of ["resume", "recover"] as const) test(`Runtime reconnects duri
   let connections = 0;
   let detachedAt = 0;
   let reconnectedAt = 0;
+  const resumed: string[] = [];
   let rejectFailure: (error: unknown) => void = () => {};
   const completed = new Promise<void>((resolve, reject) => {
     rejectFailure = reject;
@@ -74,7 +75,7 @@ for (const mode of ["resume", "recover"] as const) test(`Runtime reconnects duri
           const frame = JSON.parse(raw.toString());
           const input = {
             spaceId, sessionId, turnId, userMessageId: turnId, harness: "pi", accessMode: "full_access",
-            messages: [{ turnId, userMessageId: turnId, userId: "author", content: [{ type: "text", text: "slow transport test" }] }],
+            messages: [{ turnId, userMessageId: turnId, userId: "author", content: [{ type: "text", text: mode === "resume" ? "slow transport test with a tool step" : "slow transport test" }] }],
             context: { complete: true, revision: "initial", throughTurnId: null, messages: [] },
           };
           if (frame.type === "runtime.hello") {
@@ -82,7 +83,8 @@ for (const mode of ["resume", "recover"] as const) test(`Runtime reconnects duri
             if (connection === 1) send({ type: "turn.start", requestId: turnId, input });
             else {
               reconnectedAt ||= Date.now();
-              if (mode === "resume") send({ type: "turn.start", requestId: turnId, resumeOnly: true, input });
+              // Resumed only after the Turn committed a message nobody was connected to receive.
+              if (mode === "resume") setTimeout(() => send({ type: "turn.start", requestId: turnId, resumeOnly: true, input }), 600);
             }
             return;
           }
@@ -98,6 +100,7 @@ for (const mode of ["resume", "recover"] as const) test(`Runtime reconnects duri
           }
           if (connection > 1 && frame.type === "runtime.event" && frame.requestId === (mode === "recover" ? recoverRequestId : turnId)) {
             if (frame.event.type === "turn.error") throw new Error(frame.event.message);
+            resumed.push(frame.event.type);
             if (frame.event.type === "turn.end") {
               assert.equal(frame.event.message.stopReason, "stop", "transport loss must not abort local execution");
               assert(frame.event.message.content.some((block: { type: string; text?: string }) => block.type === "text" && block.text?.includes("new session")));
@@ -115,6 +118,8 @@ for (const mode of ["resume", "recover"] as const) test(`Runtime reconnects duri
     await completed;
     assert(connections >= 2);
     assert(reconnectedAt - detachedAt < 1500, "reconnect must not wait for the detached execution");
+    // A resumed Turn hands over what it committed while detached and streams again; its end still replays in full.
+    if (mode === "resume") assert.deepEqual(resumed, ["message.commit", "message.start", "content.replace", "content.replace", "message.commit", "turn.end", "turn.acknowledged"]);
   } finally {
     controller.abort(); await running; await runtime.close();
     for (const socket of server.clients) socket.terminate();
