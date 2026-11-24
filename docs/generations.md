@@ -56,14 +56,6 @@ type GenerationTaskResult = {
 
 `meta` is model-owned input and is validated against the model declaration. Cohub request provenance and task context are stored separately and are never forwarded to generation providers.
 
-For self-hosted `minimax-h3` and `minimax-h3-unrestricted`, use the request-level boolean `meta.context_ir_enabled` to override the server's prompt rewriting default. For example:
-
-```bash
-cohub generate "A quiet street in the rain" --model minimax-h3 --meta '{"context_ir_enabled":false}'
-```
-
-Pass `false` to keep the original prompt, `true` to enable rewriting, or omit the field to use the server default. Requests with reference video or audio still skip rewriting. Official MiniMax routes use their own prompt handling. To expose and validate the flag in a custom H3 model declaration, declare `context_ir_enabled` under `meta.fields` as `type: boolean`, `optional: true`, with no default.
-
 ## Billing
 
 Generation requests share the platform credit balance with LLM turns.
