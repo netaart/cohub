@@ -1,7 +1,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { apps, appViewerGrants, userProfiles } from "@cohub/db";
-import { hasOfflineScopes, readOfflineScopes, withOfflineScopes } from "@cohub/core/apps";
+import { appTitleFromMeta, hasOfflineScopes, readOfflineScopes, withOfflineScopes } from "@cohub/core/apps";
 import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
 import { db } from "../../db/index.js";
 import { authzDenied, getExecutionPrincipal, requireValidId, useAccountPrincipal } from "../../lib/middleware.js";
@@ -42,7 +42,7 @@ router.get("/", async (c) => {
   return c.json({
     items: rows.map((row) => ({
       grantId: row.grantId,
-      app: { id: row.app.id, slug: row.app.slug, title: appTitle(row.app.meta) },
+      app: { id: row.app.id, slug: row.app.slug, title: appTitleFromMeta(row.app.meta, row.app.slug) },
       grantedBy: row.profile?.userUuid ? row.profile : fallbackPublicUserProfile(row.viewerUserUuid),
       scopes: readOfflineScopes(row.meta),
       updatedAt: row.updatedAt?.toISOString() ?? null,
@@ -70,12 +70,5 @@ router.delete("/:grantId", async (c) => {
     .where(eq(appViewerGrants.id, grant.id));
   return c.body(null, 204);
 });
-
-function appTitle(meta: unknown): string | null {
-  if (!meta || typeof meta !== "object") return null;
-  const { title, name } = meta as { title?: unknown; name?: unknown };
-  const value = typeof title === "string" && title.trim() ? title : typeof name === "string" ? name : "";
-  return value.trim() || null;
-}
 
 export default router;

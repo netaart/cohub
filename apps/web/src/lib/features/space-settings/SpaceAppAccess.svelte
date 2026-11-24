@@ -65,7 +65,7 @@ async function revoke(item: SpaceAppAccessItem) {
 		</p>
 		<div class="mt-3 divide-y divide-border-subtle rounded-md border border-border-subtle">
 			{#each items as item (item.grantId)}
-				{@const name = item.app.title || item.app.slug}
+				{@const name = item.app.title}
 				<div data-density="compact" class="flex h-[var(--list-row-height)] items-center gap-[var(--list-row-gap)] px-3">
 					<ListRowText title={name} tooltip={name}>
 						{#snippet subtitle()}

@@ -415,7 +415,7 @@ export async function isSpaceMember(user: AuthUserProfile | null, spaceId: strin
  * member, or one offline grant covers it and its granter passes both itself.
  */
 export async function hasMemberPermission(user: AuthUserProfile | null, permission: Permission, spaceId: string): Promise<boolean> {
-  if (await hasPermission(user, permission, { spaceId }, { offlineAccess: false }) && await isSpaceMember(user, spaceId)) return true;
+  if (await hasPermission(user, permission, { spaceId }) && await isSpaceMember(user, spaceId)) return true;
   for (const grantor of await offlineGrantorsFor(getUserExecution(user), permission, spaceId)) {
     const member = { uuid: grantor };
     if (await hasPermission(member, permission, { spaceId }) && await isSpaceMember(member, spaceId)) return true;

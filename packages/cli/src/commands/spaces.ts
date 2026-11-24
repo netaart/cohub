@@ -2394,7 +2394,7 @@ function registerAppAccess(spacesCmd: Command): void {
         }
         table(result.items.map((item) => ({
           grantId: item.grantId,
-          app: item.app.title || item.app.slug,
+          app: item.app.title,
           grantedBy: item.grantedBy.displayName,
           scopes: item.scopes.join(", "),
         })), [

@@ -1810,7 +1810,7 @@ export type SpaceAccessPolicy = {
 /** An App a member gave offline access: its Actions may use these scopes on the Space while nobody is present. */
 export type SpaceAppAccessItem = {
   grantId: string;
-  app: { id: string; slug: string; title: string | null };
+  app: { id: string; slug: string; title: string };
   grantedBy: PublicUserProfile;
   scopes: Permission[];
   updatedAt: string | null;

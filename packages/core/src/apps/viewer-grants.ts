@@ -138,11 +138,11 @@ export async function listOfflineAppGrants(input: {
   executionSpaceId: string;
 }): Promise<{ viewerUserUuid: string; scopes: Permission[] }[]> {
   const [app] = await input.db
-    .select({ status: apps.status, spaceId: apps.spaceId, appScopes: apps.appScopes })
+    .select({ status: apps.status, spaceId: apps.spaceId })
     .from(apps)
     .where(eq(apps.id, input.appId))
     .limit(1);
-  if (!app || app.spaceId !== input.executionSpaceId || !delegatedAppAuthorization(app, input.spaceId).active) return [];
+  if (app?.status !== "published" || app.spaceId !== input.executionSpaceId) return [];
   const rows = await input.db
     .select({ viewerUserUuid: appViewerGrants.viewerUserUuid, meta: appViewerGrants.meta })
     .from(appViewerGrants)
@@ -152,9 +152,7 @@ export async function listOfflineAppGrants(input: {
       isNull(appViewerGrants.revokedAt),
       hasOfflineScopes,
     ));
-  return rows
-    .map((row) => ({ viewerUserUuid: row.viewerUserUuid, scopes: readOfflineScopes(row.meta) }))
-    .filter((row) => row.scopes.length > 0);
+  return rows.map((row) => ({ viewerUserUuid: row.viewerUserUuid, scopes: readOfflineScopes(row.meta) }));
 }
 
 /** SQL filter for grant rows that carry offline scopes. */
