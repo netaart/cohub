@@ -8,7 +8,7 @@ import { parseSessionArchiveFilter } from "@cohub/core/labels";
 import type { SessionArchiveFilter } from "@cohub/protocol/model";
 import { config } from "../config.js";
 import { requireValidId, useAuth, useAccountPrincipal, authzDenied, getExecutionPrincipal } from "../lib/middleware.js";
-import { revokeAppBrowserSessions } from "./app-browser-session.route.js";
+import { revokeAppBrowserSessions } from "../lib/app-browser-epoch.js";
 import { ensureCurrentUserProfile, resolveCurrentUserEmail, updateCurrentUserProfile, LogtoUserRequiredError, UsernameChangeTooSoonError, UsernameClearError, UsernameConflictError, UsernameReservedError, validateUsername } from "../user-profiles.js";
 import {
   filterSessionsByPermission,

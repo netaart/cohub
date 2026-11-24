@@ -1,4 +1,4 @@
-import { isUuid } from "@cohub/protocol/identifiers";
+import { isUuidOrShortUuid } from "@cohub/protocol/identifiers";
 
 function isAuthEndpointPath(url: URL) {
 	if (url.pathname === "/app-auth") {
@@ -9,7 +9,7 @@ function isAuthEndpointPath(url: URL) {
 			["localhost", "127.0.0.1"].includes(target.hostname);
 		// The broker revalidates the binding before issuing credentials.
 		return (
-			!isUuid(url.searchParams.get("app")) ||
+			!isUuidOrShortUuid(url.searchParams.get("app")) ||
 			!target ||
 			(target.protocol !== "https:" && !local) ||
 			target.origin !== origin

@@ -27,6 +27,8 @@ export type AppSessionPayload = {
   scopes: Permission[];
   /** @deprecated Legacy single-grant id; grants are resolved server-side now. */
   appViewerGrantId?: string;
+  /** Set on storefront tokens; they die with the account's storefront sign-ins. */
+  browserEpoch?: string;
   iat: number;
   exp: number;
 };
@@ -56,6 +58,7 @@ export function createAppSessionToken(input: {
   /** Display-only snapshot of the scopes consented by this mint's authorize call. */
   viewerScopes?: Permission[];
   ttlSeconds?: number;
+  browserEpoch?: string;
   /** Injectable for tests; production uses the configured APP_ENCRYPTION_KEY. */
   secret?: string;
 }) {
@@ -72,6 +75,7 @@ export function createAppSessionToken(input: {
     workScopes: appScopes,
     viewerScopes,
     scopes: normalizePermissionScopes([...appScopes, ...viewerScopes]),
+    ...(input.browserEpoch === undefined ? {} : { browserEpoch: input.browserEpoch }),
     iat: now,
     exp: now + (input.ttlSeconds ?? APP_SESSION_TTL_SECONDS),
   };

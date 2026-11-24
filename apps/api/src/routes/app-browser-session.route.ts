@@ -6,6 +6,7 @@ import type { Permission } from "@cohub/core/permissions";
 import { APP_SESSION_TTL_SECONDS, createAppSessionToken } from "../app-sessions.js";
 import { redisCommandClient } from "../redis.js";
 import { getExecutionPrincipal, useAccountPrincipal } from "../lib/middleware.js";
+import { currentAppBrowserEpoch as currentEpoch, retainAppBrowserEpoch } from "../lib/app-browser-epoch.js";
 
 const secret = z.string().regex(APP_BROWSER_SECRET_PATTERN);
 const target = z.object({ origin: z.string().max(255) });
@@ -17,18 +18,8 @@ const randomSecret = () => randomBytes(32).toString("base64url");
 const sessionKey = (appId: string, origin: string, handle: string) => `app:browser:${appId}:${origin}:${hash(handle)}`;
 const codeKey = (appId: string, origin: string, challenge: string, code: string) =>
   `app:browser-code:${appId}:${origin}:${challenge}:${hash(code)}`;
-const epochKey = (userUuid: string) => `app:browser-epoch:${userUuid}`;
 
 type StoredSession = { userUuid: string; epoch: string };
-
-/** Ends every storefront session of this account, on every device. */
-export async function revokeAppBrowserSessions(userUuid: string) {
-  await redisCommandClient.set(epochKey(userUuid), randomSecret(), "EX", APP_BROWSER_SESSION_SECONDS);
-}
-
-async function currentEpoch(userUuid: string) {
-  return await redisCommandClient.get(epochKey(userUuid)) ?? "";
-}
 
 type BoundApp = { id: string; spaceId: string; appScopes: string[] };
 
@@ -68,8 +59,7 @@ export function createAppBrowserSessionRouter(resolveApp: (origin: string, id: s
     // A Cohub sign-out after confirmation cancels the pending sign-in.
     if (epoch !== await currentEpoch(userUuid)) return c.json({ message: "sign-in expired" }, 401);
     const handle = randomSecret();
-    // The epoch must outlive every session that references it.
-    if (epoch) await redisCommandClient.expire(epochKey(userUuid), APP_BROWSER_SESSION_SECONDS);
+    if (epoch) await retainAppBrowserEpoch(userUuid);
     const session: StoredSession = { userUuid, epoch };
     await redisCommandClient.set(sessionKey(id, origin, handle), JSON.stringify(session), "EX", APP_BROWSER_SESSION_SECONDS);
     return c.json({ session: handle, returnTo: path });
@@ -90,7 +80,7 @@ export function createAppBrowserSessionRouter(resolveApp: (origin: string, id: s
     }
     const app = await resolveApp(origin, id);
     if (!app) return c.json({ message: "App origin unavailable" }, 403);
-    const token = createAppSessionToken({ userUuid, appId: id, spaceId: app.spaceId, appScopes: app.appScopes as Permission[] });
+    const token = createAppSessionToken({ userUuid, appId: id, spaceId: app.spaceId, appScopes: app.appScopes as Permission[], browserEpoch: epoch ?? "" });
     return c.json({ token, viewer: { userUuid }, expiresIn: APP_SESSION_TTL_SECONDS });
   });
 

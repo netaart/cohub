@@ -33,7 +33,7 @@ config.appEncryptionKey = "test-only-signing-key";
 const { createAppBrowserSessionRouter } = await import("../src/routes/app-browser-session.route.js");
 const { createAppCommerceRouter } = await import("../src/routes/app-commerce.route.js");
 const { verifyAppSessionToken } = await import("../src/app-sessions.js");
-const { revokeAppBrowserSessions } = await import("../src/routes/app-browser-session.route.js");
+const { isAppBrowserTokenLive, revokeAppBrowserSessions } = await import("../src/lib/app-browser-epoch.js");
 const api = new Hono();
 let principal: RequestPrincipal | null = null;
 api.use("*", async (c, next) => { c.set("principal", principal); await next(); });
@@ -113,9 +113,12 @@ test("signing out of Cohub ends existing storefront sessions but not later ones"
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ origin, session }),
   });
   const before = await signIn();
-  assert.equal((await token(before)).status, 200);
+  const issued = verifyAppSessionToken((await (await token(before)).json()).token);
+  assert.ok(issued);
+  assert.equal(await isAppBrowserTokenLive(issued), true);
   const pending = await confirm();
   await revokeAppBrowserSessions("buyer");
+  assert.equal(await isAppBrowserTokenLive(issued), false);
   assert.equal((await token(before)).status, 401);
   assert.equal((await pending()).status, 401);
   const after = await signIn();

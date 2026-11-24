@@ -502,7 +502,8 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
     if (message.type === "cohub.app.context") {
       const app = await this.resolveApp();
       if (!app) return null;
-      await this.browserSession(app.id);
+      // A failed restore leaves the viewer unknown instead of failing context().
+      await this.browserSession(app.id).catch(() => null);
       const viewerScopes = Array.from(new Set(this.viewerGrants.flatMap((grant) => grant.scopes)));
       return {
         type: "cohub.app.context.result",

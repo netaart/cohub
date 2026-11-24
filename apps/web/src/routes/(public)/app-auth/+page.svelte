@@ -3,7 +3,7 @@ import {
 	APP_BROWSER_SECRET_PATTERN,
 	APP_BROWSER_SESSION_PATH,
 	appReturnPath,
-	isUuid,
+	isUuidOrShortUuid,
 } from "@cohub/protocol";
 import type { AppPublicOwnerRecord, AppRecord } from "@neta-art/cohub";
 import { AlertTriangle, Loader2, ShieldCheck } from "lucide-svelte";
@@ -45,11 +45,12 @@ let errorMessage = $state("");
 let locale: Locale = $derived(getLocale());
 let appDetail = $state<AppDetail | null>(null);
 let host = $state<ReturnType<typeof createAppBridgeHost> | null>(null);
-let originAccepted = false;
+let originAccepted = $state(false);
 const accountName = $derived(
 	authStore.profile?.displayName ||
 		authStore.profile?.username ||
 		authStore.email ||
+		authStore.userUuid ||
 		"",
 );
 let continuing = $state(false);
@@ -97,7 +98,7 @@ async function resolveOriginOwner(): Promise<string> {
 }
 
 async function init() {
-	if (!isUuid(appId)) {
+	if (!isUuidOrShortUuid(appId)) {
 		fail(m.app_auth_invalid_entry({}, { locale }));
 		return;
 	}
@@ -367,7 +368,11 @@ onDestroy(() => {
 		<div class="broker-center">
 			<AlertTriangle class="h-5 w-5 text-error-soft" />
 			<p class="broker-error-msg">{errorMessage}</p>
-			<p class="broker-error-hint">{m.app_auth_close({}, { locale })}</p>
+			{#if redirect && originAccepted && returnPath}
+				<button type="button" class="secondary-key min-h-9 px-3 text-[13px]" onclick={cancelLogin}>{m.common_cancel({}, { locale })}</button>
+			{:else}
+				<p class="broker-error-hint">{m.app_auth_close({}, { locale })}</p>
+			{/if}
 		</div>
 	{/if}
 
