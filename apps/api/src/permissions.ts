@@ -390,7 +390,8 @@ export async function resolvePermissionAccess(
   const offline: Permission[] = [];
   for (const grant of await getOfflineAppGrants(execution, context.spaceId)) {
     const held = await resolveSharedPermissionAccess({ store: permissionStore, user: { uuid: grant.viewerUserUuid }, context });
-    offline.push(...intersectPermissionScopes(grant.scopes, held.permissions));
+    // Implication-aware, like hasPermission: a file.view grant still covers a granter now limited to filtered reads.
+    offline.push(...held.permissions.filter((permission) => scopeListHasPermission(grant.scopes, permission)));
   }
   const own = execution?.spaceId === context.spaceId ? normalizePermissionScopes(execution.scopes ?? []) : [];
   if (own.length === 0 && offline.length === 0) return access;
@@ -406,12 +407,7 @@ export function canViewSpaceCost(user: AuthUserProfile | null, spaceId: string):
  * while App sessions acting for a member still pass. Callers also check the scoped permission.
  */
 export async function isSpaceMember(user: AuthUserProfile | null, spaceId: string): Promise<boolean> {
-  if (scopeListHasPermission(await resolveUserSpacePermissions(user, spaceId), "member.view")) return true;
-  // An Action using offline access acts for its granting members.
-  for (const grant of await getOfflineAppGrants(getUserExecution(user), spaceId)) {
-    if (scopeListHasPermission(await resolveUserSpacePermissions({ uuid: grant.viewerUserUuid }, spaceId), "member.view")) return true;
-  }
-  return false;
+  return scopeListHasPermission(await resolveUserSpacePermissions(user, spaceId), "member.view");
 }
 
 export async function getSessionSpaceId(sessionId: string): Promise<string | null> {
@@ -436,26 +432,19 @@ export async function filterSessionsByPermission(
   if (previewSession) return hasPreviewSessionPermission(previewSession, permission, spaceId) ? sessions : [];
   const execution = getUserExecution(user);
   if (execution?.spaceId === spaceId && scopeListHasPermission(normalizePermissionScopes(execution.scopes ?? []), permission)) return sessions;
-  const visible = new Set<string>();
+  // A granting member sees every session. Non-member granters share the signed-in audience
+  // of the Action itself, so the filter below already covers them.
   for (const grantor of await offlineGrantorsFor(execution, permission, spaceId)) {
     const role = await permissionStore.getSpaceMemberRole(spaceId, grantor);
-    if (role) {
-      if (roleHasPermission(role, permission)) return sessions;
-      continue;
-    }
-    const allowed = await permissionStore.filterSessionsByPermission({ user: { uuid: grantor }, permission, spaceId, sessions, spacePolicy });
-    for (const session of allowed) visible.add(session.id);
+    if (role && roleHasPermission(role, permission)) return sessions;
   }
-  const own = await permissionStore.filterSessionsByPermission({
+  return permissionStore.filterSessionsByPermission({
     user,
     permission,
     spaceId,
     sessions,
     spacePolicy,
   });
-  if (visible.size === 0) return own;
-  for (const session of own) visible.add(session.id);
-  return sessions.filter((session) => visible.has(session.id));
 }
 
 export async function filterSpaceIdsByPermission(

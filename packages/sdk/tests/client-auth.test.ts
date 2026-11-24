@@ -111,4 +111,6 @@ test("offline authorization fails clearly when the host does not confirm offline
   await assert.rejects(client.auth.authorize(request), { code: "unsupported" });
   offlineScopes = ["space.view"];
   assert.equal((await client.auth.authorize(request)).status, "granted");
+  offlineScopes = ["file.view"];
+  assert.equal((await client.auth.authorize({ ...request, scopes: ["file.view.filtered"] })).status, "granted", "implied scopes count");
 });

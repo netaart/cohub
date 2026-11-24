@@ -1780,6 +1780,12 @@ const IMPLIED_PERMISSIONS: Partial<Record<Permission, readonly Permission[]>> = 
   "file.view.filtered": ["file.view"],
 };
 
+/** Whether a grant confirms offline access for every requested scope; older APIs omit it. */
+export function grantCoversOffline(grant: { offlineScopes?: readonly Permission[] | null }, requested: readonly Permission[]): boolean {
+	const offline = grant.offlineScopes ?? [];
+	return requested.every((scope) => scopeListHasPermission(offline, scope));
+}
+
 /** Implication-aware membership check, mirroring `@cohub/core`. */
 export function scopeListHasPermission(
 	scopes: readonly Permission[],

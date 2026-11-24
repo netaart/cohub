@@ -2,7 +2,7 @@ import type { AppDevice } from "@cohub/protocol/app-devices";
 import type { HttpTransport } from "../transport.js";
 import type { RequestSource } from "@cohub/protocol/provenance";
 import type { AppArtifactDescriptor, AppContentKind, AppDomainListResponse, AppDomainRecord, AppPromotionEventKey, AppVersionSource } from "@cohub/protocol";
-import type { Permission, PublicSlugRedirect, PublicUserProfile, SpacePublicProfile } from "../types.js";
+import { grantCoversOffline, type Permission, type PublicSlugRedirect, type PublicUserProfile, type SpacePublicProfile } from "../types.js";
 
 export type AppTargetType = "file" | "directory" | "port";
 export type AppStatus = "published" | "disabled";
@@ -291,7 +291,8 @@ export type AppAuthorizeResponse = {
     id: string;
     spaceId: string;
     scopes: Permission[];
-    offlineScopes: Permission[];
+    /** Absent from APIs without offline access. */
+    offlineScopes?: Permission[];
     expiresAt: string;
   };
 };
@@ -498,12 +499,17 @@ export class AppsApi {
    * reviving one, so revoked grants stay revoked. `offline: true` also lets
    * the App's Actions use these Space scopes while you are away, until revoked.
    */
-  authorize(appId: string, input: { scopes: Permission[]; spaceId?: string; reason?: string; silent?: boolean; scopeMode?: "extend"; offline?: boolean }) {
-    return this.transport.request<AppAuthorizeResponse>(`/api/apps/${appId}/authorize`, {
+  async authorize(appId: string, input: { scopes: Permission[]; spaceId?: string; reason?: string; silent?: boolean; scopeMode?: "extend"; offline?: boolean }) {
+    const result = await this.transport.request<AppAuthorizeResponse>(`/api/apps/${appId}/authorize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
+    // An older API ignores the flag; never report offline access it did not grant.
+    if (input.offline && !grantCoversOffline(result.grant, input.scopes)) {
+      throw new Error("Offline access was not granted; the API does not support it yet.");
+    }
+    return result;
   }
 
   /** Lists the caller's own grants for an app, one row per space. */

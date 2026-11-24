@@ -27,7 +27,7 @@ mock.module("../src/redis.js", { exports: {
 const { config } = await import("../src/config.js");
 config.appEncryptionKey = "test-only-signing-key";
 const { createAppsRouter } = await import("../src/routes/apps.route.js");
-const { hasPermission } = await import("../src/permissions.js");
+const { hasPermission, resolvePermissionAccess } = await import("../src/permissions.js");
 const { default: appAccessRouter } = await import("../src/routes/spaces/app-access.route.js");
 
 const insert = async (sql: string) => (await client.query<{ id: string }>(sql)).rows[0]?.id ?? "";
@@ -63,6 +63,7 @@ test("an App's Actions use offline access on another Space until it is revoked",
   assert.deepEqual(grant.offlineScopes, ["space.commerce.view"]);
 
   assert.equal(await canRead(), true);
+  assert.deepEqual((await resolvePermissionAccess(action(), { spaceId: shop })).permissions, ["space.commerce.view"]);
   assert.equal(await hasPermission(action(), "space.edit", { spaceId: shop }), false);
   assert.equal(await canRead(action(home)), false, "another App");
   assert.equal(await canRead(action(appId, "cron")), false, "not an App Action");
