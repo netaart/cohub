@@ -214,6 +214,23 @@ test("new SDK fails explicitly on old hosts without sending an authorization", a
   assert.deepEqual(calls, ["cohub.app.context"]);
 });
 
+test("offline access asks the viewer and sends the flag with their consent", async () => {
+  const { core, requests } = setup();
+  await core.handleMessage(request({ target: { kind: "space", spaceId: "viewer-space" }, offline: true }));
+  assert.equal(core.getState().authOpen, true);
+  assert.equal(core.getState().pendingAuth?.offline, true);
+  await core.confirmAuth();
+  const authorize = requests.filter((entry) => entry.url.endsWith("/authorize"));
+  assert.equal(authorize.at(-1)?.body?.offline, true);
+  assert.equal(authorize.at(-1)?.body?.silent, undefined);
+});
+
+test("offline access is refused for account permissions", async () => {
+  const { core, replies } = setup();
+  await core.handleMessage(request({ target: { kind: "account" }, scopes: ["user.space.list"], offline: true }));
+  assert.equal(replies.at(-1)?.code, "invalid_request");
+});
+
 test("only broker tokens are marked to end with the account's web sign-out", async () => {
   for (const surface of ["broker", "page"] as const) {
     const bodies: unknown[] = [];

@@ -1,4 +1,4 @@
-import { createBatchDrizzlePermissionStore, hasPermission as hasSharedPermission, intersectPermissionScopes, isUserLevelPermission, normalizeAppPublisherScopes, normalizePermissionScopes, resolvePermissionAccess as resolveSharedPermissionAccess, scopeListHasPermission } from "@cohub/core/permissions";
+import { createBatchDrizzlePermissionStore, hasPermission as hasSharedPermission, intersectPermissionScopes, isUserLevelPermission, roleHasPermission, normalizeAppPublisherScopes, normalizePermissionScopes, resolvePermissionAccess as resolveSharedPermissionAccess, scopeListHasPermission } from "@cohub/core/permissions";
 import { db } from "./db/index.js";
 import type { AuthUserProfile } from "./auth.js";
 import { apps, appViewerGrants, spaceMembers, spaces, type SpaceRole } from "@cohub/db";
@@ -8,6 +8,8 @@ import { hasPreviewSessionPermission } from "./preview-sessions.js";
 import type { SpaceFsVisibility } from "@cohub/core/space-fs";
 import type { AppSessionPrincipal } from "./app-sessions.js";
 import { and, eq } from "drizzle-orm";
+import { listOfflineAppGrants } from "@cohub/core/apps";
+import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
 
 type ResolvedAppState = { appScopes: Permission[] };
 
@@ -20,7 +22,13 @@ type CachedAppSessionPrincipal = AppSessionPrincipal & {
 type ScopedExecutionPrincipal = {
   spaceId: string;
   scopes?: Permission[];
+  source?: string;
+  appId?: string | null;
+  /** Memoized per request: offline grants by target Space. */
+  offlineGrants?: Map<string, Promise<OfflineGrant[]>>;
 };
+
+type OfflineGrant = { viewerUserUuid: string; scopes: Permission[] };
 
 const permissionStore = createBatchDrizzlePermissionStore(db);
 
@@ -41,6 +49,23 @@ const getUserExecution = (user: AuthUserProfile | null): ScopedExecutionPrincipa
   if (!execution || !Array.isArray(execution.scopes)) return null;
   return execution;
 };
+
+/** Offline grants an App Action may draw on for a Space; each is capped by its member at use. */
+const getOfflineAppGrants = (execution: ScopedExecutionPrincipal | null, spaceId: string): Promise<OfflineGrant[]> => {
+  if (!execution || execution.source !== APP_ACTION_EXECUTION_SOURCE || !execution.appId) return Promise.resolve([]);
+  execution.offlineGrants ??= new Map();
+  let grants = execution.offlineGrants.get(spaceId);
+  if (!grants) {
+    grants = listOfflineAppGrants({ db, appId: execution.appId, spaceId, executionSpaceId: execution.spaceId });
+    execution.offlineGrants.set(spaceId, grants);
+  }
+  return grants;
+};
+
+const offlineGrantorsFor = async (execution: ScopedExecutionPrincipal | null, permission: Permission, spaceId: string) =>
+  (await getOfflineAppGrants(execution, spaceId))
+    .filter((grant) => scopeListHasPermission(grant.scopes, permission))
+    .map((grant) => grant.viewerUserUuid);
 
 const getUserPreviewSession = (user: AuthUserProfile | null): PreviewSessionPrincipal | null => {
   const session = (user as (AuthUserProfile & { previewSession?: PreviewSessionPrincipal }) | null)?.previewSession;
@@ -305,6 +330,8 @@ export async function hasPermission(
   user: AuthUserProfile | null,
   permission: Permission,
   context: { spaceId: string; sessionId?: string },
+  /** Pass false where the result outlives the request, e.g. when minting another credential. */
+  options?: { offlineAccess?: boolean },
 ): Promise<boolean> {
   if (isUserLevelPermission(permission)) {
     const appSession = getUserAppSession(user);
@@ -321,12 +348,18 @@ export async function hasPermission(
   if (previewSession) return hasPreviewSessionPermission(previewSession, permission, context.spaceId);
   const execution = getUserExecution(user);
   if (execution?.spaceId === context.spaceId && scopeListHasPermission(normalizePermissionScopes(execution.scopes ?? []), permission)) return true;
-  return hasSharedPermission({
+  if (await hasSharedPermission({
     store: permissionStore,
     user,
     permission,
     context,
-  });
+  })) return true;
+  if (options?.offlineAccess === false) return false;
+  for (const grantor of await offlineGrantorsFor(execution, permission, context.spaceId)) {
+    // The member's own access to this resource, session overrides included.
+    if (await hasSharedPermission({ store: permissionStore, user: { uuid: grantor }, permission, context })) return true;
+  }
+  return false;
 }
 
 /** Which file view the caller gets: full, filtered by the workspace .gitignore, or none. */
@@ -354,14 +387,15 @@ export async function resolvePermissionAccess(
     user,
     context,
   });
-  if (execution?.spaceId !== context.spaceId) return access;
-  return {
-    role: access.role,
-    permissions: normalizePermissionScopes([
-      ...access.permissions,
-      ...normalizePermissionScopes(execution.scopes ?? []),
-    ]),
-  };
+  const offline: Permission[] = [];
+  for (const grant of await getOfflineAppGrants(execution, context.spaceId)) {
+    const held = await resolveSharedPermissionAccess({ store: permissionStore, user: { uuid: grant.viewerUserUuid }, context });
+    // Implication-aware, like hasPermission: a file.view grant still covers a granter now limited to filtered reads.
+    offline.push(...held.permissions.filter((permission) => scopeListHasPermission(grant.scopes, permission)));
+  }
+  const own = execution?.spaceId === context.spaceId ? normalizePermissionScopes(execution.scopes ?? []) : [];
+  if (own.length === 0 && offline.length === 0) return access;
+  return { role: access.role, permissions: normalizePermissionScopes([...access.permissions, ...own, ...offline]) };
 }
 
 export function canViewSpaceCost(user: AuthUserProfile | null, spaceId: string): Promise<boolean> {
@@ -374,6 +408,19 @@ export function canViewSpaceCost(user: AuthUserProfile | null, spaceId: string):
  */
 export async function isSpaceMember(user: AuthUserProfile | null, spaceId: string): Promise<boolean> {
   return scopeListHasPermission(await resolveUserSpacePermissions(user, spaceId), "member.view");
+}
+
+/**
+ * A member-only read as one decision: the caller holds the permission and is a
+ * member, or one offline grant covers it and its granter passes both itself.
+ */
+export async function hasMemberPermission(user: AuthUserProfile | null, permission: Permission, spaceId: string): Promise<boolean> {
+  if (await hasPermission(user, permission, { spaceId }) && await isSpaceMember(user, spaceId)) return true;
+  for (const grantor of await offlineGrantorsFor(getUserExecution(user), permission, spaceId)) {
+    const member = { uuid: grantor };
+    if (await hasPermission(member, permission, { spaceId }) && await isSpaceMember(member, spaceId)) return true;
+  }
+  return false;
 }
 
 export async function getSessionSpaceId(sessionId: string): Promise<string | null> {
@@ -398,6 +445,12 @@ export async function filterSessionsByPermission(
   if (previewSession) return hasPreviewSessionPermission(previewSession, permission, spaceId) ? sessions : [];
   const execution = getUserExecution(user);
   if (execution?.spaceId === spaceId && scopeListHasPermission(normalizePermissionScopes(execution.scopes ?? []), permission)) return sessions;
+  // A granting member sees every session. Non-member granters share the signed-in audience
+  // of the Action itself, so the filter below already covers them.
+  for (const grantor of await offlineGrantorsFor(execution, permission, spaceId)) {
+    const role = await permissionStore.getSpaceMemberRole(spaceId, grantor);
+    if (role && roleHasPermission(role, permission)) return sessions;
+  }
   return permissionStore.filterSessionsByPermission({
     user,
     permission,

@@ -1780,6 +1780,12 @@ const IMPLIED_PERMISSIONS: Partial<Record<Permission, readonly Permission[]>> = 
   "file.view.filtered": ["file.view"],
 };
 
+/** Whether a grant confirms offline access for every requested scope; older APIs omit it. */
+export function grantCoversOffline(grant: { offlineScopes?: readonly Permission[] | null }, requested: readonly Permission[]): boolean {
+	const offline = grant.offlineScopes ?? [];
+	return requested.every((scope) => scopeListHasPermission(offline, scope));
+}
+
 /** Implication-aware membership check, mirroring `@cohub/core`. */
 export function scopeListHasPermission(
 	scopes: readonly Permission[],
@@ -1799,6 +1805,15 @@ export type SpaceAccess = {
 export type SpaceAccessPolicy = {
   signed_in_user: SpaceRole | null;
   anonymous_user: SpaceRole | null;
+};
+
+/** An App a member gave offline access: its Actions may use these scopes on the Space while nobody is present. */
+export type SpaceAppAccessItem = {
+  grantId: string;
+  app: { id: string; slug: string; title: string };
+  grantedBy: PublicUserProfile;
+  scopes: Permission[];
+  updatedAt: string | null;
 };
 
 export type SpaceUsageHourlyStat = {

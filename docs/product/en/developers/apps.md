@@ -169,6 +169,7 @@ either is enough:
 | --- | --- | --- | --- |
 | **App scopes** | Publisher at publish time | Only the App's own Space; eight bounded scopes | While published |
 | **Viewer grants** | Viewer via consent dialog | Any permission the viewer holds, on any Space | 14 days, revocable |
+| **Offline access** | Viewer via consent dialog (`offline: true`) | The App's Actions, on that Space, while nobody is present | Until revoked |
 
 The eight app scopes: `space.view`, `session.view`, `file.view`, `file.edit`,
 `taskrun.view`, `session.prompt.readonly`, `session.prompt.fullaccess`,
@@ -469,6 +470,36 @@ execution.spaceId;      // the home Space
 - Actions cannot invoke `app.actions.run()` recursively.
 - Space Hooks can run an Action with `uses: user/space/app/action` — see
   [Space Hooks](https://github.com/netaart/cohub/blob/main/docs/space-hooks.md).
+
+### Offline access
+
+An Action runs as the App owner, so on other Spaces it only has what the owner
+has. To act on a viewer's Space while they are away — syncing, reporting,
+scheduled work — ask for offline access once:
+
+```ts
+await client.auth.authorize({
+  target: { kind: "space", spaceId },
+  scopes: ["space.commerce.view"],
+  offline: true,
+  reason: "Keep your shop's sales in the dashboard.",
+});
+```
+
+- Your Actions may then use those scopes on that Space at any time; the
+  interactive part of the grant still lasts 14 days.
+- Space scopes only, always with an explicit consent dialog. Shell consent and
+  silent renewal cannot create it.
+- Each use is capped by what the granting member can still do there. If they
+  lose the permission or revoke the grant, offline access ends.
+- Members see it under **Space settings → Access** and with
+  `cohub spaces app-access ls`. The granting member or a host can revoke it
+  there; revoking the whole grant also ends it.
+- Only Actions run in your App's home Space use it; browser App sessions and
+  Space Hooks running your Action elsewhere do not.
+- Any visitor can run your Actions. Before touching a granted Space, check
+  that `execution.viewerUserId` may act on it (for example, the member who
+  granted it).
 
 ## Surfaces and forms
 

@@ -42,12 +42,16 @@ export const appAuthorizationRequestSchema = z.object({
   reason: z.string().max(280).optional(),
   alwaysAsk: z.boolean().optional(),
   fallback: z.enum(["allow", "none"]).default("allow"),
+  /** Also let the App's Actions use these Space scopes while the viewer is away, until revoked. */
+  offline: z.boolean().optional(),
 });
 
 export const appAuthorizationGrantSchema = z.object({
   id: z.string().min(1),
   spaceId: z.string().min(1),
   scopes: z.array(z.string()),
+  /** Scopes the App's Actions may use while nobody is present; they end only on revocation. */
+  offlineScopes: z.array(z.string()).optional(),
   expiresAt: z.string().nullable(),
 });
 

@@ -138,6 +138,7 @@ App 在一个 Space 上的有效权限是**两个来源的并集** —— 任一
 | --- | --- | --- | --- |
 | **App scopes** | 发布者在发布时 | 仅 App 自己的 Space；八个受限 scope | 随发布存在 |
 | **Viewer grants** | 访客通过授权对话框 | 访客持有的任意权限，任意 Space | 14 天，可撤销 |
+| **长期访问** | 访客通过授权对话框（`offline: true`） | App 的 Action 在没人使用时访问该 Space | 直到撤销 |
 
 八个 app scope：`space.view`、`session.view`、`file.view`、`file.edit`、`taskrun.view`、`session.prompt.readonly`、`session.prompt.fullaccess`、`command.execute`。
 
@@ -373,6 +374,26 @@ execution.spaceId;      // home Space
 - Action 不能递归调用 `app.actions.run()`。
 - Space Hooks 可用 `uses: user/space/app/action` 运行 Action —— 见
   [Space Hooks](https://github.com/netaart/cohub/blob/main/docs/space-hooks.md)。
+
+### 长期访问
+
+Action 以 App owner 身份运行，在其他 Space 上只有 owner 本人的权限。需要在访客不在时操作他的 Space（同步、报表、定时任务），就请求一次长期访问：
+
+```ts
+await client.auth.authorize({
+  target: { kind: "space", spaceId },
+  scopes: ["space.commerce.view"],
+  offline: true,
+  reason: "Keep your shop's sales in the dashboard.",
+});
+```
+
+- 之后你的 Action 随时可以在该 Space 上使用这些 scope；授权中访客自己使用的部分仍是 14 天。
+- 只支持 Space scope，必须由访客在授权对话框中明确同意；Shell 代为同意和静默续期都不能创建长期访问。
+- 每次使用都以授权成员当前在该 Space 的权限为上限。成员失去权限或撤销授权，长期访问随之结束。
+- 成员可以在 **Space 设置 → 访问权限** 和 `cohub spaces app-access ls` 中看到。授权成员或 host 可以在那里撤销；撤销整条授权也会结束长期访问。
+- 只有在 App home Space 中运行的 Action 能使用；浏览器里的 App 会话、在其他 Space 通过 Space Hook 运行的同一个 Action 都不能。
+- 任何访客都能运行你的 Action。操作已授权的 Space 前，先确认 `execution.viewerUserId` 有资格操作它（例如就是授权的那位成员）。
 
 ## 形态
 

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { apps, appViewerGrants } from "@cohub/db";
 import {
@@ -106,3 +106,54 @@ export async function resolveViewerGrantScopesAtUseTime(input: {
   });
   return intersectPermissionScopes(held, access.permissions);
 }
+
+/**
+ * Offline access: Space scopes a viewer consented to for the App's own
+ * Actions, usable while nobody is present. They live on the viewer grant row
+ * (`meta.offlineScopes`), ignore its interactive expiry, and end only when the
+ * grant is revoked.
+ */
+export function readOfflineScopes(meta: unknown): Permission[] {
+  const raw = meta && typeof meta === "object" ? (meta as { offlineScopes?: unknown }).offlineScopes : undefined;
+  return Array.isArray(raw) ? normalizePermissionScopes(raw.filter((scope): scope is string => typeof scope === "string")) : [];
+}
+
+/** Writes offline scopes into grant meta, keeping other provenance fields. */
+export function withOfflineScopes(meta: unknown, scopes: readonly Permission[]): Record<string, unknown> | null {
+  const { offlineScopes: _previous, ...rest } = meta && typeof meta === "object" ? meta as Record<string, unknown> : {};
+  const next = scopes.length > 0 ? { ...rest, offlineScopes: normalizePermissionScopes([...scopes]) } : rest;
+  return Object.keys(next).length > 0 ? next : null;
+}
+
+/**
+ * Unrevoked offline grants a published App's Actions may draw on for a Space.
+ * Only Action runs in the App's home Space qualify: a Space Hook elsewhere runs
+ * the same Action in someone else's sandbox and environment. Callers cap each
+ * row by what its viewer can do on the resource at use time.
+ */
+export async function listOfflineAppGrants(input: {
+  db: DrizzlePermissionDb;
+  appId: string;
+  spaceId: string;
+  executionSpaceId: string;
+}): Promise<{ viewerUserUuid: string; scopes: Permission[] }[]> {
+  const [app] = await input.db
+    .select({ status: apps.status, spaceId: apps.spaceId })
+    .from(apps)
+    .where(eq(apps.id, input.appId))
+    .limit(1);
+  if (app?.status !== "published" || app.spaceId !== input.executionSpaceId) return [];
+  const rows = await input.db
+    .select({ viewerUserUuid: appViewerGrants.viewerUserUuid, meta: appViewerGrants.meta })
+    .from(appViewerGrants)
+    .where(and(
+      eq(appViewerGrants.appId, input.appId),
+      eq(appViewerGrants.spaceId, input.spaceId),
+      isNull(appViewerGrants.revokedAt),
+      hasOfflineScopes,
+    ));
+  return rows.map((row) => ({ viewerUserUuid: row.viewerUserUuid, scopes: readOfflineScopes(row.meta) }));
+}
+
+/** SQL filter for grant rows that carry offline scopes. */
+export const hasOfflineScopes = sql`jsonb_array_length(coalesce(${appViewerGrants.meta} -> 'offlineScopes', '[]'::jsonb)) > 0`;

@@ -6,7 +6,7 @@ import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { spaces, apps, appPromotions, appPromotionStatsHourly, appVersions, appViewerGrants, appViewStatsHourly, userProfiles } from "@cohub/db";
 import { createAppAssetPublicUrl, deleteAppAssetsByObjectKey, isConfiguredAppAssetPublicUrl } from "../app-asset-storage.js";
 import { publishAppAssetInWorker, type AppPublishAssetJobResult } from "../app-publish-asset-queue.js";
-import { hostConsentRefused, parseAppAuthorizeRequest, resolveAppGrantScopes } from "../app-grant-scopes.js";
+import { canRenewGrantSilently, hostConsentRefused, parseAppAuthorizeRequest, resolveAppGrantScopes, resolveOfflineGrantScopes } from "../app-grant-scopes.js";
 import { ALL_PERMISSIONS, APP_PUBLISHER_SCOPES, isUserLevelPermission, normalizePermissionScopes, scopeListHasPermission, type Permission } from "@cohub/core/permissions";
 import {
   APP_ACTION_INPUT_MAX_BYTES,
@@ -14,6 +14,8 @@ import {
   isAppActionKey,
   materializeHtmlPageMeta,
   mergeAppPageMeta,
+  readOfflineScopes,
+  withOfflineScopes,
 } from "@cohub/core/apps";
 import { db } from "../db/index.js";
 import { isPostgresUniqueViolation } from "../db/postgres-error.js";
@@ -284,18 +286,14 @@ async function findUngrantableScopes(user: AuthUser, scopes: Permission[], space
   return spaceScopes.filter((scope) => !scopeListHasPermission(held, scope));
 }
 
-/** Extends a live grant that still covers the requested scopes; never revives. */
+/** Extends a live grant that still covers the requested scopes; never revives or widens. */
 async function renewViewerGrant(input: {
   existing: typeof appViewerGrants.$inferSelect | undefined;
   requested: Permission[];
+  offline: boolean;
 }): Promise<typeof appViewerGrants.$inferSelect | null> {
   const { existing } = input;
-  if (!existing || existing.revokedAt) return null;
-  if (existing.expiresAt && existing.expiresAt.getTime() <= Date.now()) return null;
-  // Implication-aware coverage: a full-access grant silently covers a later
-  // read-only request instead of forcing a fresh consent dialog.
-  const held = normalizePermissionScopes(existing.scopes as string[]);
-  if (!input.requested.every((scope) => scopeListHasPermission(held, scope))) return null;
+  if (!existing || !canRenewGrantSilently(input)) return null;
   const [renewed] = await db
     .update(appViewerGrants)
     .set({ expiresAt: new Date(Date.now() + APP_VIEWER_GRANT_TTL_SECONDS * 1000), updatedAt: new Date() })
@@ -320,6 +318,7 @@ async function upsertViewerGrant(input: {
   expiresAt: Date;
   scopeMode?: "extend";
   consent?: "host";
+  offline: boolean;
 }): Promise<typeof appViewerGrants.$inferSelect | null | "migration_pending" | "consent_required"> {
   return db.transaction(async (tx) => {
     const key = and(
@@ -331,6 +330,7 @@ async function upsertViewerGrant(input: {
       tx.update(appViewerGrants).set({
         scopes: resolveAppGrantScopes({ requested: input.scopes, mode: input.scopeMode, existing }),
         expiresAt: input.expiresAt,
+        meta: withOfflineScopes(existing.meta, resolveOfflineGrantScopes({ requested: input.scopes, offline: input.offline, mode: input.scopeMode, existing })),
         revokedAt: null,
         updatedAt: new Date(),
       }).where(eq(appViewerGrants.id, existing.id)).returning();
@@ -347,7 +347,7 @@ async function upsertViewerGrant(input: {
       scopes: input.scopes,
       expiresAt: input.expiresAt,
       // Provenance only; the row stays the single source of truth for consent.
-      ...(input.consent ? { meta: { consent: input.consent } } : {}),
+      meta: withOfflineScopes(input.consent ? { consent: input.consent } : null, input.offline ? input.scopes : []),
     }).onConflictDoNothing().returning();
     if (inserted.length > 0) return inserted[0] ?? null;
 
@@ -364,6 +364,7 @@ const serializeViewerGrant = (grant: typeof appViewerGrants.$inferSelect) => ({
   appId: grant.appId,
   spaceId: grant.spaceId,
   scopes: normalizePermissionScopes(grant.scopes as string[]),
+  offlineScopes: readOfflineScopes(grant.meta),
   expiresAt: grant.expiresAt?.toISOString() ?? null,
   revokedAt: grant.revokedAt?.toISOString() ?? null,
   createdAt: grant.createdAt?.toISOString() ?? null,
@@ -1431,6 +1432,7 @@ async function buildAppAuthorizationPayload(
       id: grant.id,
       spaceId: grant.spaceId,
       scopes,
+      offlineScopes: readOfflineScopes(grant.meta),
       expiresAt: grant.expiresAt?.toISOString() ?? null,
     },
   };
@@ -1447,12 +1449,16 @@ router.post("/:id/authorize", async (c) => {
   if (requiresSpaceAppAccess(app) && !(await hasPermission(user, "space.view", { spaceId: app.spaceId }))) {
     return c.json({ message: "app is not accessible in this space", code: "app_not_accessible" }, 403);
   }
-  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown; scopeMode?: unknown; consent?: unknown; broker?: unknown } | null;
+  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown; scopeMode?: unknown; consent?: unknown; offline?: unknown; broker?: unknown } | null;
   const broker = body?.broker === true;
   // Hosts send `consent` with `silent`, so an older API falls back to renew-only.
   const parsed = parseAppAuthorizeRequest(body, ALLOWED_VIEWER_SCOPES);
   if ("message" in parsed) return c.json(parsed, 400);
-  const { requested, extend, hostConsent } = parsed;
+  const { requested, extend, hostConsent, offline } = parsed;
+  // Lasting consent comes from the viewer's own sign-in, never from a delegated execution.
+  if (offline && getExecutionPrincipal(c)) {
+    return c.json({ message: "offline access needs the viewer's own sign-in", code: "account_required" }, 403);
+  }
   const targetSpaceId = typeof body?.spaceId === "string" && body.spaceId.trim() ? body.spaceId.trim() : app.spaceId;
   if (!requireValidId(targetSpaceId)) return c.json({ message: "space not found", code: "space_not_found" }, 404);
   // A caller-supplied target must exist — the per-scope permission gate skips
@@ -1480,11 +1486,11 @@ router.post("/:id/authorize", async (c) => {
       ))
       .limit(1);
     if (existing?.revokedAt) return c.json({ message: "grant was revoked; viewer consent is required again", code: "consent_required" }, 403);
-    const renewed = await renewViewerGrant({ existing, requested });
+    const renewed = await renewViewerGrant({ existing, requested, offline });
     if (renewed) {
       return c.json(await buildAppAuthorizationPayload(app, user, renewed, broker));
     }
-    if (user.uuid !== app.userUuid) {
+    if (offline || user.uuid !== app.userUuid) {
       return c.json({ message: "grant is no longer active; viewer consent is required again", code: "consent_required" }, 403);
     }
   }
@@ -1513,6 +1519,7 @@ router.post("/:id/authorize", async (c) => {
     // Host consent only adds to a live grant; it never narrows what the viewer granted.
     ...(extend ? { scopeMode: "extend" as const } : {}),
     ...(hostConsent ? { consent: "host" as const } : {}),
+    offline,
   });
   if (grant === "consent_required") {
     return c.json({ message: "grant was revoked; viewer consent is required again", code: "consent_required" }, 403);

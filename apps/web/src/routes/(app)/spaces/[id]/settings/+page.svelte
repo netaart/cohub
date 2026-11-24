@@ -67,6 +67,7 @@ import SettingsHeading from "#lib/features/space-settings/SettingsHeading.svelte
 import SettingsRow, {
 	SETTINGS_SELECT,
 } from "#lib/features/space-settings/SettingsRow.svelte";
+import SpaceAppAccess from "#lib/features/space-settings/SpaceAppAccess.svelte";
 import SpaceInvitations from "#lib/features/space-settings/SpaceInvitations.svelte";
 import SpaceLikeStickerSetting from "#lib/features/space-settings/SpaceLikeStickerSetting.svelte";
 import { SandboxSettingsState } from "#lib/features/space-settings/sandbox-settings.svelte.ts";
@@ -81,6 +82,7 @@ import {
 	buildSpaceSettingsRoute,
 	buildSpaceWalletRoute,
 } from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import { invalidateCachedSpaceMembers } from "#lib/stores/space-profile-cache.ts";
 import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
 import { browser } from "$app/env";
@@ -1295,6 +1297,7 @@ $effect(() => {
 						{#if canManageSpaceMembers}
 							<SpaceInvitations {spaceId} ownerUsername={getSpaceOwnerUsername(space) || null} spaceSlug={getSpaceSlug(space) || null} bind:createOpen={showInvitePanel} />
 						{/if}
+						<SpaceAppAccess {spaceId} canManage={canManageSpaceMembers} viewerUuid={authStore.userUuid} />
 						</section>
 
 						<section id={sectionElementId("environment")} class="-scroll-mt-4 border-t border-border-subtle pt-10">

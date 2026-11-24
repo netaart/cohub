@@ -224,3 +224,15 @@ test("apps REST request paths use the canonical /api/apps mount", async () => {
     `POST /api/apps/${id}/session`,
   ]);
 });
+
+test("AppsApi.authorize only reports offline access the API confirmed", async () => {
+  let offlineScopes: string[] | undefined;
+  const transport = {
+    request: async () => ({ token: "t", expiresIn: 60, grant: { id: "g", spaceId: "s", scopes: ["file.view"], expiresAt: "", ...(offlineScopes ? { offlineScopes } : {}) } }),
+  } as unknown as HttpTransport;
+  const api = new AppsApi(transport);
+  await assert.rejects(api.authorize("app", { scopes: ["file.view"], spaceId: "s", offline: true }), /Offline access was not granted/);
+  assert.equal((await api.authorize("app", { scopes: ["file.view"], spaceId: "s" })).grant.offlineScopes, undefined);
+  offlineScopes = ["file.view"];
+  assert.equal((await api.authorize("app", { scopes: ["file.view.filtered"], spaceId: "s", offline: true })).grant.id, "g", "implied scopes count");
+});

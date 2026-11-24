@@ -18,7 +18,7 @@ import {
   parseAppDevices,
   parseAppDevicesResult,
 } from "@cohub/protocol/app-devices";
-import { PERMISSIONS, type CreateSpaceInput, type Permission, type SpaceRole } from "./types.js";
+import { PERMISSIONS, grantCoversOffline, type CreateSpaceInput, type Permission, type SpaceRole } from "./types.js";
 import { appAuthorizationRequestSchema, appAuthorizationResultSchema, type AppAuthorizationRequest as ProtocolAuthorizationRequest, type AppAuthorizationResult } from "@cohub/protocol";
 export type { AppAuthorizationResult } from "@cohub/protocol";
 export type AppAuthorizationRequest = Omit<ProtocolAuthorizationRequest, "scopes"> & { scopes: Permission[] };
@@ -1213,6 +1213,10 @@ export class AppRuntimeApi {
     this.serverGrants = true;
     if (result.data.status === "granted") {
       if (typeof response.token !== "string" || !response.token) throw new AppRuntimeError("invalid_response", "Authorization token is missing.");
+      // An older host or API drops the flag; never report offline access it did not grant.
+      if (parsed.data.offline && !grantCoversOffline(result.data.grant as { offlineScopes?: Permission[] }, parsed.data.scopes as Permission[])) {
+        throw new AppRuntimeError("unsupported", "This host does not support offline access.");
+      }
       this.token = response.token;
       this.writeStoredToken(this.token);
     }

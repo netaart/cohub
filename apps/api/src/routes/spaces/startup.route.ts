@@ -63,7 +63,8 @@ router.get("/:id/startup", async (c) => {
       config,
       configRaw: raw,
       revision: { mtimeMs: file.mtimeMs, size: file.size },
-      previewSession: needsSpacePreview
+      // The preview token outlives this request, so offline App access cannot mint it.
+      previewSession: needsSpacePreview && await hasPermission(user, "file.view", { spaceId }, { offlineAccess: false })
         ? {
             token: createPreviewSessionToken({ userUuid: user.uuid, spaceId }),
             expiresIn: PREVIEW_SESSION_TTL_SECONDS,
