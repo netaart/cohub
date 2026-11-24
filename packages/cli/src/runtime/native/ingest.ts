@@ -438,7 +438,7 @@ export class NativeIngest {
         const watcher = watch(root, { recursive: true }, (_event, name) => {
           if (!name) return;
           const path = join(root, name.toString());
-          if (this.foreign.has(path) || !acceptsTranscript(path, harness, this.options.cwd)) return;
+          if (this.foreign.has(path) || !(acceptsTranscript(path, harness, this.options.cwd) || this.runningPaths.has(path))) return;
           if (!this.live.has(path)) this.live.set(path, false);
           timer ??= setTimeout(() => { timer = null; this.drainLive(); }, WATCH_DEBOUNCE_MS);
           timer.unref?.();
@@ -458,7 +458,10 @@ export class NativeIngest {
     for (const path of [...this.runningPaths]) {
       const state = this.states.get(path);
       if (state) await this.reportControl(state, true);
+      // It may have ended while the Runtime was offline, or in a directory no longer bound.
+      this.live.set(path, true);
     }
+    this.drainLive();
   }
 
   private async reportControl(state: TranscriptState, always = false): Promise<boolean | undefined> {
@@ -572,7 +575,9 @@ export class NativeIngest {
     const harness = previous?.harness ?? this.harnessFor(path);
     // A paused harness uploads nothing, not even for transcripts it already tracks.
     if (!harness || !this.harnesses.includes(harness)) return;
-    if (previous && (previous.threadKind !== "user" || !this.owns(previous.cwd))) return;
+    const owned = !previous || this.owns(previous.cwd);
+    // A Turn already running when its directory stopped being bound is still followed to its end.
+    if (previous && (previous.threadKind !== "user" || (!owned && !previous.runningTurnId))) return;
     if (!previous) {
       // A header is read once per file: it names the project and the thread's purpose.
       const header = await readSessionHeader(path, harness);
@@ -596,9 +601,12 @@ export class NativeIngest {
     }
     const transcript = await readTranscript(path, harness);
     const state = previous ?? this.blank(path, transcript.nativeSessionId, transcript.cwd, harness, "user", { size: -1, mtimeMs: 0, ino: 0 });
+    // Outside the bound directory nothing after the running Turn is synced.
+    const through = owned ? transcript.turns.length : transcript.turns.findIndex((turn) => turn.key === state.runningTurnKey) + 1;
+    if (!through && !owned) { this.endRunning(state); this.markDirty(path); return; }
     this.states.set(path, state);
     // The file counts as read only once the server confirmed it; a failed send is retried.
-    await this.apply(state, transcript.turns, lane, info.mtimeMs);
+    await this.apply(state, transcript.turns, lane, info.mtimeMs, through);
     Object.assign(state, { size: info.size, mtimeMs: info.mtimeMs, ino: info.ino, scannedBytes: info.size });
     this.markDirty(path);
   }
@@ -665,16 +673,17 @@ export class NativeIngest {
     return known;
   }
 
-  private async apply(state: TranscriptState, turns: NativeTranscriptTurn[], lane: "live" | "import", mtimeMs: number): Promise<void> {
+  /** Syncs `turns` before index `through`; later ones only tell whether those ended. */
+  private async apply(state: TranscriptState, turns: NativeTranscriptTurn[], lane: "live" | "import", mtimeMs: number, through: number): Promise<void> {
     const transport = this.transport;
     if (!transport) throw new Error("Runtime is offline");
     const derived = (turn: NativeTranscriptTurn) => nativeTurnId(this.options.spaceId, state.harness, state.nativeSessionId, turn.key);
     const from = state.throughTurnKey ? turns.findIndex((turn) => turn.key === state.throughTurnKey) + 1 : 0;
-    const pending = turns.slice(from);
+    const pending = turns.slice(from, through);
     // One question to the server replaces every local receipt: which of these do you have?
     const known = pending.length ? await this.known(transport, pending.flatMap((turn) => turn.cloudTurnId ? [turn.cloudTurnId, derived(turn)] : [derived(turn)])) : new Map();
     const cohub = (turn: NativeTranscriptTurn) => turn.cloudTurnId && known.has(turn.cloudTurnId) ? turn.cloudTurnId : null;
-    const tail = turns.at(-1);
+    const tail = turns[through - 1];
     // A Cohub file whose latest Cohub Turn the file cannot name (its format marks none, or it predates
     // the marker) holds only Turns the server already has, up to its current end.
     const cohubHead = state.executingTurnId ?? state.headTurnId;
@@ -698,7 +707,7 @@ export class NativeIngest {
         if (!candidates.length) { state.throughTurnKey = turn.key; state.throughTurnId = marked; }
         continue;
       }
-      const settled = offset < pending.length - 1 || this.tailSettled(state, turn, mtimeMs);
+      const settled = from + offset < turns.length - 1 || this.tailSettled(state, turn, mtimeMs);
       // History that never ended is left to the live lane; its transcript reports it again.
       if (!settled && lane === "import") break;
       // A prompt still being recorded would change the Turn's identity; it is sent once complete.
@@ -736,7 +745,7 @@ export class NativeIngest {
         startedAt: item.turn.startedAt,
         ...(this.imported(item.turn) ? { origin: "local_import" as const } : {}),
         ...(!item.settled && controllable !== undefined ? { controllable } : {}),
-        result: item.settled ? this.complete(item.turn.result ?? this.cutOff(item, pending)) : null,
+        result: item.settled ? this.complete(item.turn.result ?? this.cutOff(item, turns)) : null,
       },
     }));
     const sizes = new Map(payloads.map((payload) => [payload, frameBytes(payload.turn)]));
@@ -812,8 +821,8 @@ export class NativeIngest {
     this.options.hooks?.onRunning?.(state, null);
   }
 
-  private cutOff(item: Candidate, pending: NativeTranscriptTurn[]): NonNullable<NativeTranscriptTurn["result"]> {
-    const next = pending[pending.indexOf(item.turn) + 1];
+  private cutOff(item: Candidate, turns: NativeTranscriptTurn[]): NonNullable<NativeTranscriptTurn["result"]> {
+    const next = turns[turns.indexOf(item.turn) + 1];
     return { messages: item.turn.messages, status: "interrupted", completedAt: next?.startedAt ?? item.turn.startedAt };
   }
 

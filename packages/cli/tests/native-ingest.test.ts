@@ -75,8 +75,8 @@ async function workspace() {
   const codexPath = (id: string) => join(root, "codex-home", "sessions", "2026", "01", "01", `rollout-2026-01-01T00-00-00-${id}.jsonl`);
   const claudePath = (cwd: string, id: string) => join(root, "claude", "projects", claudeProjectName(cwd), `${id}.jsonl`);
   const workbuddyPath = (cwd: string, id: string) => join(root, "codebuddy", "projects", workbuddyProjectName(cwd), `${id}.jsonl`);
-  const ingest = (options: { enabledAt?: string; harnesses?: Synced[]; hooks?: IngestHooks } = {}) => new NativeIngest({
-    spaceId: SPACE, cwd: project, harnesses: options.harnesses ?? ["pi", "codex"], enabledAt: options.enabledAt ?? new Date(0).toISOString(),
+  const ingest = (options: { cwd?: string; enabledAt?: string; harnesses?: Synced[]; hooks?: IngestHooks } = {}) => new NativeIngest({
+    spaceId: SPACE, cwd: options.cwd ?? project, harnesses: options.harnesses ?? ["pi", "codex"], enabledAt: options.enabledAt ?? new Date(0).toISOString(),
     root: join(root, "state"), archives: new RuntimeArchiveStore(join(root, "state", "archives"), null), hooks: options.hooks,
   });
   const write = async (path: string, content: string, mtime?: Date) => {
@@ -504,6 +504,29 @@ test("pausing a harness stops its uploads and previews, for transcripts already 
     await new Promise((resolve) => setTimeout(resolve, 200));
     assert.equal(server.batches.length, batches, "nothing more is uploaded");
     await ingest.close(AbortSignal.timeout(2_000));
+  } finally { await w.cleanup(); }
+});
+
+test("a Turn running when its directory is rebound elsewhere still settles, and nothing after it syncs", async () => {
+  const w = await workspace();
+  try {
+    const server = fakeServer();
+    const old = join(w.root, "old"), id = randomUUID(), path = w.claudePath(old, id);
+    const turn = claudeTurn(id, old, "u1", null, "q");
+    await w.write(path, turn.slice(0, turn.indexOf("\n") + 1));
+    const before = w.ingest({ cwd: old, harnesses: ["claude"] });
+    await before.load();
+    before.connect(server.transport);
+    await until(() => server.turns.size === 1);
+    await before.close(AbortSignal.timeout(2_000));
+
+    await w.write(path, turn + claudeTurn(id, old, "u2", "a-u1", "later"));
+    const rebound = w.ingest({ harnesses: ["claude"] });
+    await rebound.load();
+    rebound.connect(server.transport);
+    await until(() => server.turns.get(turnIdOf("claude", id, "u1"))?.settled === true);
+    assert.equal(server.turns.size, 1);
+    await rebound.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
 });
 
