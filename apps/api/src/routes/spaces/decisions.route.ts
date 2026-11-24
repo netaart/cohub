@@ -209,7 +209,7 @@ router.post("/", decisionRequestBodyLimit, async (c) => {
 
   let state: Awaited<ReturnType<typeof prepareDecisionState>>;
   try {
-    state = await prepareDecisionState(body.state, { signal: c.req.raw.signal });
+    state = await prepareDecisionState(body.state, { model: model.id, signal: c.req.raw.signal });
   } catch (error) {
     if (error instanceof RequestError) return requestErrorFrom(c, error);
     throw error;

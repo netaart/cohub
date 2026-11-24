@@ -34,7 +34,7 @@ type SpaceDecisionResult = {
 
 Without `model`, selection follows catalog order like LLM completions: use the first visible model, or the first configured model if all are hidden. With `provider`, apply the same rule within that provider. An explicit model ID may select a hidden model. Put the preferred default first in the catalog; image capability does not change the order.
 
-Images arrive as URLs. The API downloads `https` images with the safe remote fetcher, bounds them with the shared `@cohub/media` normalizer, and sends them upstream as data URLs. Caller `data:` URLs pass through unchanged. Image counts are checked against the model's `maxImages` before any upstream call.
+Images arrive as URLs. The API downloads `https` images with the safe remote fetcher and sends images upstream as data URLs. For Jev, local CLI attachments, remote URLs and inline data use PNG or JPEG with a maximum edge of 1568 pixels. Images smaller than 256 pixels per side or 78400 pixels total after fitting are rejected. Other models keep the shared image normalizer for remote URLs and pass inline data URLs through unchanged. Image counts are checked against the model's `maxImages` before any upstream call.
 
 The SDK exposes `space.decision()`; the CLI exposes `cohub decision` and `cohub spaces decision`.
 
@@ -50,7 +50,7 @@ Platform and user configuration live in `.cohub/decisions.json`. Decision models
       "apiKey": "PLATFORM_ENV_NAME",
       "models": [
         { "id": "openai/gpt-6-luna-decisions", "name": "Luna", "input": ["text", "image"], "maxImages": 128 },
-        { "id": "jev-latest", "name": "Jev" }
+        { "id": "jev-latest", "name": "Jev", "input": ["text", "image"] }
       ]
     }
   }

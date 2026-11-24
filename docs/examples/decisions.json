@@ -5,7 +5,7 @@
       "apiKey": "PLATFORM_ENV_NAME",
       "models": [
         { "id": "openai/gpt-6-luna-decisions", "name": "Luna", "input": ["text", "image"], "maxImages": 128 },
-        { "id": "jev-latest", "name": "Jev" }
+        { "id": "jev-latest", "name": "Jev", "input": ["text", "image"] }
       ]
     }
   }
