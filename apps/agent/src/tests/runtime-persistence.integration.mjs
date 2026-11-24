@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mock, test, after } from "node:test";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import { is, eq, asc } from "drizzle-orm";
+import { rotateQueuedTurnSequences } from "../../../api/src/queued-steer.js";
 import * as schema from "@cohub/db";
 import { LOCAL_HARNESSES } from "@cohub/protocol";
 
@@ -18,6 +19,7 @@ for (const table of Object.values(schema).filter((table) => is(table, PgTable)))
   const columns = config.columns.map((column) => `"${column.name}" ${column.getSQLType()}${column.name === "id" && column.getSQLType() === "uuid" ? " primary key default gen_random_uuid()" : column.name === "created_at" || column.name === "updated_at" ? " default now()" : ""}`);
   await engine.exec(`create table if not exists "${config.schema}"."${config.name}" (${columns.join(",")})`);
 }
+await engine.exec("create unique index test_turn_sequence on v2.session_turns(session_id,sequence)");
 await engine.exec("create unique index test_message_idempotency on v2.session_messages(session_id,idempotency_key)");
 let queueUnavailable = false;
 let gatewayUnavailable = false;
@@ -130,19 +132,31 @@ for (const harness of ["cohub", "pi", "codex"]) test(`mixed follow-ups use the l
 test("steer remains single and direct generation remains a claim barrier", async () => {
   const sessionId = crypto.randomUUID(), spaceId = crypto.randomUUID();
   await database.insert(schema.spaceSessions).values({ id: sessionId, spaceId });
-  const turns = ["followup", "steer", "followup", "followup"].map((intent, index) => ({
-    id: crypto.randomUUID(), sessionId, sequence: index + 1, executionKind: index === 2 ? "direct_generation" : "agent", intent, status: "queued", userContent: [], meta: {},
+  const turns = ["A", "generation", "B", "later"].map((text, index) => ({
+    id: crypto.randomUUID(), sessionId, sequence: index + 1, executionKind: index === 1 ? "direct_generation" : "agent",
+    intent: "followup", status: index === 1 ? "running" : "queued", updatedAt: new Date(index * 1000),
+    userContent: [{ type: "text", text }], meta: {},
   }));
+  const [a, generation, b, later] = turns;
   await database.insert(schema.sessionTurns).values(turns);
+  const affected = await database.transaction(async (tx) => {
+    const ids = await rotateQueuedTurnSequences(tx, b);
+    await tx.update(schema.sessionTurns).set({ intent: "steer" }).where(eq(schema.sessionTurns.id, b.id));
+    return ids;
+  });
+  assert.deepEqual(new Set(affected), new Set([a.id, b.id]));
+  assert.ok((await readTurn(a.id)).updatedAt > b.updatedAt, "a cached pre-promotion tail must accept A in B's old slot");
   const steer = await claimNextTurnBatch({ sessionId });
-  assert.equal(steer.batch.ownerTurn.id, turns[1].id); assert.equal(steer.batch.turns.length, 1);
-  await database.update(schema.sessionTurns).set({ status: "completed" }).where(eq(schema.sessionTurns.id, turns[1].id));
-  const earlier = await claimNextTurnBatch({ sessionId });
-  assert.equal(earlier.batch.ownerTurn.id, turns[0].id); assert.equal(earlier.batch.turns.length, 1);
-  await database.update(schema.sessionTurns).set({ status: "completed" }).where(eq(schema.sessionTurns.id, turns[0].id));
+  assert.deepEqual(steer.batch.executionBatch.turnIds, [b.id]);
+  await persistBatchUserMessages({ spaceId, sessionId, batch: steer.batch });
+  await finish({ spaceId, sessionId, turnId: b.id });
   assert.equal((await claimNextTurnBatch({ sessionId })).kind, "noop");
-  await database.update(schema.sessionTurns).set({ status: "completed" }).where(eq(schema.sessionTurns.id, turns[2].id));
-  assert.equal((await claimNextTurnBatch({ sessionId })).batch.ownerTurn.id, turns[3].id);
+  assert.equal((await readTurn(generation.id)).sequence, generation.sequence);
+  await database.update(schema.sessionTurns).set({ status: "completed" }).where(eq(schema.sessionTurns.id, generation.id));
+  const next = await claimNextTurnBatch({ sessionId });
+  assert.deepEqual(next.batch.executionBatch.turnIds, [a.id, later.id]);
+  const history = await createRuntimeContextReader(database)({ spaceId, sessionId, beforeSequence: next.batch.turns[0].sequence });
+  assert.deepEqual(history.messages.filter((message) => message.turnId === b.id).map((message) => message.role), ["user", "assistant"]);
 });
 
 test("resolution lookup stays bounded and validates Session and execution boundary", async () => {

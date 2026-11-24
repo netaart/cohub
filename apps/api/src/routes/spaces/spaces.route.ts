@@ -13,6 +13,7 @@ import {
 } from "@cohub/protocol/public-identifiers";
 import { normalizeGenerationPolicy, type GenerationContentBlock } from "@cohub/protocol/generation";
 import * as cronParser from "cron-parser";
+import { rotateQueuedTurnSequences } from "../../queued-steer.js";
 import { db } from "../../db/index.js";
 import { readBoardCheckpoint } from "@cohub/core/board";
 import { boardErrorBody, boardErrorResponse } from "../../board-error.js";
@@ -287,10 +288,8 @@ async function promoteQueuedTurnToSteer(input: {
     if (target.executionKind !== "agent") throw new Error("direct generation turns cannot be steered");
     if (target.intent !== "followup") throw new Error("only follow-up turns can be steered");
 
-    const [maxSequenceRow] = await tx.select({ max: sql<number>`coalesce(max(${sessionTurns.sequence}), 0)::int` }).from(sessionTurns).where(eq(sessionTurns.sessionId, input.sessionId));
-    const nextSequence = (maxSequenceRow?.max ?? target.sequence) + 1;
+    const affectedTurnIds = await rotateQueuedTurnSequences(tx, target);
     await tx.update(sessionTurns).set({
-      sequence: nextSequence,
       intent: "steer",
       meta: sanitizeMeta({
         ...readMetaRecord(target.meta),
@@ -315,9 +314,10 @@ async function promoteQueuedTurnToSteer(input: {
         meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(abortMeta)}::jsonb`,
         updatedAt: now,
       }).where(and(eq(sessionTurns.id, activeTurn.id), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"])));
+      affectedTurnIds.push(activeTurn.id);
     }
 
-    return { targetId: target.id, activeTurnId: activeTurn?.id ?? null, activeTurnStatus: activeTurn?.status ?? null, affectedTurnIds: [target.id, ...(activeTurn?.id && activeTurn.id !== target.id ? [activeTurn.id] : [])] };
+    return { targetId: target.id, activeTurnId: activeTurn?.id ?? null, activeTurnStatus: activeTurn?.status ?? null, affectedTurnIds };
   });
 
   try {

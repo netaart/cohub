@@ -83,7 +83,7 @@ mock.module("../abort.js", { exports: {
   },
 } });
 mock.module("../sandbox-pool.js", { exports: { ensureSandboxConnection: async () => {} } });
-mock.module("../sandbox/tools.js", { exports: { createSandboxCodingTools: () => [readTool] } });
+mock.module("../sandbox/tools.js", { exports: { createSandboxCodingTools: () => [readTool], resolveSandboxProvider: async () => "cloud", tracedRpc: unavailable } });
 mock.module("../execution-grants.js", { exports: { createAgentExecutionToken: async () => null } });
 mock.module("../runtime/models-loader.js", { exports: { loadRuntimeModelsConfigs: async () => [modelsConfig] } });
 mock.module("../runtime/model-tasks-config.js", { exports: { loadImageToTextConfig: async () => null, loadContextCompactionConfig: async () => null } });
