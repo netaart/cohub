@@ -1774,3 +1774,38 @@ test("standalone sign-in preserves the return route and restores only the active
 	await second.signOut();
 	assert.equal((await first.context())?.viewer, null);
 });
+
+test("authorizing from a signed-in storefront keeps the revocable storefront token", async (t) => {
+	const id = "11111111-1111-4111-8111-111111111111";
+	let messageHandler: ((event: MessageEvent) => void) | null = null;
+	const popup = {
+		closed: false,
+		close() { this.closed = true; },
+		postMessage(message: Record<string, unknown>) {
+			queueMicrotask(() => messageHandler?.({
+				source: popup,
+				origin: "https://cohub.live",
+				data: { type: "cohub.app.authorize.result", requestId: message.requestId, token: "popup-token" },
+			} as MessageEvent));
+		},
+	};
+	globalThis.document = { cookie: `__Host-cohub-app-active=${id}.${"a".repeat(43)}` } as Document;
+	globalThis.window = {
+		location: { origin: "https://shop.example" },
+		parent: {} as Window,
+		open: () => {
+			queueMicrotask(() => messageHandler?.({
+				source: popup,
+				origin: "https://cohub.live",
+				data: { type: "cohub.app.broker.ready", viewer: { userUuid: "buyer" } },
+			} as MessageEvent));
+			return popup;
+		},
+		addEventListener: (_type: string, handler: (event: MessageEvent) => void) => { messageHandler = handler; },
+		removeEventListener: () => { messageHandler = null; },
+	} as unknown as Window & typeof globalThis;
+	t.mock.method(globalThis, "fetch", async () => Response.json({ token: "storefront-token", viewer: { userUuid: "buyer" } }));
+	const transport = new PopupBrokerTransport({ brokerOrigin: "https://cohub.live", appId: id });
+	const response = await transport.request<{ token: string }>({ type: "cohub.app.authorize", scopes: ["space.view"] });
+	assert.equal(response?.token, "storefront-token");
+});

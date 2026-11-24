@@ -25,6 +25,7 @@ import { hostPromptImages } from "../../session-images.js";
 import { normalizeContentBlocks } from "@cohub/core/content/normalize";
 import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError } from "@cohub/core/sessions";
 import { verifyAppSessionToken } from "../../app-sessions.js";
+import { isAppBrowserTokenLive } from "../../lib/app-browser-epoch.js";
 import { mergePromptContextAuth, promptAuthContextFromAppSession } from "../../prompt-auth-context.js";
 import { getSpaceSandboxBySpaceId, updateSpaceSandbox, recoverSpaceSandbox } from "../../space-sandboxes.js";
 import { isSandboxReportTokenValid } from "../../crypto.js";
@@ -456,6 +457,8 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
   if (promptThinkingLevel === null) return c.json({ message: `thinkingLevel must be one of: ${MODEL_THINKING_LEVELS.join(", ")}` }, 400);
   const promptPermission = accessMode === "read_only" ? "session.prompt.readonly" : "session.prompt.fullaccess";
   const appSession = body.authToken ? verifyAppSessionToken(body.authToken) : null;
+  // An ended storefront token must not fall back to the account's own access.
+  if (appSession && !(await isAppBrowserTokenLive(appSession))) return c.json({ message: "App session ended" }, 401);
   const permissionSubject = appSession && appSession.userUuid === userId
     ? ({ uuid: userId, appSession } as { uuid: string; appSession: typeof appSession })
     : { uuid: userId };
