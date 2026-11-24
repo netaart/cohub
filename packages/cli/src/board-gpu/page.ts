@@ -219,7 +219,7 @@ const api = {
     const options = { sampler, region: input.region, camera: input.camera, scale: input.scale, padding: 0, ...(at ? { at } : {}) };
     const planned = prepareBoardExport(document, options);
     if (!planned) throw new Error("Nothing to profile: the region contains no items.");
-    const scripts = await session.scripts.at(at ? sampler.at(time).document : document, time, boardExportView(planned.plan));
+    const scripts = await session.scripts.at(at ? sampler.at(time).document : document, time, boardExportView(planned.plan, planned.camera?.view));
     const gl = (target as WebGLRenderer).gl;
     const info = gl.getExtension("WEBGL_debug_renderer_info");
     const rendererName = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
@@ -373,7 +373,7 @@ const api = {
       ...(at ? { at } : {}),
     };
     const planned = prepareBoardExport(document, framing);
-    const scripts = await session.scripts.at(sample, time, planned ? boardExportView(planned.plan) : undefined);
+    const scripts = await session.scripts.at(sample, time, planned ? boardExportView(planned.plan, planned.camera?.view) : undefined);
     const options = { ...framing, screen: frame.screen, scripts };
     const prepared = prepareBoardExport(document, options);
     if (!prepared) throw new Error("Nothing to export: the region contains no items.");

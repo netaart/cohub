@@ -146,7 +146,7 @@ test("spaces turns ls forwards parsed options to the selected space", async () =
               return { session: {}, turns: [turn], hasMore: true, nextCursor: 6 };
             },
             get: async () => ({ turn }),
-            intermediate: { get: async () => null },
+            intermediate: { get: async () => null, listToolCalls: async () => new Map() },
           },
         }),
       }),

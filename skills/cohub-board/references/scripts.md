@@ -87,7 +87,9 @@ starts over. Check the visitor's view with `simulate --mode play`.
 ## Verify with simulate
 
 `simulate` runs the scripts through input steps without saving. It reports script
-errors and broadcasts, and `-o` draws the result.
+errors, broadcasts and `console` lines, and `-o` draws the result. `ctx.view` is set
+only for a script that listens for `viewchange`, there and live alike; `--view` sets the
+camera it reports, pitch included.
 
 ```bash
 cohub boards simulate <board> -i steps.json --json

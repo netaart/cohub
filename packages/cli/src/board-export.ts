@@ -521,7 +521,7 @@ export async function runBoardExport(
       const prepareScripts = async (scripts: NonNullable<typeof host>, shaders: boolean) => {
         await scripts.prepare(initial.scene.items, [time ?? 0], initial.plan.scale, initial.document.board, {
           shaders,
-          view: boardExportView(initial.plan),
+          view: boardExportView(initial.plan, initial.camera?.view),
           ...(inputs ? { inputs } : {}),
           ...(history ? { history: (at: number) => documentAt(at) } : {}),
         });

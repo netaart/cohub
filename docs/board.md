@@ -442,7 +442,11 @@ A track drives one property of one target:
   ids step), `step`, or `spline` for smooth position paths; `orient` turns the item
   along the path.
 
-A marker with `pause: true` stops playback there until `next`.
+A marker with `pause: true` stops playback there until `next`. Writes never interrupt a
+shared playback: edits to the playing animation, its tracks included, show as it runs, and
+only deleting the animation ends it. Viewers load the images of the next 3 seconds of a
+shared playback, past a pause marker it holds at, at the size they grow to, so items fade
+or grow in already loaded.
 
 A play or read-only view that just opened holds `auto` animations and Board scripts at
 their start until the model objects in view have loaded, at most 1.5 s, so the first
@@ -467,9 +471,10 @@ keyframed `bearing` blends as a number, so 350 to 370 turns 20 degrees.
 A tipped camera shows the Board as ground in perspective, with lifted items and model
 objects standing on it; at 60 degrees the top of the view still looks down at the Board,
 so no horizon shows. Screen layers from scripts stay on the screen, anchored ones over
-their item. Viewers pan and zoom across the ground until **Back to the camera**. The
-camera tips and turns in play, read-only views and `--camera` exports; editing levels it
-first, so every editing tool works on the flat Board. `#view=<x>,<y>,<zoom>,<pitch>,<bearing>`
+their item. Viewers pan and zoom across the ground, still tipped, until **Back to the
+camera** or the next playback, whoever starts it. The camera tips and turns in play,
+read-only views and `--camera` exports; choosing an editing tool levels it first, so every
+editing tool works on the flat Board. `#view=<x>,<y>,<zoom>,<pitch>,<bearing>`
 opens a link at an angle.
 
 Use `boards schema track`, `boards schema animation` and `boards schema effect`

@@ -240,7 +240,7 @@ const MIME: Record<BoardNodeExportFormat, string> = {
   webp: "image/webp",
 };
 
-export { type BoardScriptLaneStatus, createNodeBoardScriptHost, createNodeBoardScriptRuntime, describeBoardScriptLanes } from "./scripts.js";
+export { type BoardScriptLaneStatus, type BoardScriptLog, createNodeBoardScriptHost, createNodeBoardScriptRuntime, describeBoardScriptLanes } from "./scripts.js";
 
 export function boardImageMimeType(format: BoardNodeExportFormat): string {
   return MIME[format];

@@ -16,7 +16,7 @@ import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset, uploadLikeStickerAsset } from "../avatar.js";
 import { createClient, createRealtimeClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
-import { table, json as outJson, jsonRequested, ok, error, reportError, handleHttp, formatEpochMs, truncateText, spinner } from "../output.js";
+import { table, json as outJson, jsonRequested, ok, error, reportError, handleHttp, formatEpochMs, truncateText, excerptColumn, spinner } from "../output.js";
 import { SESSION_INITIATOR_COLUMN, SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
 import { explicitSpace, failSpaceTarget, resolveSpace, resolveSpaceRef, resolveSpaceTarget } from "../space.js";
 import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
@@ -2003,8 +2003,8 @@ function registerTurns(sessionsCmd: Command): void {
           { key: "sequence", label: "Seq" },
           { key: "id", label: "ID" },
           { key: "status", label: "Status" },
-          { key: "userText", label: "User" },
-          { key: "assistantText", label: "Assistant" },
+          excerptColumn("userText", "User"),
+          excerptColumn("assistantText", "Assistant"),
           { key: "updatedAt", label: "Updated" },
         ]);
         if (result.hasMore) console.log(`\n  More turns available — next cursor: ${result.nextCursor}`);
@@ -2151,8 +2151,8 @@ function registerTurns(sessionsCmd: Command): void {
           { key: "sequence", label: "Seq" },
           { key: "id", label: "ID" },
           { key: "status", label: "Status" },
-          { key: "userPreview", label: "User" },
-          { key: "assistantPreview", label: "Assistant" },
+          excerptColumn("userPreview", "User"),
+          excerptColumn("assistantPreview", "Assistant"),
         ]);
         if (result.hasMore) console.log(`\n  More turns available — next cursor: ${result.nextCursor}`);
       } catch (e: unknown) {
@@ -2185,8 +2185,8 @@ function registerTurns(sessionsCmd: Command): void {
           { key: "sequence", label: "Seq" },
           { key: "id", label: "ID" },
           { key: "status", label: "Status" },
-          { key: "userText", label: "User" },
-          { key: "assistantText", label: "Assistant" },
+          excerptColumn("userText", "User"),
+          excerptColumn("assistantText", "Assistant"),
         ]);
         console.log(`\n  Window — older: ${result.hasMoreOlder ? "yes" : "no"}, newer: ${result.hasMoreNewer ? "yes" : "no"}`);
       } catch (e: unknown) {

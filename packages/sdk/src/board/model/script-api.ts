@@ -45,7 +45,7 @@ export const BOARD_SCRIPT_API = {
     items: "Every item in scope, as authored, by id; current after each change event.",
     state: "Mutable state kept across frames and restored in exports.",
     frame: "The latest frame.",
-    view: "Camera, width, height and safeRect in screen pixels; null until a viewchange. Exports and profiles send the area they draw, at the output's pixels.",
+    view: "Camera, width, height and safeRect in screen pixels; set by viewchange, so it stays null without a viewchange listener. Exports and profiles send the camera or area they draw, at the output's pixels.",
     env: "The viewer's environment: mode, pointer, orientation, reducedMotion, locale and senses. See env; envchange reports changes.",
     random: "random(): a seeded number in [0, 1); Math.random() draws from the same sequence.",
     on: "on(type, handler): input and host events; returns an unsubscribe function.",

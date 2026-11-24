@@ -82,7 +82,8 @@ import {
 	parseBoardCssColor,
 	resolveBoardBackdrop,
 } from "../render/index.js";
-import type { BoardAssetManager } from "./assets.js";
+import type { BoardAssetManager, BoardAssetPrefetch } from "./assets.js";
+import { boardLookaheadPrefetch } from "./lookahead.js";
 import { type BoardBackdropStatus, createBoardStageBackdrop } from "./backdrop.js";
 import { type BoardCanvasBox, boardCanvasSize, measureBoardCanvasBox } from "./canvas-size.js";
 import { scheduleBoardMaintenance } from "./maintenance.js";
@@ -260,6 +261,7 @@ const LOAD_LEAD_MS = 300;
 const CULL_PADDING = 96;
 const PREFETCH_REST_MS = 200;
 const PREFETCH_LIMIT = 96;
+const LOOKAHEAD_REFRESH_MS = 500;
 const FRAME_SAMPLES = 120;
 const ENTERED_MODEL_MIN_EDGE = 240;
 const ENTERED_MODEL_EDGE = 420;
@@ -433,6 +435,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let prefetchMovedAt = 0;
 	let prefetchContext: BoardRenderContext | null = null;
 	let cancelPrefetch: (() => void) | null = null;
+	let around: BoardAssetPrefetch[] = [];
+	let ahead: BoardAssetPrefetch[] = [];
+	let lookedAheadAt = Number.NEGATIVE_INFINITY;
 	const staleIds = new Set<string>();
 	let canvasBox: BoardCanvasBox | null = null;
 	let canvasSize = { width: 0, height: 0, resolution: 0 };
@@ -441,6 +446,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let shownEditingId: string | null = null;
 	let surface = { width: 0, height: 0 };
 	let playbackCamera: BoardViewport | null = null;
+	let playbackId: string | null = null;
 	let directed = false;
 	let scriptCamera = false;
 	const scriptListeners = new Set<() => void>();
@@ -1213,7 +1219,29 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		cancelPrefetch = null;
 		prefetchKey = "";
 		prefetchContext = null;
+		around = [];
+		ahead = [];
+		lookedAheadAt = Number.NEGATIVE_INFINITY;
 		assets.prefetch?.([]);
+	}
+
+	function pushPrefetch() {
+		assets.prefetch?.(ahead.length ? [...ahead, ...around] : around);
+	}
+
+	function lookAhead(playback: BoardPlaybackSnapshot | null, now: number, wall: number) {
+		if (!assets.prefetch || (options.prefetch ?? device.prefetch) <= 0 || now - lookedAheadAt < LOOKAHEAD_REFRESH_MS) return;
+		lookedAheadAt = now;
+		const frames = playback && !editor.playhead ? player.ahead(editor.document, playback, wall) : [];
+		const next = frames.length
+			? boardLookaheadPrefetch(frames, (id) => editor.scene.get(id), (frame) => {
+					const camera = editor.cameraPolicy === "follow" && Object.keys(frame.camera).length > 0 ? followCamera(frame.camera, frame, editor.scene) : renderCamera();
+					return camera.zoom * nearest(camera) * (app?.renderer.resolution ?? 1);
+				})
+			: [];
+		if (next.length === 0 && ahead.length === 0) return;
+		ahead = next;
+		pushPrefetch();
 	}
 
 	function prefetch(margin: number, context: BoardRenderContext) {
@@ -1243,7 +1271,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			wanted.push({ item, edge: boardTextureEdge(item, scale), distance });
 		}
 		wanted.sort((a, b) => a.distance - b.distance);
-		assets.prefetch?.(wanted.slice(0, PREFETCH_LIMIT));
+		around = wanted.slice(0, PREFETCH_LIMIT);
+		pushPrefetch();
 	}
 
 	function syncScripts() {
@@ -1355,9 +1384,14 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		scripts.update();
 		player.enter(editor.consumeRecentlyAdded(), editor.document);
 		const playback = options.playback?.() ?? null;
+		if (playback && playback.playbackId !== playbackId) {
+			playbackId = playback.playbackId;
+			editor.setCameraPolicy("follow");
+		}
 		const now = performance.now();
 		const wall = timeline.at(now);
 		const frame = player.frame(editor.document, playback, now, wall, editor.playhead?.animationId ?? null);
+		lookAhead(playback, now, wall);
 		const previews = previewItems();
 		const moving = new Map<string, BoardItem>(previews);
 		for (const [id, item] of frame.items) moving.set(id, item);

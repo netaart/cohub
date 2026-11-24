@@ -99,7 +99,10 @@ import {
 	boardReceivesKeys,
 	registerBoardPanel,
 } from "#lib/board/board-keyboard.ts";
-import { boardAnimationReach, opensInPlace } from "#lib/board/board-media-playback.ts";
+import {
+	boardAnimationReach,
+	opensInPlace,
+} from "#lib/board/board-media-playback.ts";
 import {
 	enterPresentationFullscreen,
 	holdPresentation,
@@ -290,11 +293,12 @@ const assets = createBoardAssetManager({
 	resolveFile: (path, options) =>
 		resolvedAssetSource.resolveFile(path, options),
 	subscribe: resolvedAssetSource.subscribe,
-	modelPreviews: !spaceId && !signals.saveData && typeof createImageBitmap === "function"
-		? createBoardModelPreviews(resolvedAssetSource, {
-				cache: { read: readModelStill, write: saveModelStill },
-			})
-		: undefined,
+	modelPreviews:
+		!spaceId && !signals.saveData && typeof createImageBitmap === "function"
+			? createBoardModelPreviews(resolvedAssetSource, {
+					cache: { read: readModelStill, write: saveModelStill },
+				})
+			: undefined,
 });
 const boardLod = $derived(lod ?? forced?.lod);
 const appDetails = createBoardAppDetailLoader();
@@ -1209,7 +1213,7 @@ async function copyViewLink() {
 			: view
 				? { view }
 				: {};
-	if (activePlayback && activePlayback.status !== "stopped") {
+	if (activePlayback) {
 		const at = playbackClockAt(
 			activePlayback,
 			editor.document,

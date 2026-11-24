@@ -14,7 +14,7 @@ test("Board JSON input enforces the streamed size limit", async () => {
   try {
     await writeFile(input, '{"value":"large"}');
     await assert.rejects(readBoardJsonObject(input, 4), /input limit/);
-    await assert.rejects(readBoardJsonObject(root, 1024), /regular file/);
+    await assert.rejects(readBoardJsonObject(root, 1024), /a file or a pipe/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

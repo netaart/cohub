@@ -4,16 +4,21 @@ import {
   type SpaceTurnListItem,
   type SpaceTurnListOptions,
   type SpaceTurnsResponse,
+  type MessageToolCallsFile,
   type SessionTurnRecord,
+  type StoredIntermediateMessage,
+  type StoredToolCall,
   type TurnIntermediateMessagesFile,
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import {
   error,
+  excerptColumn,
   handleHttp,
   json as outJson,
   jsonRequested,
+  printable,
   table,
   type Row,
 } from "../output.js";
@@ -47,6 +52,7 @@ type SpaceTurnsCommandClient = {
         }>;
         intermediate: {
           get(turnId: string): Promise<TurnIntermediateMessagesFile | null>;
+          listToolCalls(turnId: string, messages: readonly StoredIntermediateMessage[]): Promise<Map<string, MessageToolCallsFile>>;
         };
       };
     };
@@ -158,6 +164,30 @@ export function toSpaceTurnRows(turns: SpaceTurnListItem[]): Row[] {
   }));
 }
 
+const TOOL_TEXT_LINES = 40;
+
+function clipLines(text: string): string {
+  const lines = text.trimEnd().split(/\r?\n/);
+  const shown = lines.slice(0, TOOL_TEXT_LINES).map((line) => `     ${printable(line.length > 400 ? `${line.slice(0, 399)}…` : line)}`);
+  if (lines.length > TOOL_TEXT_LINES) shown.push(`     … ${lines.length - TOOL_TEXT_LINES} more lines in --json`);
+  return shown.join("\n");
+}
+
+function toolText(content: NonNullable<StoredToolCall["result"]>["content"]): string {
+  if (typeof content === "string") return content;
+  return (content ?? []).map((block) => (block.type === "text" ? block.text : `[${block.type}]`)).join("\n");
+}
+
+export function describeToolCall(call: StoredToolCall): string {
+  const timing = (call.meta?.timing ?? null) as { durationMs?: number } | null;
+  const status = !call.result ? "no result" : call.result.isError ? "error" : "ok";
+  const head = `  → ${call.name} · ${status}${typeof timing?.durationMs === "number" ? ` · ${timing.durationMs}ms` : ""}`;
+  const input = typeof call.input.command === "string" ? call.input.command : JSON.stringify(call.input, null, 2);
+  const parts = [printable(head), clipLines(input)];
+  if (call.result) parts.push("   ⇢", clipLines(toolText(call.result.content)));
+  return parts.join("\n");
+}
+
 export function registerSpaceTurns(
   spacesCmd: Command,
   dependencies: { createClient?: () => SpaceTurnsCommandClient } = {},
@@ -221,8 +251,8 @@ export function registerSpaceTurns(
             { key: "id", label: "Turn ID" },
             { key: "meta", label: "By", format: (meta) => readTurnInitiator(meta) },
             { key: "status", label: "Status" },
-            { key: "userText", label: "User" },
-            { key: "assistantText", label: "Assistant" },
+            excerptColumn("userText", "User"),
+            excerptColumn("assistantText", "Assistant"),
             { key: "updatedAt", label: "Updated" },
           ]);
           if (result.hasMore) console.log(`\n  More turns available - next cursor: ${result.nextCursor}`);
@@ -241,8 +271,8 @@ export function registerSpaceTurns(
           { key: "sequence", label: "Seq" },
           { key: "id", label: "Turn ID" },
           { key: "status", label: "Status" },
-          { key: "userPreview", label: "User" },
-          { key: "assistantPreview", label: "Assistant" },
+          excerptColumn("userPreview", "User"),
+          excerptColumn("assistantPreview", "Assistant"),
         ]);
         if (result.pageInfo.hasMore && result.pageInfo.nextCursor) {
           console.log(`\n  More turns available - next cursor: ${result.pageInfo.nextCursor}`);
@@ -255,20 +285,32 @@ export function registerSpaceTurns(
   turnsCmd
     .command("intermediate <sessionId> <turnId>")
     .description("Read persisted intermediate messages from the CDN archive")
+    .option("--tool-calls", "Include each tool call's full input and result")
     .option("--json", "Output as JSON")
-    .action(async (sessionId: string, turnId: string, options: { json?: boolean }) => {
+    .addHelpText("after", `
+Without --tool-calls, tool calls show as short previews. With it, every call's input,
+result and timing are fetched; the table clips long results, --json keeps them whole.
+
+  cohub spaces turns intermediate <sessionId> <turnId> --tool-calls
+  cohub spaces turns intermediate <sessionId> <turnId> --tool-calls --json`)
+    .action(async (sessionId: string, turnId: string, options: { json?: boolean; toolCalls?: boolean }) => {
       const spaceId = await resolveSpace(spacesCmd);
       const client = dependencies.createClient?.() ?? createClient();
       try {
-        const archive = await client.space(spaceId).session(sessionId).turns.intermediate.get(turnId);
-        if (jsonRequested(options)) return outJson(archive);
+        const turns = client.space(spaceId).session(sessionId).turns;
+        const archive = await turns.intermediate.get(turnId);
+        const calls = archive && options.toolCalls ? await turns.intermediate.listToolCalls(turnId, archive.messages) : null;
+        if (jsonRequested(options)) {
+          return outJson(archive && calls ? { ...archive, messages: archive.messages.map((message) => ({ ...message, toolCalls: calls.get(message.id)?.toolCalls ?? [] })) } : archive);
+        }
         if (!archive) return console.log("  No intermediate messages found");
         console.log(`Turn ${archive.turnId}`);
         console.log(`  ${archive.summary.messageCount} intermediate messages · ${archive.summary.toolCallCount} tool calls`);
         for (const [index, message] of archive.messages.entries()) {
-          console.log(`\n${index + 1}. ${message.role}${message.provider ? ` · ${message.provider}/${message.model ?? ""}` : ""}`);
-          if (message.text) console.log(message.text);
-          if (message.toolCallsObjectKey) console.log("  Tool calls: available");
+          console.log(printable(`\n${index + 1}. ${message.role}${message.provider ? ` · ${message.provider}/${message.model ?? ""}` : ""}${message.createdAt ? ` · ${message.createdAt}` : ""}`));
+          if (message.text) console.log(printable(message.text));
+          if (calls) for (const call of calls.get(message.id)?.toolCalls ?? []) console.log(describeToolCall(call));
+          else if (message.toolCallsObjectKey) console.log("  Tool calls: add --tool-calls");
         }
       } catch (cause) {
         handleHttp(cause);

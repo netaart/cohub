@@ -26,7 +26,7 @@ import { dispatchLabelAssignmentsUpdated } from "../realtime-events.js";
 import { buildSessionTurnResponse } from "../session-turn-response.js";
 import { parseSessionTitleInput } from "../session-title-input.js";
 import { changeSessionArchive } from "../session-archive.js";
-import { isNativeClientTurn, type SpeakTurnResponse } from "@cohub/protocol";
+import { isNativeClientTurn, SESSION_TURN_SIGNED_URL_LIMIT, type SpeakTurnResponse } from "@cohub/protocol";
 import { BillingAccessBlockedError } from "@cohub/billing";
 import { billingBlockedResponse } from "../lib/billing-blocked.js";
 import { getRequestSource } from "../lib/request-source.js";
@@ -378,7 +378,8 @@ router.post("/:id/turns/:turnId/signed-urls", async (c) => {
 
   const body = await c.req.json<{ objectKeys?: string[] }>().catch(() => null);
   const objectKeys = Array.isArray(body?.objectKeys) ? body.objectKeys.filter((key): key is string => typeof key === "string") : [];
-  if (objectKeys.length === 0 || objectKeys.length > 50) return c.json({ message: "objectKeys is required" }, 400);
+  if (objectKeys.length === 0) return c.json({ message: "objectKeys is required" }, 400);
+  if (objectKeys.length > SESSION_TURN_SIGNED_URL_LIMIT) return c.json({ message: `At most ${SESSION_TURN_SIGNED_URL_LIMIT} objectKeys per request` }, 400);
   let urls: Awaited<ReturnType<typeof createSignedTurnUrls>>;
   try {
     urls = await createSignedTurnUrls({ spaceId: session.spaceId, sessionId: session.id, turnId, objectKeys });
