@@ -143,6 +143,9 @@ test("member-only reads need one grant that covers them from a member", async ()
     });
   };
   const listCheckpoints = () => hasMemberPermission(action(report), "checkpoint.view", shop);
+  // The publisher already reads checkpoints as a signed-in guest, but is not a member.
+  await client.exec(`INSERT INTO v2.access_policies (resource_type, resource_id, signed_in_user_role, created_by, updated_by) VALUES ('space', '${shop}', 'guest', 'owner', 'owner')`);
+  assert.equal(await hasPermission(action(report), "checkpoint.view", { spaceId: shop }), true);
   assert.equal((await grant(["file.view"])).status, 200);
   assert.equal(await listCheckpoints(), false, "an unrelated grant does not unlock it");
   assert.equal((await grant(["checkpoint.view"])).status, 200);
