@@ -129,6 +129,32 @@ for (const harness of ["cohub", "pi", "codex"]) test(`mixed follow-ups use the l
   assert.deepEqual(history.messages.map((message) => message.id), turns.map((turn) => turn.meta.userMessageId));
 });
 
+const promote = (target) => database.transaction(async (tx) => {
+  const ids = await rotateQueuedTurnSequences(tx, target);
+  await tx.update(schema.sessionTurns).set({ intent: "steer" }).where(eq(schema.sessionTurns.id, target.id));
+  return ids;
+});
+
+test("successive steers keep their acceptance order in claims and history", async () => {
+  const sessionId = crypto.randomUUID(), spaceId = crypto.randomUUID();
+  await database.insert(schema.spaceSessions).values({ id: sessionId, spaceId });
+  const [waiting, a, b] = await database.insert(schema.sessionTurns).values(["waiting", "A", "B"].map((text, i) => ({
+    sessionId, sequence: i + 1, executionKind: "agent", intent: "followup", status: "queued", userContent: [{ type: "text", text }], meta: {},
+  }))).returning();
+  await promote(a);
+  await promote(b);
+  const timeline = await database.select().from(schema.sessionTurns).where(eq(schema.sessionTurns.sessionId, sessionId)).orderBy(asc(schema.sessionTurns.sequence));
+  assert.deepEqual(timeline.map((turn) => turn.id), [a.id, b.id, waiting.id]);
+  const first = await claimNextTurnBatch({ sessionId });
+  assert.deepEqual(first.batch.executionBatch.turnIds, [a.id]);
+  await persistBatchUserMessages({ spaceId, sessionId, batch: first.batch });
+  await finish({ spaceId, sessionId, turnId: a.id });
+  const second = await claimNextTurnBatch({ sessionId });
+  assert.deepEqual(second.batch.executionBatch.turnIds, [b.id]);
+  const history = await createRuntimeContextReader(database)({ spaceId, sessionId, beforeSequence: second.batch.ownerTurn.sequence });
+  assert.deepEqual(history.messages.map((message) => [message.turnId, message.role]), [[a.id, "user"], [a.id, "assistant"]]);
+});
+
 test("steer remains single and direct generation remains a claim barrier", async () => {
   const sessionId = crypto.randomUUID(), spaceId = crypto.randomUUID();
   await database.insert(schema.spaceSessions).values({ id: sessionId, spaceId });
@@ -139,11 +165,7 @@ test("steer remains single and direct generation remains a claim barrier", async
   }));
   const [a, generation, b, later] = turns;
   await database.insert(schema.sessionTurns).values(turns);
-  const affected = await database.transaction(async (tx) => {
-    const ids = await rotateQueuedTurnSequences(tx, b);
-    await tx.update(schema.sessionTurns).set({ intent: "steer" }).where(eq(schema.sessionTurns.id, b.id));
-    return ids;
-  });
+  const affected = await promote(b);
   assert.deepEqual(new Set(affected), new Set([a.id, b.id]));
   assert.ok((await readTurn(a.id)).updatedAt > b.updatedAt, "a cached pre-promotion tail must accept A in B's old slot");
   const steer = await claimNextTurnBatch({ sessionId });

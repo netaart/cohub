@@ -298,7 +298,6 @@ async function promoteQueuedTurnToSteer(input: {
         promotedFromIntent: target.intent,
         dispatchIntent: "steer",
       }),
-      updatedAt: now,
     }).where(eq(sessionTurns.id, target.id));
 
     const [activeTurn] = await tx.select({ id: sessionTurns.id, status: sessionTurns.status }).from(sessionTurns).where(and(eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"]))).orderBy(desc(sessionTurns.sequence)).limit(1);
