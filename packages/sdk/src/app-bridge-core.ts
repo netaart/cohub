@@ -504,6 +504,8 @@ export function createAppBridgeCore(
 			? { surface: "background" as const }
 			: { surface: "page" as const });
 	const onStateChange = config.onStateChange;
+	// Tokens leaving Cohub through the broker end with the account's web sign-out.
+	const broker = authorizationContext.surface === "broker";
 
 	let appToken: string | null = null;
 	let tokenViewer: string | null | undefined;
@@ -828,7 +830,8 @@ export function createAppBridgeCore(
 			`${apiOrigin}/api/apps/${app.id}/session`,
 			{
 				method: "POST",
-				headers: { Authorization: `Bearer ${userToken}` },
+				headers: { Authorization: `Bearer ${userToken}`, ...(broker ? { "Content-Type": "application/json" } : {}) },
+				...(broker ? { body: JSON.stringify({ broker: true }) } : {}),
 			},
 		);
 		if (!response.ok) throw new Error("Failed to create app session.");
@@ -876,6 +879,7 @@ export function createAppBridgeCore(
 					...(options?.silent ? { silent: true } : {}),
 					...(options?.consent ? { consent: options.consent } : {}),
 					...(incremental ? { scopeMode: "extend" } : {}),
+					...(broker ? { broker: true } : {}),
 				}),
 				},
 			);

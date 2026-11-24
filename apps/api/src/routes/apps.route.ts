@@ -1390,21 +1390,31 @@ router.post("/:id/session", async (c) => {
   const app = await getAppById(id);
   if (app?.status !== "published") return c.json({ message: "app not found" }, 404);
   if (requiresSpaceAppAccess(app) && !(await hasPermission(user, "space.view", { spaceId: app.spaceId }))) return authzDenied(c);
+  const body = await c.req.json().catch(() => null) as { broker?: unknown } | null;
   const token = createAppSessionToken({
     userUuid: user.uuid,
     appId: app.id,
     spaceId: app.spaceId,
     appScopes: app.appScopes as Permission[],
-    browserEpoch: await holdAppBrowserEpoch(user.uuid),
+    ...(await brokerTokenEpoch(user, body?.broker === true)),
   });
   return c.json({ token, expiresIn: APP_SESSION_TTL_SECONDS, ...wrapAppRecord(wire, serializeApp(app)) });
 });
 
-// Account-minted App tokens end with the account's App sign-ins, wherever the App runs.
+/**
+ * Tokens the sign-in broker hands to a page outside Cohub end with the
+ * account's web sign-out on every device. Tokens for Apps embedded in Cohub
+ * follow that Cohub session instead.
+ */
+async function brokerTokenEpoch(user: AuthUser, broker: boolean) {
+  return broker ? { browserEpoch: await holdAppBrowserEpoch(user.uuid) } : {};
+}
+
 async function buildAppAuthorizationPayload(
   app: typeof apps.$inferSelect,
   user: AuthUser,
   grant: typeof appViewerGrants.$inferSelect,
+  broker: boolean,
 ) {
   const scopes = normalizePermissionScopes(grant.scopes as string[]);
   return {
@@ -1414,7 +1424,7 @@ async function buildAppAuthorizationPayload(
       spaceId: app.spaceId,
       appScopes: app.appScopes as Permission[],
       viewerScopes: scopes,
-      browserEpoch: await holdAppBrowserEpoch(user.uuid),
+      ...(await brokerTokenEpoch(user, broker)),
     }),
     expiresIn: APP_SESSION_TTL_SECONDS,
     grant: {
@@ -1437,7 +1447,8 @@ router.post("/:id/authorize", async (c) => {
   if (requiresSpaceAppAccess(app) && !(await hasPermission(user, "space.view", { spaceId: app.spaceId }))) {
     return c.json({ message: "app is not accessible in this space", code: "app_not_accessible" }, 403);
   }
-  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown; scopeMode?: unknown; consent?: unknown } | null;
+  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown; scopeMode?: unknown; consent?: unknown; broker?: unknown } | null;
+  const broker = body?.broker === true;
   // Hosts send `consent` with `silent`, so an older API falls back to renew-only.
   const parsed = parseAppAuthorizeRequest(body, ALLOWED_VIEWER_SCOPES);
   if ("message" in parsed) return c.json(parsed, 400);
@@ -1471,7 +1482,7 @@ router.post("/:id/authorize", async (c) => {
     if (existing?.revokedAt) return c.json({ message: "grant was revoked; viewer consent is required again", code: "consent_required" }, 403);
     const renewed = await renewViewerGrant({ existing, requested });
     if (renewed) {
-      return c.json(await buildAppAuthorizationPayload(app, user, renewed));
+      return c.json(await buildAppAuthorizationPayload(app, user, renewed, broker));
     }
     if (user.uuid !== app.userUuid) {
       return c.json({ message: "grant is no longer active; viewer consent is required again", code: "consent_required" }, 403);
@@ -1511,7 +1522,7 @@ router.post("/:id/authorize", async (c) => {
   }
   if (!grant) return c.json({ message: "failed to create grant" }, 500);
 
-  return c.json(await buildAppAuthorizationPayload(app, user, grant));
+  return c.json(await buildAppAuthorizationPayload(app, user, grant, broker));
 });
 
 // ── Viewer grants: list + revoke (the viewer's own consents) ─────────────────
