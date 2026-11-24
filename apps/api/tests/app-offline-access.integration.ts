@@ -27,7 +27,7 @@ mock.module("../src/redis.js", { exports: {
 const { config } = await import("../src/config.js");
 config.appEncryptionKey = "test-only-signing-key";
 const { createAppsRouter } = await import("../src/routes/apps.route.js");
-const { hasPermission, resolvePermissionAccess } = await import("../src/permissions.js");
+const { hasMemberPermission, hasPermission, resolvePermissionAccess } = await import("../src/permissions.js");
 const { default: appAccessRouter } = await import("../src/routes/spaces/app-access.route.js");
 
 const insert = async (sql: string) => (await client.query<{ id: string }>(sql)).rows[0]?.id ?? "";
@@ -130,4 +130,21 @@ test("an App published by a builder uses a host's offline access on its own Spac
   });
   assert.equal(granted.status, 200);
   assert.equal(await canRead(run()), true);
+});
+
+test("member-only reads need one grant that covers them from a member", async () => {
+  const report = await insert(`INSERT INTO v2.apps (space_id, user_uuid, slug, status, target_type, target_ref)
+    VALUES ('${home}', 'publisher', 'report', 'published', 'directory', 'report') RETURNING id`);
+  const grant = (scopes: string[]) => {
+    principal = { type: "user", user: { uuid: "owner" } };
+    return api.request(`/apps/${report}/authorize`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ spaceId: shop, scopes, offline: true }),
+    });
+  };
+  const listCheckpoints = () => hasMemberPermission(action(report), "checkpoint.view", shop);
+  assert.equal((await grant(["file.view"])).status, 200);
+  assert.equal(await listCheckpoints(), false, "an unrelated grant does not unlock it");
+  assert.equal((await grant(["checkpoint.view"])).status, 200);
+  assert.equal(await listCheckpoints(), true);
 });

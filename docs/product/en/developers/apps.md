@@ -486,8 +486,6 @@ await client.auth.authorize({
   silent renewal cannot create it.
 - Each use is capped by what the granting member can still do there. If they
   lose the permission or revoke the grant, offline access ends.
-- Member-only reads, such as checkpoint lists and Space usage, still require
-  the App owner's own membership.
 - Members see it under **Space settings → Access** and with
   `cohub spaces app-access ls`. The granting member or a host can revoke it
   there; revoking the whole grant also ends it.

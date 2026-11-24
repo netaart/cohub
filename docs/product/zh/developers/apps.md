@@ -385,7 +385,6 @@ await client.auth.authorize({
 - 之后你的 Action 随时可以在该 Space 上使用这些 scope；授权中访客自己使用的部分仍是 14 天。
 - 只支持 Space scope，必须由访客在授权对话框中明确同意；Shell 代为同意和静默续期都不能创建长期访问。
 - 每次使用都以授权成员当前在该 Space 的权限为上限。成员失去权限或撤销授权，长期访问随之结束。
-- 仅限成员的读取（如 checkpoint 列表、Space 用量）仍需要 App owner 本人是成员。
 - 成员可以在 **Space 设置 → 访问权限** 和 `cohub spaces app-access ls` 中看到。授权成员或 host 可以在那里撤销；撤销整条授权也会结束长期访问。
 - 只有在 App home Space 中运行的 Action 能使用；浏览器里的 App 会话、在其他 Space 通过 Space Hook 运行的同一个 Action 都不能。
 - 任何访客都能运行你的 Action。操作已授权的 Space 前，先确认 `execution.viewerUserId` 有资格操作它（例如就是授权的那位成员）。
