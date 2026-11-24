@@ -4,6 +4,18 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.109 — 2026-11-24
+
+- **Offline App access**: `auth.authorize({ ..., offline: true })` lets an App's Actions use consented Space scopes while nobody is present, until revoked. Space scopes only and always behind explicit viewer consent; each use is capped by what the granting member can still do, and members can review or revoke it in Space settings or via `cohub spaces app-access`.
+- **Full-page storefront sign-in**: Published Apps on managed and custom domains can sign buyers in with a first-party, App-scoped session lasting up to 14 days, restored on reload through `context()` and ended by `auth.signOut()`. App Actions can now verify the signed-in buyer's own orders.
+- **Account-wide App session revocation**: App sign-ins and broker-issued tokens carry a per-account epoch, so a web sign-out or `user.revokeAppBrowserSessions()` invalidates them on every App origin and device.
+- **Hardened App host routing**: App origin resolution is unified behind one resolver shared by `/by-origin` and the session endpoints, the sign-in confirmation is served `frame-ancestors 'none'` and rejects redirects back into auth endpoints.
+
+### Bug Fixes
+
+- App Actions looking up a buyer's order were denied because ownership was compared against the execution account; the check now uses the resolved buyer identity.
+- Navigating back into the sign-in confirmation no longer strands the buyer; a forward/back return cancels and restores the App page.
+
 ## v2.108 — 2026-11-24
 
 - **Google Play release track**: Android now ships a signed AAB from a dedicated `playRelease` flavor with cloud Spaces and system file picking but no on-device Runtime, screen control, or all-files access; release automation builds, verifies and checksums both the APK and the bundle, asserting prohibited permissions and services are absent.
