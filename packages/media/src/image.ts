@@ -6,6 +6,26 @@ export const IMAGE_MAX_INPUT_BYTES = 32 * 1024 * 1024;
 export const IMAGE_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const IMAGE_MAX_INPUT_PIXELS = 64_000_000;
 
+export async function normalizeJevImage(data: Buffer): Promise<{ data: Buffer; mimeType: string }> {
+  if (!data.length || data.length > IMAGE_MAX_INPUT_BYTES) throw new Error("Invalid image size");
+  const image = sharp(data, { limitInputPixels: IMAGE_MAX_INPUT_PIXELS });
+  const meta = await image.metadata();
+  if (!meta.width || !meta.height || (meta.pages ?? 1) > 1) throw new Error("Jev requires a still image");
+  const scale = Math.min(1, 1568 / Math.max(meta.width, meta.height));
+  const width = Math.round(meta.width * scale);
+  const height = Math.round(meta.height * scale);
+  if (Math.min(width, height) < 256 || width * height < 78_400) {
+    throw new Error("Jev requires at least 256 pixels per side and 78400 pixels total after resizing");
+  }
+  if (scale === 1 && (meta.orientation ?? 1) === 1 && data.length <= 16 * 1024 * 1024 && (meta.format === "jpeg" || meta.format === "png")) {
+    return { data, mimeType: `image/${meta.format}` };
+  }
+  const fitted = image.rotate().resize(1568, 1568, { fit: "inside", withoutEnlargement: true });
+  return meta.hasAlpha
+    ? { data: await fitted.png().toBuffer(), mimeType: "image/png" }
+    : { data: await fitted.jpeg({ quality: 90 }).toBuffer(), mimeType: "image/jpeg" };
+}
+
 export type ImageProfile = { maxEdge: number; quality: number };
 
 export const STORED_IMAGE: ImageProfile = { maxEdge: IMAGE_MAX_EDGE, quality: 86 };
