@@ -4,6 +4,19 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.110 — 2026-11-24
+
+- **Shared playback preroll**: `boards play` and `boards seek` take `--preroll` (`board.play()` / `board.seek()`), holding the first frame until every watching screen reports its scene, next second of sound and scripts' `preload()`s loaded — at most 5 s — then starting everyone together; `resume` gains `ifCommand` so a replaced playback cannot be revived, and `boards viewers` / `board.viewers()` list each screen's readiness, camera, sound and lost audio start.
+- **Playback media cues**: viewers preload a show's next three sounds wherever they fall, nested animations included, plus the videos of its next 3 seconds paused at their first frame, so a play, seek or `next` that lands on a clip plays from its first word; the media clock also reports how much of a sound's start loading cost.
+- **Script image preload**: `ctx.preload([src | { src, width?, height? }])` loads up to 16 images at their on-Board size ahead of a reveal and resolves with `{ loaded, failed }` within 15 s; a prerolled playback waits for it too.
+- **Directed camera control**: the stage exposes `cameraDirected` (deprecating `scriptCamera`), and Back to the camera now appears for any directed camera, including a playback someone else started, until the next playback.
+
+### Bug Fixes
+
+- **Per-call model usage**: CLI runtime attributes each Claude message's own token usage and context — tool calls keep their own counts, the final reply shows the context it actually used, and the turn cost is attached once.
+- **App view counts**: the Cohub bar and public App detail now report web views only, keeping CLI and other non-human views out of the number through a source-scoped query and cache key.
+- **Runtime rebind**: a local Turn already running when the Runtime is rebound to another directory is followed to its end instead of being left running in the Space.
+
 ## v2.109 — 2026-11-24
 
 - **Offline App access**: `auth.authorize({ ..., offline: true })` lets an App's Actions use consented Space scopes while nobody is present, until revoked. Space scopes only and always behind explicit viewer consent; each use is capped by what the granting member can still do, and members can review or revoke it in Space settings or via `cohub spaces app-access`.
