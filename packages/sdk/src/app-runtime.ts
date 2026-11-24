@@ -1,3 +1,4 @@
+import { browserSessionHint, endAppBrowserSession, restoreAppBrowserSession, startAppBrowserSignIn } from "./app-browser-sign-in.js";
 import { APP_RUNTIME_HAPTIC_VIBRATION, buildAppRuntimeCloseRequest, buildAppRuntimeHaptic, buildAppRuntimeReady, type AppRuntimeHaptic, parseAppRuntimeAnnounce, buildAppRuntimeConfigureRequest, buildAppRuntimePointer, type AppAppearance, type AppRuntimeConfigureRequest, type AppRuntimeAnchor, type AppRuntimeRect } from "@cohub/protocol/app-runtime";
 
 // Re-export configure types so tsdown can emit them in the DTS bundle.
@@ -400,7 +401,16 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
   private viewerGrants: AppRuntimeGrantSummary[] = [];
   private viewerIdentity: string | null | undefined;
 
+  private sessionHint: string | null = null;
+  private restored: ReturnType<typeof restoreAppBrowserSession> | null = null;
+
   getViewerIdentity() {
+    const hint = browserSessionHint();
+    if (hint !== this.sessionHint) {
+      this.sessionHint = hint;
+      this.restored = null;
+      this.observeViewerIdentity(null);
+    }
     return this.viewerIdentity;
   }
 
@@ -445,15 +455,55 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
     return (await this.resolveApp())?.id ?? null;
   }
 
+  private async browserSession(appId: string, forceRefresh = false) {
+    this.getViewerIdentity();
+    const hint = this.sessionHint;
+    if (!hint?.startsWith(appId + ".")) return null;
+    if (forceRefresh) this.restored = null;
+    this.restored ??= restoreAppBrowserSession(appId);
+    const attempt = this.restored;
+    try {
+      const session = await attempt;
+      this.getViewerIdentity();
+      if (this.restored !== attempt) return null;
+      this.observeViewerIdentity(session?.viewer.userUuid ?? null);
+      return session;
+    } catch (error) {
+      if (this.restored === attempt) this.restored = null;
+      throw error;
+    }
+  }
+
   async request<T>(
     message: Record<string, unknown>,
     options?: AppRuntimeRequestOptions,
   ): Promise<T | null> {
+    if (message.type === "cohub.app.sign-in" || message.type === "cohub.app.sign-out") {
+      const id = await this.resolveAppId();
+      if (!id) throw new Error("App origin is unavailable.");
+      if (message.type === "cohub.app.sign-in") {
+        await startAppBrowserSignIn(id, this.brokerOrigin, typeof message.returnTo === "string" ? message.returnTo : undefined);
+      } else {
+        await endAppBrowserSession(id);
+        this.restored = null;
+        this.observeViewerIdentity(null);
+      }
+      return { handled: true } as T;
+    }
+    if (message.type === "cohub.app.token" && browserSessionHint()) {
+      const id = await this.resolveAppId();
+      if (id && browserSessionHint()?.startsWith(id + ".")) {
+        const session = await this.browserSession(id, message.forceRefresh === true);
+        return { token: session?.token ?? null } as T;
+      }
+    }
     // Non-interactive messages are answered locally to avoid popping up a
     // window for data the app already has (or cannot have).
     if (message.type === "cohub.app.context") {
       const app = await this.resolveApp();
       if (!app) return null;
+      // A failed restore leaves the viewer unknown instead of failing context().
+      await this.browserSession(app.id).catch(() => null);
       const viewerScopes = Array.from(new Set(this.viewerGrants.flatMap((grant) => grant.scopes)));
       return {
         type: "cohub.app.context.result",
@@ -540,7 +590,7 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
         });
       }, timeoutMs);
 
-      const onMessage = (event: MessageEvent<RuntimeResponse | { type: string; requestId?: string }>) => {
+      const onMessage = async (event: MessageEvent<RuntimeResponse | { type: string; requestId?: string }>) => {
         if (event.source !== popup) return;
         if (event.origin !== this.brokerOrigin) return;
         const data = event.data;
@@ -555,19 +605,27 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
 
         // Handshake: broker signals it's ready to receive the actual request.
         if (data.type === "cohub.app.broker.ready" && !ready) {
+          ready = true;
           const brokerViewer = (data as { viewer?: { userUuid?: unknown } | null }).viewer;
-          this.observeViewerIdentity(
-            brokerViewer === null
-              ? null
-              : typeof brokerViewer?.userUuid === "string"
-                ? brokerViewer.userUuid
-                : undefined,
-          );
+          const viewer = typeof brokerViewer?.userUuid === "string" ? brokerViewer.userUuid : brokerViewer === null ? null : undefined;
+          if (browserSessionHint()?.startsWith(appId + ".")) {
+            try {
+              const session = await this.browserSession(appId);
+              if (settled) return;
+              if (!session || session.viewer.userUuid !== viewer) {
+                finish(() => reject(new AppRuntimeError("session_changed", "Sign in to the storefront again to use your current Cohub account.")));
+                return;
+              }
+            } catch (error) {
+              finish(() => reject(error));
+              return;
+            }
+          }
+          this.observeViewerIdentity(viewer);
           if (message.type === "cohub.app.authorize.v2" && (data as { authorizationVersion?: number }).authorizationVersion !== 2) {
             finish(() => reject(new AppRuntimeError("unsupported", "This host does not support structured authorization.")));
             return;
           }
-          ready = true;
           if (timer) clearTimeout(timer);
           timer = setTimeout(() => finish(() => reject(new AppRuntimeError("host_timeout", "Authorization timed out."))), timeoutMs);
           try {
@@ -1052,6 +1110,19 @@ export class AppRuntimeApi {
         Array.isArray(input.inputRegion) && input.inputRegion.length > 0,
       );
     }
+  }
+
+  async signIn(options?: { returnTo?: string }): Promise<void> {
+    const result = await this.transport.request<{ handled: boolean }>({ type: "cohub.app.sign-in", returnTo: options?.returnTo });
+    if (!result?.handled) throw new AppRuntimeError("unsupported", "App sign-in is unavailable.");
+  }
+
+  async signOut(): Promise<void> {
+    const result = await this.transport.request<{ handled: boolean }>({ type: "cohub.app.sign-out" });
+    if (!result?.handled) throw new AppRuntimeError("unsupported", "Standalone App sign-out is unavailable.");
+    this.token = null;
+    this.observeViewer(null);
+    this.writeStoredToken(null);
   }
 
   async getAccessToken(options?: { forceRefresh?: boolean }) {
