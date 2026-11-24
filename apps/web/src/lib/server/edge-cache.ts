@@ -22,9 +22,11 @@ export async function withEdgeCache(
 	waitUntil: (promise: Promise<unknown>) => void,
 	respond: () => Promise<Response>,
 ): Promise<Response> {
+	const { pathname } = new URL(request.url);
 	if (
 		request.method !== "GET" ||
-		new URL(request.url).pathname.startsWith("/_app/")
+		pathname.startsWith("/_app/") ||
+		pathname === "/.well-known/assetlinks.json"
 	)
 		return respond();
 	pages ??= caches.open("pages").catch(() => {

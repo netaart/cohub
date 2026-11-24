@@ -42,5 +42,5 @@ const statements = (ANDROID_APPS[env] ?? []).map(
 
 export const GET: RequestHandler = () =>
 	Response.json(statements, {
-		headers: { "cache-control": "public, max-age=3600" },
+		headers: { "cache-control": "no-store" },
 	});
