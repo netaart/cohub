@@ -127,18 +127,20 @@ async function holdsPrompt(path: string, turnId: string, signal: AbortSignal): P
 }
 
 /** `partial` holds streamed blocks by index until the complete block arrives, so an interrupted reply keeps them. */
-type Message = { ordinal: number; content: ContentBlock[]; partial: Map<number, Extract<ContentBlock, { type: "text" | "thinking" }>>; model: string | null };
+type Message = { ordinal: number; content: ContentBlock[]; partial: Map<number, Extract<ContentBlock, { type: "text" | "thinking" }>>; model: string | null; usage?: JsonRecord };
 
 /** Maps stream-json output onto Cohub's streaming protocol; sub-agent traffic stays in the native transcript. */
-function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; model: string | null }) {
+export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; model: string | null }) {
   const messages = new Map<string, Message>();
   const owners = new Map<string, Message>();
   let current: Message | null = null;
   let streaming: Message | null = null;
   let model = identity.model;
   let final: RuntimeMessage | null = null;
+  const counts = (value: unknown) => Object.fromEntries(Object.entries(record(value)).filter(([, count]) => typeof count === "number"));
   const snapshot = (message: Message): RuntimeMessage => ({
     ordinal: message.ordinal, content: [...message.content, ...message.partial.values()], provider: identity.provider, model: message.model ?? model,
+    usage: streamUsage(message.usage, undefined),
     stopReason: message.content.some((block) => block.type === "tool_use") ? "tool_use" : "stop",
   });
   const begin = (id: string, messageModel: string | null) => {
@@ -161,7 +163,12 @@ function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, iden
       if (event.type === "system" && event.subtype === "init") { model = text(event.model) || model; return false; }
       if (event.type === "stream_event") {
         const stream = record(event.event);
-        if (stream.type === "message_start") streaming = begin(text(record(stream.message).id) || randomUUID(), text(record(stream.message).model) || null);
+        if (stream.type === "message_start") {
+          const native = record(stream.message);
+          streaming = begin(text(native.id) || randomUUID(), text(native.model) || null);
+          streaming.usage = counts(native.usage);
+        }
+        if (streaming && stream.type === "message_delta") streaming.usage = { ...streaming.usage, ...counts(stream.usage) };
         const delta = record(stream.delta);
         if (streaming && stream.type === "content_block_delta" && (delta.type === "text_delta" || delta.type === "thinking_delta")) {
           const index = Number(stream.index ?? 0), chunk = text(delta.text ?? delta.thinking);
@@ -176,6 +183,7 @@ function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, iden
       if (event.type === "assistant") {
         const native = record(event.message);
         const message = begin(text(native.id) || randomUUID(), text(native.model) || null);
+        message.usage = { ...message.usage, ...counts(native.usage) };
         // Complete blocks supersede what streamed so far.
         message.partial.clear();
         for (const block of streamContent(native.content)) {
@@ -201,11 +209,13 @@ function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, iden
       }
       if (event.type !== "result") return false;
       const failed = event.is_error === true || event.subtype !== "success";
+      const reply = last();
+      if (reply.usage) reply.usage.contextTokens = (reply.usage.input ?? 0) + (reply.usage.cacheRead ?? 0) + (reply.usage.cacheWrite ?? 0);
+      if (typeof event.total_cost_usd === "number" && event.total_cost_usd > 0) reply.usage = { ...reply.usage, cost: { total: event.total_cost_usd } };
       final = {
-        ...last(),
+        ...reply,
         stopReason: failed ? "error" : "stop",
         errorMessage: failed ? text(event.result) || array(event.errors).map(text).join("\n") || text(event.subtype) || "Turn failed" : null,
-        usage: streamUsage(event.usage, event.total_cost_usd),
       };
       return true;
     },
