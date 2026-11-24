@@ -1,5 +1,12 @@
 # @neta-art/cohub
 
+## 13.29.0
+
+### Minor Changes
+
+- 7be909d: Add offline access for Apps: `auth.authorize({ ..., offline: true })` lets an App's Actions use consented Space scopes while nobody is present, until revoked. List and revoke it with `space(id).appAccess` and `cohub spaces app-access`.
+- 75777d1: Add full-page sign-in for published Apps on managed domains. App Actions can verify the signed-in buyer's orders. Deploy the API and web host before updating storefronts.
+
 ## 13.28.0
 
 ### Minor Changes
