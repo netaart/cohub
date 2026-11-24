@@ -75,8 +75,8 @@ async function workspace() {
   const codexPath = (id: string) => join(root, "codex-home", "sessions", "2026", "01", "01", `rollout-2026-01-01T00-00-00-${id}.jsonl`);
   const claudePath = (cwd: string, id: string) => join(root, "claude", "projects", claudeProjectName(cwd), `${id}.jsonl`);
   const workbuddyPath = (cwd: string, id: string) => join(root, "codebuddy", "projects", workbuddyProjectName(cwd), `${id}.jsonl`);
-  const ingest = (options: { enabledAt?: string; harnesses?: Synced[]; hooks?: IngestHooks } = {}) => new NativeIngest({
-    spaceId: SPACE, cwd: project, harnesses: options.harnesses ?? ["pi", "codex"], enabledAt: options.enabledAt ?? new Date(0).toISOString(),
+  const ingest = (options: { cwd?: string; enabledAt?: string; harnesses?: Synced[]; hooks?: IngestHooks } = {}) => new NativeIngest({
+    spaceId: SPACE, cwd: options.cwd ?? project, harnesses: options.harnesses ?? ["pi", "codex"], enabledAt: options.enabledAt ?? new Date(0).toISOString(),
     root: join(root, "state"), archives: new RuntimeArchiveStore(join(root, "state", "archives"), null), hooks: options.hooks,
   });
   const write = async (path: string, content: string, mtime?: Date) => {
@@ -505,6 +505,36 @@ test("pausing a harness stops its uploads and previews, for transcripts already 
     assert.equal(server.batches.length, batches, "nothing more is uploaded");
     await ingest.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
+});
+
+test("a Turn running when its directory is rebound elsewhere still settles, and nothing after it syncs", async () => {
+  const w = await workspace();
+  const controller = new AbortController();
+  try {
+    const server = fakeServer();
+    const old = join(w.root, "old");
+    const prompt = (id: string, uuid: string) => claudeRecord(id, old, { type: "user", uuid, parentUuid: null, promptId: `p-${uuid}`, promptSource: "typed", message: { role: "user", content: "q" } });
+    const offline = randomUUID(), watched = randomUUID();
+    await w.write(w.claudePath(old, offline), prompt(offline, "u1"));
+    await w.write(w.claudePath(old, watched), prompt(watched, "u1"));
+    const before = w.ingest({ cwd: old, harnesses: ["claude"] });
+    await before.load();
+    before.connect(server.transport);
+    await until(() => server.turns.size === 2);
+    await before.close(AbortSignal.timeout(2_000));
+
+    await w.write(w.claudePath(old, offline), claudeTurn(offline, old, "u1", null, "q") + claudeTurn(offline, old, "u2", "a-u1", "later"));
+    const rebound = w.ingest({ harnesses: ["claude"] });
+    await rebound.load();
+    await rebound.watch(controller.signal);
+    rebound.connect(server.transport);
+    await until(() => server.turns.get(turnIdOf("claude", offline, "u1"))?.settled === true);
+    await appendFile(w.claudePath(old, watched), claudeTurn(watched, old, "u1", null, "q").split("\n").slice(1).join("\n"));
+    await until(() => server.turns.get(turnIdOf("claude", watched, "u1"))?.settled === true);
+    assert.equal(server.turns.size, 2, "Turns after it belong to the other directory");
+    assert.equal(rebound.status().running, 0);
+    await rebound.close(AbortSignal.timeout(2_000));
+  } finally { controller.abort(); await w.cleanup(); }
 });
 
 test("Claude Code terminal Turns sync and settle on their recorded end; Cohub's prompt id marks its own Turn", async () => {
