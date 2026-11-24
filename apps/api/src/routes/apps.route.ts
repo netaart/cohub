@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { createAppBrowserSessionRouter } from "./app-browser-session.route.js";
+import { holdAppBrowserEpoch } from "../lib/app-browser-epoch.js";
 import { bodyLimit } from "hono/body-limit";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { spaces, apps, appPromotions, appPromotionStatsHourly, appVersions, appViewerGrants, appViewStatsHourly, userProfiles } from "@cohub/db";
@@ -1394,11 +1395,13 @@ router.post("/:id/session", async (c) => {
     appId: app.id,
     spaceId: app.spaceId,
     appScopes: app.appScopes as Permission[],
+    browserEpoch: await holdAppBrowserEpoch(user.uuid),
   });
   return c.json({ token, expiresIn: APP_SESSION_TTL_SECONDS, ...wrapAppRecord(wire, serializeApp(app)) });
 });
 
-function buildAppAuthorizationPayload(
+// Account-minted App tokens end with the account's App sign-ins, wherever the App runs.
+async function buildAppAuthorizationPayload(
   app: typeof apps.$inferSelect,
   user: AuthUser,
   grant: typeof appViewerGrants.$inferSelect,
@@ -1411,6 +1414,7 @@ function buildAppAuthorizationPayload(
       spaceId: app.spaceId,
       appScopes: app.appScopes as Permission[],
       viewerScopes: scopes,
+      browserEpoch: await holdAppBrowserEpoch(user.uuid),
     }),
     expiresIn: APP_SESSION_TTL_SECONDS,
     grant: {
@@ -1467,7 +1471,7 @@ router.post("/:id/authorize", async (c) => {
     if (existing?.revokedAt) return c.json({ message: "grant was revoked; viewer consent is required again", code: "consent_required" }, 403);
     const renewed = await renewViewerGrant({ existing, requested });
     if (renewed) {
-      return c.json(buildAppAuthorizationPayload(app, user, renewed));
+      return c.json(await buildAppAuthorizationPayload(app, user, renewed));
     }
     if (user.uuid !== app.userUuid) {
       return c.json({ message: "grant is no longer active; viewer consent is required again", code: "consent_required" }, 403);
@@ -1507,7 +1511,7 @@ router.post("/:id/authorize", async (c) => {
   }
   if (!grant) return c.json({ message: "failed to create grant" }, 500);
 
-  return c.json(buildAppAuthorizationPayload(app, user, grant));
+  return c.json(await buildAppAuthorizationPayload(app, user, grant));
 });
 
 // ── Viewer grants: list + revoke (the viewer's own consents) ─────────────────

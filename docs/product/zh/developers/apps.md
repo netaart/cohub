@@ -110,7 +110,7 @@ body {
 
 ## 从店铺登录
 
-在已绑定的自定义域名或托管的独立域名上，登录按钮可以调用 `await client.auth.signIn({ returnTo: location.href })`。访客确认使用的 Cohub 账号后会回到原页面，并保留查询参数和哈希路由。店铺会话最长保留 14 天，刷新或打开新标签页后可通过 `client.context()` 恢复访客身份。`client.auth.signOut()` 会退出当前店铺，在网页上退出 Cohub 会结束所有设备上的店铺登录。在 Cohub 内嵌的 App 中，`signIn()` 使用宿主的登录流程和返回地址。
+在已绑定的自定义域名或托管的独立域名上，登录按钮可以调用 `await client.auth.signIn({ returnTo: location.href })`。访客确认使用的 Cohub 账号后会回到原页面，并保留查询参数和哈希路由。店铺会话最长保留 14 天，刷新或打开新标签页后可通过 `client.context()` 恢复访客身份。`client.auth.signOut()` 会退出当前店铺，在网页上退出 Cohub 会结束所有设备上的店铺登录，以及签发给该账号的所有 App 凭证。在 Cohub 内嵌的 App 中，`signIn()` 使用宿主的登录流程和返回地址。
 
 店铺 App Action 可以用自己的执行凭证调用 `client.appCommerce.getOrder(appId, orderId)`，服务端会核对当前买家的身份。
 

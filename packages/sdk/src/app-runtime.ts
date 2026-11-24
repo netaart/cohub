@@ -568,7 +568,6 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
       }
 
       let ready = false;
-      let storefrontToken: string | null = null;
       let loginPending = false;
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
@@ -617,7 +616,6 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
                 finish(() => reject(new AppRuntimeError("session_changed", "Sign in to the storefront again to use your current Cohub account.")));
                 return;
               }
-              storefrontToken = session.token;
             } catch (error) {
               finish(() => reject(error));
               return;
@@ -668,9 +666,7 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
               this.viewerGrants = [...existing, { spaceId: authorization.grant.spaceId, scopes }];
             }
           }
-          // Grants live server-side; keep the storefront token so Cohub sign-out still ends access.
-          const token = (data as { token?: unknown }).token;
-          resolve((storefrontToken && typeof token === "string" ? { ...data, token: storefrontToken } : data) as T);
+          resolve(data as T);
         });
       };
 

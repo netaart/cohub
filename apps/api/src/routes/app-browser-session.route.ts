@@ -6,7 +6,7 @@ import type { Permission } from "@cohub/core/permissions";
 import { APP_SESSION_TTL_SECONDS, createAppSessionToken } from "../app-sessions.js";
 import { redisCommandClient } from "../redis.js";
 import { getExecutionPrincipal, useAccountPrincipal } from "../lib/middleware.js";
-import { currentAppBrowserEpoch as currentEpoch, retainAppBrowserEpoch } from "../lib/app-browser-epoch.js";
+import { currentAppBrowserEpoch as currentEpoch, holdAppBrowserEpoch } from "../lib/app-browser-epoch.js";
 
 const secret = z.string().regex(APP_BROWSER_SECRET_PATTERN);
 const target = z.object({ origin: z.string().max(255) });
@@ -42,7 +42,7 @@ export function createAppBrowserSessionRouter(resolveApp: (origin: string, id: s
     const path = appReturnPath(returnTo, origin);
     if (!path || !(await resolveApp(origin, id))) return c.json({ message: "invalid App destination" }, 403);
     const code = randomSecret();
-    const epoch = await currentEpoch(user.uuid);
+    const epoch = await holdAppBrowserEpoch(user.uuid);
     await redisCommandClient.set(codeKey(id, origin, challenge, code), JSON.stringify({ userUuid: user.uuid, path, epoch }), "EX", 90);
     return c.json({ code });
   });
@@ -59,7 +59,6 @@ export function createAppBrowserSessionRouter(resolveApp: (origin: string, id: s
     // A Cohub sign-out after confirmation cancels the pending sign-in.
     if (epoch !== await currentEpoch(userUuid)) return c.json({ message: "sign-in expired" }, 401);
     const handle = randomSecret();
-    if (epoch) await retainAppBrowserEpoch(userUuid);
     const session: StoredSession = { userUuid, epoch };
     await redisCommandClient.set(sessionKey(id, origin, handle), JSON.stringify(session), "EX", APP_BROWSER_SESSION_SECONDS);
     return c.json({ session: handle, returnTo: path });
