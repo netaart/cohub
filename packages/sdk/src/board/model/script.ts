@@ -223,6 +223,8 @@ export type BoardScriptTextInput = {
   width?: number;
 };
 
+export type BoardScriptPreload = { src: string; width?: number; height?: number };
+
 export type BoardScriptContext = {
   readonly self: {
     readonly id: string;
@@ -254,6 +256,7 @@ export type BoardScriptContext = {
   hitRegions(hits: Record<string, BoardScriptHit>): void;
   commit(patch: BoardPatch): Promise<boolean>;
   layoutText(text: BoardScriptTextInput): Promise<{ width: number; height: number }>;
+  preload(images: readonly (string | BoardScriptPreload)[]): Promise<{ loaded: number; failed: number }>;
   uniforms(values: BoardShaderUniformValues): void;
   passes(states: BoardShaderPassStates): void;
   capabilities: {

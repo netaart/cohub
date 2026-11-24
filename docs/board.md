@@ -447,9 +447,12 @@ shared playback: edits to the playing animation, its tracks included, show as it
 only deleting the animation ends it. Viewers load the images and videos of the next 3
 seconds of a shared playback, past a pause marker it holds at, at the size they grow to,
 so items fade or grow in already loaded, and the next few sounds wherever they fall, so a
-seek or `next` that lands on one still plays it from its first word. `boards play` and
-`boards seek` take `--preroll <time>` (up to 5 s): every screen holds the first frame
-that long and loads it, then the clock runs.
+seek or `next` that lands on one still plays it from its first word. With `--preroll`,
+`boards play` and `boards seek` hold the first frame on every screen until all that
+watch have loaded it, at most 5 s or the time given, then start everyone together.
+`boards viewers` lists the screens on the Board: whether each has loaded what it shows
+and the next second of sound, follows the camera, is muted or hidden, and how much of a
+voice's start it lost to loading.
 
 A play or read-only view that just opened holds `auto` animations and Board scripts at
 their start until the model objects in view have loaded, at most 1.5 s, so the first

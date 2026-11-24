@@ -966,6 +966,7 @@ export async function applyBoardPlayback(
 				commandId: command.commandId,
 			};
 		} else {
+			if (command.type === "resume" && command.ifCommand && command.ifCommand !== current?.commandId) return current;
 			if (!current) throw new BoardError(409, "PLAYBACK_NOT_ACTIVE", "Nothing is playing.");
 			const { header } = await loadAnimation(current.animationId);
 			const position = boardPlaybackPosition(current, header, now);

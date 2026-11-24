@@ -2,6 +2,7 @@ import type { BoardPlaybackSnapshot } from "@cohub/protocol";
 import type {
 	BoardMediaCue,
 	BoardScriptInputLog,
+	BoardScriptPreload,
 	BoardScriptOutput,
 	BoardScriptPeer,
 	BoardScriptSense,
@@ -57,6 +58,7 @@ import {
 	type WorldPoint,
 	worldPoint,
 } from "../model/index.js";
+import { BOARD_SCRIPT_PRELOAD_MAX, boardScriptPreloads } from "../model/script-calls.js";
 import { type BoardPlayerFrame, createBoardPlayer } from "../player/index.js";
 import {
 	DEFAULT_BOARD_RENDER_LABELS,
@@ -265,6 +267,9 @@ const CULL_PADDING = 96;
 const PREFETCH_REST_MS = 200;
 const PREFETCH_LIMIT = 96;
 const LOOKAHEAD_REFRESH_MS = 500;
+const REPORT_MS = 250;
+const READY_AHEAD_MS = 1000;
+const PRELOAD_TIMEOUT_MS = 15_000;
 const FRAME_SAMPLES = 120;
 const ENTERED_MODEL_MIN_EDGE = 240;
 const ENTERED_MODEL_EDGE = 420;
@@ -340,7 +345,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	const { saveData } = readBoardDeviceSignals();
 	const scripts = createBoardScriptController({
 		editor,
-		capabilities: options.scriptCapabilities,
+		capabilities: { ...options.scriptCapabilities, "board.preload": async (_id, value) => preload(boardScriptPreloads(value)) },
 		device: () => ({
 			pointer: coarsePointer?.matches ? "coarse" : "fine",
 			orientation: portrait?.matches ? "portrait" : "landscape",
@@ -403,6 +408,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 				scheduleTick();
 			} else scheduleRender();
 		},
+		onLate: (ms) => {
+			late = Math.max(late, ms);
+		},
 	});
 	const live = createBoardLiveScheduler({ video: device.media, model: device.models, app: device.apps });
 	let liveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -443,6 +451,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let cues: BoardMediaCue[] = [];
 	let lookedAheadAt = Number.NEGATIVE_INFINITY;
 	let lookedAheadCommand: string | null = null;
+	let reported: string | null = null;
+	let reportedAt = Number.NEGATIVE_INFINITY;
+	let late = 0;
+	let preloading = 0;
 	const staleIds = new Set<string>();
 	let canvasBox: BoardCanvasBox | null = null;
 	let canvasSize = { width: 0, height: 0, resolution: 0 };
@@ -1232,6 +1244,52 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		assets.prefetch?.([]);
 	}
 
+	function reportPlayback(playback: BoardPlaybackSnapshot | null, time: number | null, now: number) {
+		if (!presence) return;
+		const shared = editor.playhead ? null : playback;
+		if (!shared) {
+			if (reported !== null) presence.setPlayback(null);
+			reported = null;
+			return;
+		}
+		if (shared.commandId === reported && now - reportedAt < REPORT_MS) return;
+		reported = shared.commandId;
+		reportedAt = now;
+		const due = time === null ? [] : cues.flatMap((cue) => (cue.kind === "audio" && cue.at <= time + READY_AHEAD_MS ? [cue.id] : []));
+		const pending = waitingCards() + media.waiting(due) + scripts.booting() + preloading;
+		presence.setPlayback({
+			commandId: shared.commandId,
+			ready: pending === 0 && !scene?.settling,
+			pending,
+			following: !(cameraDirected && editor.cameraPolicy === "free"),
+			muted: media.muted || media.blocked,
+			late,
+		});
+	}
+
+	async function preload(images: BoardScriptPreload[]): Promise<{ loaded: number; failed: number }> {
+		const view = boardViewRect(renderCamera(), surface);
+		const scale = textureScale();
+		const items = images.map(({ src, width = view.width, height = view.height }, index) => {
+			const fit = view.width > 0 && view.height > 0 ? Math.min(1, view.width / width, view.height / height) : 1;
+			return { id: `preload:${index}`, type: "image", props: { src }, frame: { x: 0, y: 0, width: width * fit, height: height * fit, rotation: 0 } } as unknown as BoardSceneItem;
+		});
+		if (preloading + items.length > BOARD_SCRIPT_PRELOAD_MAX) throw new Error(`preload() holds at most ${BOARD_SCRIPT_PRELOAD_MAX} images at a time.`);
+		preloading += items.length;
+		try {
+			return await assets.withTextures(
+				items,
+				(textures) => {
+					const loaded = items.filter((item) => textures.has(assets.assetKey(item) ?? "")).length;
+					return { loaded, failed: items.length - loaded };
+				},
+				{ edge: (item) => boardTextureEdge(item, scale), timeoutMs: PRELOAD_TIMEOUT_MS },
+			);
+		} finally {
+			preloading -= items.length;
+		}
+	}
+
 	function pushPrefetch() {
 		assets.prefetch?.(ahead.length ? [...ahead, ...around] : around);
 	}
@@ -1399,6 +1457,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		const playback = options.playback?.() ?? null;
 		if (playback && playback.playbackId !== playbackId) {
 			playbackId = playback.playbackId;
+			late = 0;
 			editor.setCameraPolicy("follow");
 		}
 		const now = performance.now();
@@ -1545,6 +1604,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		const nextCursor = cursorFor();
 		if (nextCursor !== cursor) host.style.cursor = cursor = nextCursor;
 
+		reportPlayback(playback, frame.playbackTime, now);
 		scheduleRender();
 		if (frame.running || scene.animated) scheduleTick();
 		if (scripts.animated || shaders?.animated) scheduleScriptTick();
@@ -2174,6 +2234,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			disposed = true;
 			motion?.removeEventListener("change", scheduleTick);
 			stopPresence();
+			if (reported !== null) presence?.setPlayback(null);
 			if (liveTimer !== null) clearTimeout(liveTimer);
 			if (openingTimer !== null) clearTimeout(openingTimer);
 			pointers.cancel();

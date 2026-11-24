@@ -243,6 +243,9 @@ export function createScriptRuntime(
     async layoutText(text) {
       return (await host.call("board.layoutText", text)) as { width: number; height: number };
     },
+    async preload(images) {
+      return (await host.call("board.preload", images)) as { loaded: number; failed: number };
+    },
     capabilities: {
       has: (name) => (input.capabilities ?? []).includes(name),
       call: (name, value) => host.call(name, value),

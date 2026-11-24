@@ -15,6 +15,7 @@ export {
   BoardAwarenessGestureSchema,
   BoardAwarenessItemPreviewSchema,
   BoardAwarenessPointSchema,
+  BoardAwarenessPlaybackSchema,
   BoardAwarenessStateUpdateSchema,
   BoardAwarenessUpdateSchema,
   BoardAwarenessViewportSchema,

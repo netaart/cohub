@@ -5,11 +5,13 @@ import { dirname } from "node:path";
 
 import type {
   BoardApplyResult,
+  BoardClient,
   BoardCheckpointReadResult,
   BoardCreateInput,
   BoardPatch,
   BoardPlaybackSnapshot,
   BoardReadInput,
+  BoardViewer,
 } from "@neta-art/cohub";
 import {
   BOARD_MAX_PITCH,
@@ -976,19 +978,59 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
   return boards;
 }
 
-const PREROLL_HELP = `Hold the first frame this long so every screen loads its images and sound first, up to ${BOARD_PLAYBACK_PREROLL_MAX_MS / 1000}s`;
+const PREROLL_HELP = `Hold the first frame until every watching screen has loaded it, at most this long (default and limit ${BOARD_PLAYBACK_PREROLL_MAX_MS / 1000}s)`;
 
-function preroll(value: string | undefined): { preroll?: number } {
+function preroll(value: string | true | undefined): { preroll?: number } {
   if (!value) return {};
-  const ms = parseBoardTime(value, "--preroll");
+  const ms = value === true ? BOARD_PLAYBACK_PREROLL_MAX_MS : parseBoardTime(value, "--preroll");
   if (ms > BOARD_PLAYBACK_PREROLL_MAX_MS) throw new Error(`--preroll is at most ${BOARD_PLAYBACK_PREROLL_MAX_MS / 1000}s.`);
   return { preroll: ms };
 }
 
+async function withRealtimeBoard<T>(boards: Command, target: string, use: (board: BoardClient) => Promise<T>): Promise<T> {
+  const spaceId = await resolveSpace(boards);
+  const client = createRealtimeClient();
+  try {
+    return await use(await client.space(spaceId).boards.open(target));
+  } finally {
+    await client.disconnect().catch(() => undefined);
+  }
+}
+
+function showViewers(viewers: BoardViewer[]): void {
+  if (!viewers.length) {
+    ok("Nobody is watching");
+    return;
+  }
+  table(
+    viewers.map(({ actorName, connectionId, playback }) => ({
+      viewer: printable(actorName.replace(/\s+/g, " ")) || connectionId.slice(0, 8),
+      playback: !playback ? "-" : playback.ready ? "ready" : `loading ${playback.pending}`,
+      camera: !playback ? "-" : playback.following ? "follows" : "away",
+      sound: !playback ? "-" : [playback.muted ? "muted" : "on", playback.late ? `${formatBoardTime(playback.late)} late` : ""].filter(Boolean).join(", "),
+      page: playback?.hidden ? "hidden" : "shown",
+    })),
+    [
+      { key: "viewer", label: "Viewer" },
+      { key: "playback", label: "Playback" },
+      { key: "camera", label: "Camera" },
+      { key: "sound", label: "Sound" },
+      { key: "page", label: "Page" },
+    ],
+  );
+}
+
 function registerPlaybackCommands(boards: Command): void {
-  const run = async (target: string, options: JsonOptions, command: (board: Awaited<ReturnType<typeof boardClient>>) => Promise<BoardPlaybackSnapshot | null>) => {
+  const run = async (
+    target: string,
+    options: JsonOptions & { preroll?: string | true },
+    command: (board: BoardClient, roll: { preroll?: number }) => Promise<BoardPlaybackSnapshot | null>,
+  ) => {
     try {
-      const playback = await command(await boardClient(boards, target));
+      const roll = preroll(options.preroll);
+      const playback = roll.preroll
+        ? await withRealtimeBoard(boards, target, (board) => command(board, roll))
+        : await command(await boardClient(boards, target), roll);
       if (jsonRequested(options)) return outJson({ playback });
       showPlayback(playback);
     } catch (cause) {
@@ -1001,23 +1043,39 @@ function registerPlaybackCommands(boards: Command): void {
     .option("--at <time>", "Start position, e.g. 2.5s")
     .option("--speed <factor>", "Playback speed, up to 4")
     .option("--seed <seed>", "Seed for procedural effects")
-    .option("--preroll <time>", PREROLL_HELP))
+    .option("--preroll [max]", PREROLL_HELP))
     .addHelpText("after", `
   cohub boards play plan.board lecture
   cohub boards play plan.board lecture --at 2.5s --speed 1.5
-  cohub boards play plan.board reveal --preroll 1s`)
-    .action((target: string, animation: string, options: JsonOptions & { at?: string; speed?: string; seed?: string; preroll?: string }) =>
-      run(target, options, (board) => board.play(animation, {
+  cohub boards play plan.board reveal --preroll`)
+    .action((target: string, animation: string, options: JsonOptions & { at?: string; speed?: string; seed?: string; preroll?: string | true }) =>
+      run(target, options, (board, roll) => board.play(animation, {
         ...(options.at ? { position: parseBoardTime(options.at, "--at") } : {}),
         ...(options.speed ? { timeScale: parseNumber(options.speed, "--speed", { min: Number.EPSILON, max: 4 }) } : {}),
         ...(options.seed ? { seed: options.seed } : {}),
-        ...preroll(options.preroll),
+        ...roll,
       })));
 
   withJson(boards.command("pause <board>").description("Pause playback")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.pause()));
   withJson(boards.command("resume <board>").description("Resume paused playback")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.resume()));
-  withJson(boards.command("seek <board> <time>").description("Move the playhead, e.g. 12.5s").option("--preroll <time>", PREROLL_HELP))
-    .action((target: string, time: string, options: JsonOptions & { preroll?: string }) => run(target, options, (board) => board.seek(parseBoardTime(time), preroll(options.preroll))));
+  withJson(boards.command("seek <board> <time>").description("Move the playhead, e.g. 12.5s").option("--preroll [max]", PREROLL_HELP))
+    .action((target: string, time: string, options: JsonOptions & { preroll?: string | true }) =>
+      run(target, options, (board, roll) => board.seek(parseBoardTime(time), roll)));
   withJson(boards.command("next <board>").description("Continue past the marker a presentation holds at")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.next()));
   withJson(boards.command("stop <board>").description("Stop playback")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.stop()));
+
+  withJson(boards.command("viewers <board>").description("List the screens on the Board and how each plays the shared playback"))
+    .addHelpText("after", `
+Listens for about 2.5s. Playback shows whether a screen has loaded what is in view and the
+next second of sound; Sound shows if it is muted and how much of a voice's start it lost.
+  cohub boards play plan.board reveal --preroll && cohub boards viewers plan.board`)
+    .action(async (target: string, options: JsonOptions) => {
+      try {
+        const viewers = await withRealtimeBoard(boards, target, (board) => board.viewers());
+        if (jsonRequested(options)) return outJson({ viewers });
+        showViewers(viewers);
+      } catch (cause) {
+        handleHttp(cause);
+      }
+    });
 }

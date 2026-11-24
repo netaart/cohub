@@ -301,6 +301,7 @@ export {
 export type {
   BoardAwarenessGesture,
   BoardAwarenessItemPreview,
+  BoardAwarenessPlayback,
   BoardAwarenessStateUpdate,
   BoardAwarenessUpdate,
   ChannelEnvelope,
@@ -365,6 +366,7 @@ export type {
   BoardReplicaLeaseOptions,
   BoardSubscriptionHandlers,
   BoardSyncResult,
+  BoardViewer,
 } from "./board/client/index.js";
 export type { SpaceWebhookListItem, SpaceWebhookTriggerResponse } from "@cohub/protocol";
 export {

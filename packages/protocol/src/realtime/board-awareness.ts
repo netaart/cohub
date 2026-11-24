@@ -118,11 +118,24 @@ export const BoardAwarenessGestureSchema = z.discriminatedUnion("kind", [
 export const BOARD_REACTIONS = ["heart", "star", "spark", "confetti"] as const;
 export type BoardReaction = (typeof BOARD_REACTIONS)[number];
 
+export const BoardAwarenessPlaybackSchema = z.object({
+	type: z.literal("playback"),
+	commandId: idSchema,
+	ready: z.boolean(),
+	pending: z.number().int().nonnegative().max(100_000),
+	following: z.boolean(),
+	muted: z.boolean(),
+	hidden: z.boolean(),
+	/** Milliseconds of a sound's start lost to loading. */
+	late: finiteSchema.nonnegative().max(3_600_000),
+});
+
 export const BOARD_SCRIPT_BROADCAST_JSON_LENGTH = 1024;
 export const BOARD_SCRIPT_BROADCASTS_PER_SECOND = 10;
 
 export const BoardAwarenessUpdateSchema = z.discriminatedUnion("type", [
 	BoardAwarenessStateUpdateSchema,
+	BoardAwarenessPlaybackSchema,
 	z.object({
 		type: z.literal("gesture"),
 		gesture: BoardAwarenessGestureSchema,
@@ -176,6 +189,7 @@ export type BoardAwarenessItemPreview = z.infer<
 export type BoardAwarenessStateUpdate = z.infer<
 	typeof BoardAwarenessStateUpdateSchema
 >;
+export type BoardAwarenessPlayback = z.infer<typeof BoardAwarenessPlaybackSchema>;
 export type BoardAwarenessGesture = z.infer<
 	typeof BoardAwarenessGestureSchema
 >;

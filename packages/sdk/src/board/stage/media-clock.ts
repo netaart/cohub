@@ -19,6 +19,7 @@ type Entry = {
 	ready: boolean;
 	failed: boolean;
 	pendingSeek: number | null;
+	due: number | null;
 	loop: boolean;
 	frameHandle: number;
 	idleSince: number | null;
@@ -38,6 +39,7 @@ export type BoardMediaClock = {
 		onScreen: (id: string) => boolean;
 	}): number | null;
 	texture(id: string): Texture | null;
+	waiting(ids: Iterable<string>): number;
 	readonly blocked: boolean;
 	readonly muted: boolean;
 	setMuted(muted: boolean): void;
@@ -53,11 +55,13 @@ const NUDGE = 0.05;
 const RELEASE_MS = 2500;
 const WATCHDOG_MS = 300;
 const HAVE_FUTURE_DATA = 3;
+const LATE_S = 0.1;
 
 export function createBoardMediaClock(options: {
 	source: BoardAssetSource;
 	limit: number;
 	onFrame: (id: string, changed: boolean) => void;
+	onLate?: (ms: number) => void;
 }): BoardMediaClock {
 	const entries = new Map<string, Entry>();
 	const samples = new Map<string, Sample>();
@@ -128,6 +132,7 @@ export function createBoardMediaClock(options: {
 			ready: false,
 			failed: false,
 			pendingSeek: null,
+			due: null,
 			loop: false,
 			frameHandle: 0,
 			idleSince: null,
@@ -143,6 +148,12 @@ export function createBoardMediaClock(options: {
 		const onPlay = () => {
 			if (entry.kind === "video") watchFrames(entry);
 		};
+		const onPlaying = () => {
+			if (entry.due === null) return;
+			const late = element.currentTime - entry.due;
+			entry.due = null;
+			if (late > LATE_S) options.onLate?.(Math.round(late * 1000));
+		};
 		const onError = () => {
 			entry.failed = true;
 			if (entry.ready) options.onFrame(entry.id, true);
@@ -151,11 +162,13 @@ export function createBoardMediaClock(options: {
 		element.addEventListener("seeked", onSeeked);
 		element.addEventListener("loadedmetadata", onMetadata);
 		element.addEventListener("play", onPlay);
+		element.addEventListener("playing", onPlaying);
 		element.addEventListener("error", onError);
 		entry.dispose = () => {
 			element.removeEventListener("seeked", onSeeked);
 			element.removeEventListener("loadedmetadata", onMetadata);
 			element.removeEventListener("play", onPlay);
+			element.removeEventListener("playing", onPlaying);
 			element.removeEventListener("error", onError);
 			if (entry.frameHandle) (element as FrameVideo).cancelVideoFrameCallback?.(entry.frameHandle);
 			element.pause();
@@ -213,6 +226,7 @@ export function createBoardMediaClock(options: {
 		const volume = Math.min(1, Math.max(0, state.volume));
 		if (Math.abs(element.volume - volume) > 0.001) element.volume = volume;
 		if (rate <= 0) {
+			entry.due = null;
 			if (!element.paused) element.pause();
 			if (Math.abs((entry.pendingSeek ?? element.currentTime) - target) > HOLD_DRIFT_S) seek(entry, target);
 			return null;
@@ -220,6 +234,7 @@ export function createBoardMediaClock(options: {
 		if (element.muted !== silent(entry)) element.muted = silent(entry);
 		const drift = target - element.currentTime;
 		if (element.paused) {
+			if (entry.kind === "audio") entry.due = target;
 			if (Math.abs(drift) > HOLD_DRIFT_S) seek(entry, target);
 			element.playbackRate = rate;
 			play(entry);
@@ -337,6 +352,16 @@ export function createBoardMediaClock(options: {
 		texture(id) {
 			const entry = entries.get(id);
 			return entry?.ready && !entry.failed ? entry.texture : null;
+		},
+		waiting(ids) {
+			let waiting = 0;
+			for (const id of ids) {
+				const entry = entries.get(id);
+				// iOS loads sound only once it plays.
+				const { readyState, networkState } = entry?.element ?? {};
+				if (!entry || (!entry.failed && readyState !== undefined && readyState < HAVE_FUTURE_DATA && networkState !== HTMLMediaElement.NETWORK_IDLE)) waiting += 1;
+			}
+			return waiting;
 		},
 		get blocked() {
 			return blocked;

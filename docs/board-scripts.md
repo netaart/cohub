@@ -536,6 +536,21 @@ scripted Board, and `cohub boards simulate` with `{"tool": "play"}`.
 `layoutText({ text, fontSize?, fontWeight?, font?, lineHeight?, width? })` resolves
 to the size a native text item would take, for laying out controls.
 
+`preload([src | { src, width?, height? }])` loads up to 16 images at a time before a scene shows
+them, at their size on the Board up to the view (the whole view when omitted), and resolves to
+`{ loaded, failed }` once each has loaded or failed, at most 15 s. Await it before a
+reveal; a shared playback started with `--preroll` also waits for it on every screen.
+Exports load everything anyway, so there it resolves at once.
+
+```js
+const colossus = { type: "image", props: { src: "art/colossus.png" }, size: { width: 1600, height: 2400 } };
+const loaded = ctx.preload([{ src: colossus.props.src, ...colossus.size }]);
+ctx.on("reveal", async () => {
+  await loaded;
+  ctx.scene({ colossus });
+});
+```
+
 ## Share effects with other viewers
 
 Each viewer runs the scripts on their own screen, so a spark drawn for a click shows

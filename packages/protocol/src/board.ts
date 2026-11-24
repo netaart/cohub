@@ -230,7 +230,7 @@ export const BoardPlaybackCommandSchema = z.discriminatedUnion("type", [
 		preroll,
 	}).strict(),
 	z.object({ commandId, type: z.literal("pause") }).strict(),
-	z.object({ commandId, type: z.literal("resume") }).strict(),
+	z.object({ commandId, type: z.literal("resume"), ifCommand: commandId.optional() }).strict(),
 	z.object({ commandId, type: z.literal("seek"), position: z.number().finite().nonnegative(), preroll }).strict(),
 	z.object({ commandId, type: z.literal("next") }).strict(),
 	z.object({ commandId, type: z.literal("stop") }).strict(),

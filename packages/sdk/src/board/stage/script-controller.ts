@@ -447,6 +447,12 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     get hovering() { return hover !== null; },
     get hovered(): BoardScriptPointerTarget | null { return hover; },
     get paused() { return paused; },
+    booting(): number {
+      if (!host) return 0;
+      let booting = 0;
+      for (const { id } of boardScriptAttachments(scriptDocument(), editor.scriptMode)) if (!host.ready?.(id) && !host.error(id)) booting += 1;
+      return booting;
+    },
     setPaused(next: boolean) {
       if (next === paused) return;
       if (next) cancelPointers();

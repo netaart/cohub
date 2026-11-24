@@ -179,7 +179,8 @@ export function nextLocalPlayback(
 		case "pause":
 			return current ? { ...current, ...base, status: "paused", position } : null;
 		case "resume":
-			return current ? { ...current, ...base, status: "playing", position } : null;
+			if (!current || (command.ifCommand && command.ifCommand !== current.commandId)) return current;
+			return { ...current, ...base, status: "playing", position };
 		case "seek":
 			return current ? { ...current, ...base, position: command.position, effectiveAt: now + (command.preroll ?? 0) } : null;
 		case "next": {

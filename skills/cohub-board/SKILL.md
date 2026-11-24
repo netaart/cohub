@@ -152,6 +152,7 @@ Playback is shared by every viewer, and a marker with `pause: true` holds until 
 cohub boards play <board> lecture --at 2.5s
 cohub boards next <board>        # also pause, resume, seek <time>, stop
 cohub boards watch <board> --json  # stream changes and playback
+cohub boards viewers <board>       # each screen: loaded, camera, sound
 cohub boards get <board> --only playback
 ```
 
@@ -159,8 +160,12 @@ cohub boards get <board> --only playback
   when it is ready, then `next`. Viewers load what follows the marker while it holds,
   so put the reveal right after it rather than seeking past a long wait.
 - Viewers load the next few sounds early, so voices start whole. To start or jump
-  somewhere new with heavy images, add `--preroll 1s` to `play` or `seek`: every screen
-  holds that frame while it loads, then plays in step.
+  somewhere new with heavy images, add `--preroll` to `play` or `seek`: every screen
+  holds that frame until all have loaded it, at most 5 s, then they start together.
+  Scripts that reveal heavy images `await ctx.preload([...])` first, and the preroll
+  waits for that too.
+- `boards viewers` after a play shows whether each screen was ready, followed the
+  camera, and lost the start of a voice (`late`).
 - Every new `play` brings back viewers who took the camera; `seek` and `next` keep
   their view.
 

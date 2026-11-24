@@ -35,7 +35,7 @@ test("Board commands are one small, flat set and all expose -h", () => {
   const { boards } = createProgram();
   assert.deepEqual(boards.commands.map((command) => command.name()), [
     "create", "get", "apply", "history", "diff", "schema", "preset", "examples", "export", "simulate", "profile", "gpu-daemon", "inspect", "frames", "sequence", "place", "path",
-    "play", "pause", "resume", "seek", "next", "stop", "watch",
+    "play", "pause", "resume", "seek", "next", "stop", "viewers", "watch",
   ]);
   for (const command of boards.commands) {
     assert.match(command.helpInformation(), /-h, --help/, `${command.name()} is missing -h`);

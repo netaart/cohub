@@ -456,7 +456,7 @@ const publishBoardAwareness = async (
   const previousSeq = ctx.boardAwarenessSeqByBoard.get(boardId) ?? -1;
   if (seq <= previousSeq) return;
 
-  const permission = update.type === "state" || update.type === "reaction" || update.type === "script" ? "view" : "edit";
+  const permission = update.type === "state" || update.type === "playback" || update.type === "reaction" || update.type === "script" ? "view" : "edit";
   const spaceId = await authorizeBoardAwarenessFor(ctx, { boardId, permission });
   if (!spaceId) {
     sendWsError(socket, "FORBIDDEN", `Missing Board ${permission} permission`, requestId);

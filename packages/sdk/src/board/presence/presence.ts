@@ -1,6 +1,7 @@
 import {
 	BOARD_SCRIPT_BROADCASTS_PER_SECOND,
 	type BoardAwarenessGesture,
+	type BoardAwarenessPlayback,
 	type BoardAwarenessPoint,
 	type BoardAwarenessStateUpdate,
 	type BoardAwarenessUpdate,
@@ -65,6 +66,8 @@ export type BoardPresenceChannel = {
 		resync?: () => void;
 	}): () => void;
 };
+
+export type BoardPresencePlayback = Omit<BoardAwarenessPlayback, "type" | "hidden">;
 
 export type BoardPresenceGesture =
 	| Exclude<BoardAwarenessGesture, { kind: "draw" }>
@@ -198,10 +201,15 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 	let shownAt = now();
 	let syncQueued = false;
 	let shownView: readonly unknown[] = [];
+	let playback: BoardPresencePlayback | null = null;
 
 	function send(update: BoardAwarenessUpdate) {
 		if (destroyed) return;
 		sendTail = sendTail.then(() => channel.updateAwareness(update)).catch(() => undefined);
+	}
+
+	function sendPlayback() {
+		if (playback && publish !== "none") send({ type: "playback", ...playback, hidden: !visible });
 	}
 
 	function changed() {
@@ -612,6 +620,7 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 		visible = globalThis.document?.visibilityState !== "hidden";
 		if (!visible) cursor = null;
 		syncState();
+		sendPlayback();
 	}
 
 	const stopEditor = editor.subscribe(EDITOR_CHANNELS, queueSync);
@@ -626,7 +635,14 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 			},
 		});
 	} catch {}
-	const heartbeat = sharesState && typeof globalThis.window !== "undefined" ? setInterval(() => !destroyed && flushState(), HEARTBEAT_MS) : null;
+	const heartbeat =
+		publish !== "none" && typeof globalThis.window !== "undefined"
+			? setInterval(() => {
+					if (destroyed) return;
+					if (sharesState) flushState();
+					sendPlayback();
+				}, HEARTBEAT_MS)
+			: null;
 	globalThis.document?.addEventListener("visibilitychange", onVisibility);
 	globalThis.window?.addEventListener("blur", clearCursor);
 	queueSync();
@@ -685,6 +701,20 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 			broadcastWindow.count += 1;
 			send({ type: "script", owner, event, data: data as Extract<BoardAwarenessUpdate, { type: "script" }>["data"] });
 			return true;
+		},
+		setPlayback(next: BoardPresencePlayback | null) {
+			const previous = playback;
+			playback = next;
+			if (
+				next &&
+				(!previous ||
+					previous.commandId !== next.commandId ||
+					previous.ready !== next.ready ||
+					previous.following !== next.following ||
+					previous.muted !== next.muted ||
+					previous.late !== next.late)
+			)
+				sendPlayback();
 		},
 		onBroadcast(listener: (event: BoardPresenceBroadcast) => void): () => void {
 			broadcastListeners.add(listener);

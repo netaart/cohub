@@ -182,6 +182,15 @@ wherever they fall, outside the budget, and with prefetch on, videos of the next
 while a decoder is free.
 `onLiveChange` reports the live set for other per-card work such as file previews.
 
+During a shared playback the stage reports this screen through `presence.setPlayback`:
+whether everything in view, the sounds of the next second, its scripts and their
+pending `preload()`s have loaded (`ready`, `pending`), whether the camera follows, whether
+sound is muted, and the most a sound started late (`late`, from the media clock's
+`playing` events). The presence sends it at once when it changes and with every
+heartbeat. `BoardClient.play` and `seek` with `preroll` listen for these reports and
+start early, with `resume` guarded by `ifCommand`, once every screen that reported
+is ready or hidden; `BoardClient.viewers()` lists them.
+
 Hosts add pictures for their own items through `itemAsset`, which maps an item to
 the same `file:` and `url:` keys built-in cards use, so they share every rule below.
 A `cover:` prefix sizes a picture cropped to fill its box by its short edge. Queued

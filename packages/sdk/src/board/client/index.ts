@@ -5,7 +5,7 @@ import {
   getRealtimeBoardRoom,
 } from "@cohub/protocol/realtime/types";
 import { isSpaceFsSymlink } from "@cohub/protocol/fs";
-import type { BoardAwarenessUpdate } from "@cohub/protocol/realtime";
+import type { BoardAwarenessPlayback, BoardAwarenessUpdate } from "@cohub/protocol/realtime";
 import { ensureRealtimeConnected } from "../../realtime.js";
 import type { Fetch, HttpTransport } from "../../transport.js";
 import type {
@@ -45,6 +45,25 @@ export type BoardSubscriptionHandlers = {
   event?: (event: BoardChangedEvent | BoardAwarenessUpdatedEvent | BoardPlaybackChangedEvent) => void;
   resync?: () => void;
 };
+
+export type BoardViewer = {
+  connectionId: string;
+  actorId: string;
+  actorName: string;
+  playback: Omit<BoardAwarenessPlayback, "type"> | null;
+};
+
+type BoardPlaybackStart = Extract<BoardPlaybackCommand, { type: "play" | "seek" }>;
+
+const ROOM_WAIT_MS = 3000;
+const REPORT_GRACE_MS = 500;
+const VIEWERS_LISTEN_MS = 2500;
+
+function within(ms: number, until?: Promise<unknown>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const elapsed = new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); });
+  return Promise.race(until ? [until, elapsed] : [elapsed]).then(() => clearTimeout(timer));
+}
 
 export type BoardSyncResult = Pick<BoardReadResult, "id" | "title" | "version" | "updatedAt" | "playback"> & {
   document: BoardDocument;
@@ -241,9 +260,9 @@ export class BoardClient implements BoardRemote {
     return playback;
   }
 
-  /** Shared playback: every viewer follows the same clock. */
+  /** Shared playback: every viewer follows the same clock. `preroll` holds the first frame until every screen is ready, at most that many ms. */
   play(animationId: string, options: { position?: number; timeScale?: number; seed?: string; preroll?: number } = {}) {
-    return this.control({ commandId: createBoardEntityId(), type: "play", animationId, ...options });
+    return this.start({ commandId: createBoardEntityId(), type: "play", animationId, ...options });
   }
 
   pause() {
@@ -255,7 +274,62 @@ export class BoardClient implements BoardRemote {
   }
 
   seek(position: number, options: { preroll?: number } = {}) {
-    return this.control({ commandId: createBoardEntityId(), type: "seek", position, ...options });
+    return this.start({ commandId: createBoardEntityId(), type: "seek", position, ...options });
+  }
+
+  private async start(command: BoardPlaybackStart) {
+    if (!command.preroll || !this.websocket) return this.control(command);
+    const ready = new Map<string, boolean>();
+    let heard = () => {};
+    const listening = await this.listen((payload) => {
+      const { update } = payload;
+      if (update.type !== "playback" || update.commandId !== command.commandId) return;
+      ready.set(payload.connectionId, update.ready || update.hidden);
+      heard();
+    });
+    try {
+      const sentAt = Date.now();
+      const playback = await this.control(command);
+      if (!listening.live || playback?.commandId !== command.commandId || playback.status !== "playing") return playback;
+      const deadline = sentAt + command.preroll;
+      await within(deadline - Date.now(), new Promise<void>((resolve) => {
+        const check = () => {
+          if (Date.now() - sentAt >= REPORT_GRACE_MS && [...ready.values()].every(Boolean)) resolve();
+        };
+        heard = check;
+        void within(REPORT_GRACE_MS).then(check);
+      }));
+      if (Date.now() >= deadline) return playback;
+      return await this.control({ commandId: createBoardEntityId(), type: "resume", ifCommand: command.commandId });
+    } finally {
+      listening.stop();
+    }
+  }
+
+  async viewers(): Promise<BoardViewer[]> {
+    const viewers = new Map<string, BoardViewer>();
+    const listening = await this.listen(({ connectionId, actorId, actorName, update }) => {
+      const { type, ...report } = update;
+      const playback = type === "playback" ? (report as BoardViewer["playback"]) : (viewers.get(connectionId)?.playback ?? null);
+      viewers.set(connectionId, { connectionId, actorId, actorName, playback });
+    });
+    try {
+      if (!listening.live) throw new Error("The Board's realtime room is not available.");
+      await within(VIEWERS_LISTEN_MS);
+      return [...viewers.values()];
+    } finally {
+      listening.stop();
+    }
+  }
+
+  private async listen(receive: (payload: BoardAwarenessUpdatedEvent["payload"]) => void) {
+    const websocket = this.websocket;
+    if (!websocket) throw new Error("realtime transport is not configured for this client");
+    const room = getRealtimeBoardRoom(this.id);
+    let joined = () => {};
+    const stop = this.realtime.subscribe({ awareness: (event) => receive(event.payload), resync: () => joined() });
+    if (!websocket.isRoomLive(room)) await within(ROOM_WAIT_MS, new Promise<void>((resolve) => { joined = resolve; }));
+    return { live: websocket.isRoomLive(room), stop };
   }
 
   /** Continue past the marker a presentation is holding at. */

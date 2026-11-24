@@ -362,6 +362,8 @@ cohub -s <spaceId> boards get <boardId> --only board
 cohub -s <spaceId> boards schema
 cohub -s <spaceId> boards history <boardId> --json
 cohub -s <spaceId> boards watch <boardId> --json
+cohub -s <spaceId> boards play <boardId> reveal --preroll
+cohub -s <spaceId> boards viewers <boardId>
 ```
 
 Use the filters so a large Board is not read whole:
