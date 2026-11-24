@@ -1,5 +1,19 @@
 # @neta-art/cohub-cli
 
+## 10.36.0
+
+### Minor Changes
+
+- 7be909d: Add offline access for Apps: `auth.authorize({ ..., offline: true })` lets an App's Actions use consented Space scopes while nobody is present, until revoked. List and revoke it with `space(id).appAccess` and `cohub spaces app-access`.
+
+### Patch Changes
+
+- 0c505c6: Download the RTC helper v2.106.0.
+- ee721ac: Download sandboxd v2.108.0.
+- Updated dependencies [7be909d]
+- Updated dependencies [75777d1]
+  - @neta-art/cohub@13.29.0
+
 ## 10.35.0
 
 ### Minor Changes
