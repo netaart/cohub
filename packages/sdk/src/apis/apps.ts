@@ -270,6 +270,8 @@ export type AppViewerGrantRecord = {
   appId: string;
   spaceId: string;
   scopes: Permission[];
+  /** Scopes the App's Actions may use while the viewer is away; they end only on revocation. */
+  offlineScopes: Permission[];
   expiresAt: string | null;
   revokedAt: string | null;
   createdAt: string | null;
@@ -289,6 +291,7 @@ export type AppAuthorizeResponse = {
     id: string;
     spaceId: string;
     scopes: Permission[];
+    offlineScopes: Permission[];
     expiresAt: string;
   };
 };
@@ -492,9 +495,10 @@ export class AppsApi {
   /**
    * Grants scopes as the current user. Pass `silent: true` to only renew an
    * existing live grant — the server rejects it instead of creating or
-   * reviving one, so revoked grants stay revoked.
+   * reviving one, so revoked grants stay revoked. `offline: true` also lets
+   * the App's Actions use these Space scopes while you are away, until revoked.
    */
-  authorize(appId: string, input: { scopes: Permission[]; spaceId?: string; reason?: string; silent?: boolean; scopeMode?: "extend" }) {
+  authorize(appId: string, input: { scopes: Permission[]; spaceId?: string; reason?: string; silent?: boolean; scopeMode?: "extend"; offline?: boolean }) {
     return this.transport.request<AppAuthorizeResponse>(`/api/apps/${appId}/authorize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

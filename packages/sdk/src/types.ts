@@ -1801,6 +1801,15 @@ export type SpaceAccessPolicy = {
   anonymous_user: SpaceRole | null;
 };
 
+/** An App a member gave offline access: its Actions may use these scopes on the Space while nobody is present. */
+export type SpaceAppAccessItem = {
+  grantId: string;
+  app: { id: string; slug: string; title: string | null };
+  grantedBy: PublicUserProfile;
+  scopes: Permission[];
+  updatedAt: string | null;
+};
+
 export type SpaceUsageHourlyStat = {
   bucketStartAt: string;
   totalTokens: number;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { delegatedAppAuthorization } from "./viewer-grants.js";
+import { delegatedAppAuthorization, readOfflineScopes, withOfflineScopes } from "./viewer-grants.js";
 
 const publishedHomeApp = {
   status: "published",
@@ -46,5 +46,20 @@ describe("delegatedAppAuthorization", () => {
       ),
       { active: true, appScopes: ["file.view", "file.edit", "session.prompt.fullaccess", "command.execute"] },
     );
+  });
+});
+
+describe("offline scopes", () => {
+  it("round-trips through grant meta without dropping provenance", () => {
+    const meta = withOfflineScopes({ consent: "host" }, ["space.commerce.view", "space.view"]);
+    assert.deepEqual(readOfflineScopes(meta), ["space.commerce.view", "space.view"]);
+    assert.deepEqual(withOfflineScopes(meta, []), { consent: "host" });
+    assert.equal(withOfflineScopes(null, []), null);
+  });
+
+  it("ignores rows that never consented to offline access", () => {
+    assert.deepEqual(readOfflineScopes(null), []);
+    assert.deepEqual(readOfflineScopes({ consent: "host" }), []);
+    assert.deepEqual(readOfflineScopes({ offlineScopes: ["not-a-scope", 3] }), []);
   });
 });

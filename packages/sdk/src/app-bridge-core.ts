@@ -88,6 +88,8 @@ export type AppAuthorizeRequest = {
 	/** Viewer-owned Space to create as part of this consent. */
 	createSpace?: CreateSpaceInput;
 	join?: AppAuthorizeJoin;
+	/** The App's Actions may also use these scopes while the viewer is away, until revoked. */
+	offline?: boolean;
 };
 
 export type AppAuthorizeJoin = Pick<InvitationDetail, "token" | "spaceId" | "spaceName" | "spaceAvatarUrl" | "role" | "inviter">;
@@ -527,6 +529,7 @@ export function createAppBridgeCore(
 		const current = authorizationRequests.get(requestId);
 		return Boolean(previous) === Boolean(current)
 			&& previous?.fallback === current?.fallback
+			&& previous?.offline === current?.offline
 			&& isSameConsent(pending, next);
 	}
 	const joinReservations = new WeakSet<AppAuthorizeRequest>();
@@ -847,7 +850,7 @@ export function createAppBridgeCore(
 	async function authorize(
 		scopes: Permission[],
 		spaceId?: string,
-		options?: { silent?: boolean; consent?: "host"; forceRefreshToken?: boolean },
+		options?: { silent?: boolean; consent?: "host"; forceRefreshToken?: boolean; offline?: boolean },
 	) {
 		const incremental = Boolean(state.pendingAuth && authorizationRequests.has(state.pendingAuth.requestId));
 		const userToken = await getAccessToken(
@@ -875,6 +878,7 @@ export function createAppBridgeCore(
 					...(spaceId ? { spaceId } : {}),
 					...(options?.silent ? { silent: true } : {}),
 					...(options?.consent ? { consent: options.consent } : {}),
+					...(options?.offline ? { offline: true } : {}),
 					...(incremental ? { scopeMode: "extend" } : {}),
 				}),
 				},
@@ -926,12 +930,12 @@ export function createAppBridgeCore(
 	 * token expired, not that the grant was revoked, so refresh once before
 	 * letting the caller classify the failure.
 	 */
-	async function authorizeSilent(scopes: Permission[], spaceId?: string) {
+	async function authorizeSilent(scopes: Permission[], spaceId?: string, offline?: boolean) {
 		try {
-			return await authorize(scopes, spaceId, { silent: true });
+			return await authorize(scopes, spaceId, { silent: true, offline });
 		} catch (error) {
 			if (!isAuthFailure(error)) throw error;
-			return authorize(scopes, spaceId, { silent: true, forceRefreshToken: true });
+			return authorize(scopes, spaceId, { silent: true, forceRefreshToken: true, offline });
 		}
 	}
 
@@ -1015,7 +1019,7 @@ export function createAppBridgeCore(
 		if (!viewerUuid || targets.length === 0) return false;
 		for (const target of targets) {
 			try {
-				const result = await authorizeSilent(scopes, target);
+				const result = await authorizeSilent(scopes, target, reserved.offline);
 				// A different request may have replaced us while we waited; it already
 				// answered us, and clearing state here would wipe its reservation.
 				if (state.pendingAuth !== reserved) return true;
@@ -1029,8 +1033,11 @@ export function createAppBridgeCore(
 				// token (already retried with a refresh) and a 5xx/network error is
 				// transient: neither may drop a valid grant.
 				if (isGrantRejection(error)) {
-					clearGrantedAppScopes(viewerUuid, app.id, target);
-					if (target === app.spaceId) clearGrantedAppScopes(viewerUuid, app.id);
+					// Missing offline access says nothing about the cached interactive grant.
+					if (!reserved.offline) {
+						clearGrantedAppScopes(viewerUuid, app.id, target);
+						if (target === app.spaceId) clearGrantedAppScopes(viewerUuid, app.id);
+					}
 					continue;
 				}
 				replyPendingAuth(reserved, {
@@ -1357,6 +1364,7 @@ export function createAppBridgeCore(
 			createSpace?: unknown;
 			invite?: unknown;
 			alwaysAsk?: boolean;
+			offline?: boolean;
 			forceRefresh?: boolean;
 			productKey?: string;
 			purchaseAttemptId?: string;
@@ -1371,6 +1379,10 @@ export function createAppBridgeCore(
 			const input = parsed.data;
 			if (input.target.kind === "account" && input.scopes.some((scope) => !isUserLevelPermission(scope as Permission))) {
 				replyForRequest(data.requestId, { type: "cohub.app.error", code: "invalid_request", message: "Space permissions require a Space target." }, true);
+				return;
+			}
+			if (input.offline && (input.target.kind === "account" || input.scopes.some((scope) => isUserLevelPermission(scope as Permission)))) {
+				replyForRequest(data.requestId, { type: "cohub.app.error", code: "invalid_request", message: "Offline access covers Space permissions only." }, true);
 				return;
 			}
 			authorizationRequests.set(data.requestId, input);
@@ -1546,6 +1558,7 @@ export function createAppBridgeCore(
 				// `alwaysAsk` skips silent reuse so the viewer can re-confirm or
 				// change the grant (e.g. switch to another Space).
 				const alwaysAsk = data.alwaysAsk === true;
+				const offline = data.offline === true;
 				if (scopes.length === 0) {
 					replyForRequest(data.requestId, {
 						type: "cohub.app.error",
@@ -1674,6 +1687,7 @@ export function createAppBridgeCore(
 					homeSpaceName: app.spaceName ?? null,
 					...(spaceId ? { spaceId } : {}),
 					...(selectSpace ? { selectSpace: true } : {}),
+					...(offline ? { offline: true } : {}),
 				};
 				state.pendingAuth = reserved;
 				reservedAuth = reserved;
@@ -1697,7 +1711,8 @@ export function createAppBridgeCore(
 					!alwaysAsk && !selectSpace && shellSpace && (!spaceId || spaceId === shellSpace.id)
 						? shellSpace.id
 						: null;
-				const shellConsent = shellTargetId ? await shellConsentFor(scopes, shellTargetId) : null;
+				// Offline access always needs the viewer's own consent.
+				const shellConsent = shellTargetId && !offline ? await shellConsentFor(scopes, shellTargetId) : null;
 				if (state.pendingAuth !== reserved) return;
 				if (shellConsent && shellTargetId) {
 					try {
@@ -2133,7 +2148,7 @@ export function createAppBridgeCore(
 				}
 				requestedSpaceId = mintedSpace.id;
 			}
-			const result = await authorize(pending.scopes, requestedSpaceId);
+			const result = await authorize(pending.scopes, requestedSpaceId, pending.offline ? { offline: true } : undefined);
 			const viewerUuid = await getViewerUuid();
 			setGrantedAppScopes(viewerUuid, app.id, result.scopes, result.spaceId);
 			if (

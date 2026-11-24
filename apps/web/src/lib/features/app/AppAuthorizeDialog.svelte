@@ -590,7 +590,9 @@ const scopeLabel = (scope: string) =>
 						: m.app_auth_join_validity({}, { locale })
 					: pending.createSpace
 						? m.app_auth_validity_create({}, { locale })
-						: m.app_auth_validity({}, { locale })}
+						: pending.offline
+							? m.app_auth_validity_offline({}, { locale })
+							: m.app_auth_validity({}, { locale })}
 			</div>
 
 			{#if error}

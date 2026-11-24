@@ -801,8 +801,9 @@ export function registerApps(program: Command): void {
     .requiredOption("--scope <scope>", "Scope to grant (repeatable)", collectOption, [])
     .option("--space <space>", "Target space (ID, home, slug, or username/slug); defaults to the app's own space")
     .option("--extend", "Add scopes without replacing active grants")
+    .option("--offline", "Also let the app's Actions use these Space scopes while you are away, until revoked")
     .option("--json", "Output as JSON")
-    .action(async (appRef: string, opts: { scope: string[]; space?: string; extend?: boolean; json?: boolean }, command: Command) => {
+    .action(async (appRef: string, opts: { scope: string[]; space?: string; extend?: boolean; offline?: boolean; json?: boolean }, command: Command) => {
       const client = createClient();
       try {
         // The root `-s, --space` option claims `--space` after the subcommand too; COHUB_SPACE_ID must not apply here.
@@ -813,6 +814,7 @@ export function registerApps(program: Command): void {
           scopes: opts.scope as Permission[],
           ...(spaceId ? { spaceId } : {}),
           ...(opts.extend ? { scopeMode: "extend" as const } : {}),
+          ...(opts.offline ? { offline: true } : {}),
         });
         if (jsonRequested(opts)) return outJson(result);
         ok(`Granted ${result.grant.scopes.join(", ")} on space ${result.grant.spaceId}`);
@@ -835,6 +837,7 @@ export function registerApps(program: Command): void {
           { key: "id", label: "ID" },
           { key: "spaceId", label: "Space" },
           { key: "scopes", label: "Scopes" },
+          { key: "offlineScopes", label: "Offline" },
           { key: "expiresAt", label: "Expires" },
           { key: "revokedAt", label: "Revoked" },
         ]);

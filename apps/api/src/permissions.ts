@@ -8,6 +8,8 @@ import { hasPreviewSessionPermission } from "./preview-sessions.js";
 import type { SpaceFsVisibility } from "@cohub/core/space-fs";
 import type { AppSessionPrincipal } from "./app-sessions.js";
 import { and, eq } from "drizzle-orm";
+import { resolveOfflineAppScopesAtUseTime } from "@cohub/core/apps";
+import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
 
 type ResolvedAppState = { appScopes: Permission[] };
 
@@ -20,6 +22,10 @@ type CachedAppSessionPrincipal = AppSessionPrincipal & {
 type ScopedExecutionPrincipal = {
   spaceId: string;
   scopes?: Permission[];
+  source?: string;
+  appId?: string | null;
+  /** Memoized per request: offline access by target Space. */
+  offlineScopes?: Map<string, Promise<Permission[]>>;
 };
 
 const permissionStore = createBatchDrizzlePermissionStore(db);
@@ -40,6 +46,20 @@ const getUserExecution = (user: AuthUserProfile | null): ScopedExecutionPrincipa
   const execution = (user as (AuthUserProfile & { execution?: ScopedExecutionPrincipal }) | null)?.execution;
   if (!execution || !Array.isArray(execution.scopes)) return null;
   return execution;
+};
+
+/** An App Action reaching outside its home Space may use offline access consented there. */
+const getOfflineAppScopes = (execution: ScopedExecutionPrincipal | null, spaceId: string): Promise<Permission[]> => {
+  if (!execution || execution.spaceId === spaceId || execution.source !== APP_ACTION_EXECUTION_SOURCE || !execution.appId) {
+    return Promise.resolve([]);
+  }
+  execution.offlineScopes ??= new Map();
+  let scopes = execution.offlineScopes.get(spaceId);
+  if (!scopes) {
+    scopes = resolveOfflineAppScopesAtUseTime({ db, appId: execution.appId, spaceId });
+    execution.offlineScopes.set(spaceId, scopes);
+  }
+  return scopes;
 };
 
 const getUserPreviewSession = (user: AuthUserProfile | null): PreviewSessionPrincipal | null => {
@@ -321,12 +341,13 @@ export async function hasPermission(
   if (previewSession) return hasPreviewSessionPermission(previewSession, permission, context.spaceId);
   const execution = getUserExecution(user);
   if (execution?.spaceId === context.spaceId && scopeListHasPermission(normalizePermissionScopes(execution.scopes ?? []), permission)) return true;
-  return hasSharedPermission({
+  if (await hasSharedPermission({
     store: permissionStore,
     user,
     permission,
     context,
-  });
+  })) return true;
+  return scopeListHasPermission(await getOfflineAppScopes(execution, context.spaceId), permission);
 }
 
 /** Which file view the caller gets: full, filtered by the workspace .gitignore, or none. */
@@ -354,7 +375,10 @@ export async function resolvePermissionAccess(
     user,
     context,
   });
-  if (execution?.spaceId !== context.spaceId) return access;
+  if (execution?.spaceId !== context.spaceId) {
+    const offline = await getOfflineAppScopes(execution, context.spaceId);
+    return offline.length ? { role: access.role, permissions: normalizePermissionScopes([...access.permissions, ...offline]) } : access;
+  }
   return {
     role: access.role,
     permissions: normalizePermissionScopes([
@@ -398,6 +422,7 @@ export async function filterSessionsByPermission(
   if (previewSession) return hasPreviewSessionPermission(previewSession, permission, spaceId) ? sessions : [];
   const execution = getUserExecution(user);
   if (execution?.spaceId === spaceId && scopeListHasPermission(normalizePermissionScopes(execution.scopes ?? []), permission)) return sessions;
+  if (scopeListHasPermission(await getOfflineAppScopes(execution, spaceId), permission)) return sessions;
   return permissionStore.filterSessionsByPermission({
     user,
     permission,

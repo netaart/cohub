@@ -1063,6 +1063,7 @@ export function registerSpaces(program: Command): void {
 
   // ── spaces access ──
   registerAccess(spacesCmd);
+  registerAppAccess(spacesCmd);
 
   // ── spaces checkpoints ──
   registerCheckpoints(spacesCmd);
@@ -2365,6 +2366,56 @@ function registerAccess(spacesCmd: Command): void {
         if (jsonRequested(opts)) return outJson(policy);
         ok("Access policy updated");
         table([policy], ACCESS_COLUMNS);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+}
+
+function registerAppAccess(spacesCmd: Command): void {
+  const appAccessCmd = spacesCmd
+    .command("app-access")
+    .description("Apps whose Actions may use this Space while nobody is present")
+    .hook("preAction", async () => { await resolveSpace(spacesCmd); });
+
+  appAccessCmd
+    .command("ls")
+    .alias("list")
+    .description("List offline App access")
+    .option("--json", "Output as JSON")
+    .action(async (opts: { json?: boolean }) => {
+      const spaceId = await resolveSpace(spacesCmd);
+      try {
+        const result = await createClient().space(spaceId).appAccess.list();
+        if (jsonRequested(opts)) return outJson(result);
+        if (result.items.length === 0) {
+          console.log("  (empty)");
+          return;
+        }
+        table(result.items.map((item) => ({
+          grantId: item.grantId,
+          app: item.app.title || item.app.slug,
+          grantedBy: item.grantedBy.displayName,
+          scopes: item.scopes.join(", "),
+        })), [
+          { key: "grantId", label: "Grant ID" },
+          { key: "app", label: "App" },
+          { key: "grantedBy", label: "Granted by" },
+          { key: "scopes", label: "Scopes" },
+        ]);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  appAccessCmd
+    .command("revoke <grantId>")
+    .description("End an App's offline access; the member's own grant stays")
+    .action(async (grantId: string) => {
+      const spaceId = await resolveSpace(spacesCmd);
+      try {
+        await createClient().space(spaceId).appAccess.revoke(grantId);
+        ok(`${grantId} revoked`);
       } catch (e: unknown) {
         handleHttp(e);
       }

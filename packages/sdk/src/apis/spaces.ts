@@ -100,6 +100,7 @@ import type {
   LabelResourceType,
   PatchResourceLabelsInput,
   PatchResourceLabelsResponse,
+  SpaceAppAccessItem,
   SpaceModListItem,
   SpaceMember,
   SpaceRecord,
@@ -1414,6 +1415,23 @@ export class SpaceAccessApi {
   }
 }
 
+/** Offline access Apps hold on this Space. Ending it keeps each member's interactive grant. */
+export class SpaceAppAccessApi {
+  constructor(
+    private readonly transport: HttpTransport,
+    private readonly spaceId: string,
+  ) {}
+
+  list() {
+    return this.transport.request<{ items: SpaceAppAccessItem[] }>(`/api/spaces/${this.spaceId}/app-access`);
+  }
+
+  /** Allowed for the member who granted it and for Space hosts. */
+  revoke(grantId: string) {
+    return this.transport.request<void>(`/api/spaces/${this.spaceId}/app-access/${encodeURIComponent(grantId)}`, { method: "DELETE" });
+  }
+}
+
 export class SpaceUsageApi {
   constructor(
     private readonly transport: HttpTransport,
@@ -2141,6 +2159,7 @@ export class SpaceClient {
   readonly members: SpaceMembersApi;
   readonly presence: SpacePresenceApi;
   readonly access: SpaceAccessApi;
+  readonly appAccess: SpaceAppAccessApi;
   readonly checkpoints: SpaceCheckpointsApi;
   readonly usage: SpaceUsageApi;
   readonly activity: SpaceActivityApi;
@@ -2170,6 +2189,7 @@ export class SpaceClient {
     this.members = new SpaceMembersApi(transport, id);
     this.presence = new SpacePresenceApi(transport, id);
     this.access = new SpaceAccessApi(transport, id);
+    this.appAccess = new SpaceAppAccessApi(transport, id);
     this.checkpoints = createSpaceCheckpointsApi(transport, id);
     this.usage = new SpaceUsageApi(transport, id);
     this.activity = new SpaceActivityApi(transport, id);
