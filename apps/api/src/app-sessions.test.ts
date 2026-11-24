@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { describe, it } from "node:test";
-import { createAppSessionToken, verifyAppSessionToken } from "./app-sessions.js";
+import { createAppSessionToken, isSignedAppSessionToken, verifyAppSessionToken } from "./app-sessions.js";
 
 const SECRET = "test-app-encryption-key";
 const mint = (input: Parameters<typeof createAppSessionToken>[0]) =>
@@ -128,5 +128,12 @@ describe("app session tokens", () => {
     assert.equal(verify(`${token}x`), null);
     assert.equal(verify("not-a-token"), null);
     assert.equal(verifyAppSessionToken(token, "other-secret"), null);
+  });
+
+  it("still recognizes an expired token as ours so callers cannot fall back to account access", () => {
+    const expired = mint({ userUuid: "user-1", appId: "app-1", spaceId: "home-space", appScopes: [], ttlSeconds: -1 });
+    assert.equal(verify(expired), null);
+    assert.equal(isSignedAppSessionToken(expired, SECRET), true);
+    assert.equal(isSignedAppSessionToken(`${expired}x`, SECRET), false);
   });
 });

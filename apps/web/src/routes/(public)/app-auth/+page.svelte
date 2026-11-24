@@ -1,9 +1,16 @@
 <script lang="ts">
+import {
+	APP_BROWSER_SECRET_PATTERN,
+	APP_BROWSER_SESSION_PATH,
+	appReturnPath,
+	isUuidOrShortUuid,
+} from "@cohub/protocol";
 import type { AppPublicOwnerRecord, AppRecord } from "@neta-art/cohub";
 import { AlertTriangle, Loader2, ShieldCheck } from "lucide-svelte";
 import { onDestroy, onMount } from "svelte";
 import { getAuthToken, signInWithRedirectPath } from "#lib/auth.ts";
 import { readAppCheckoutState } from "#lib/components/app/app-checkout-state.ts";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
 import AppAuthorizeDialog from "#lib/features/app/AppAuthorizeDialog.svelte";
 import { isLegacyAppOriginAllowed } from "#lib/features/app/app-origin-allowlist.ts";
 import { createAppBridgeHost } from "#lib/features/app/bridge-host.svelte.ts";
@@ -15,7 +22,7 @@ import { authStore } from "#lib/stores/auth.svelte.ts";
 import { PUBLIC_API_ORIGIN } from "$app/env/public";
 import { page } from "$app/state";
 
-type BrokerState = "loading" | "need-login" | "ready" | "error";
+type BrokerState = "loading" | "need-login" | "confirm" | "ready" | "error";
 
 type AppDetail = {
 	app: Pick<AppRecord, "id" | "spaceId" | "userUuid" | "slug" | "appScopes">;
@@ -26,6 +33,11 @@ type AppDetail = {
 const params = $derived(page.url.searchParams);
 const appId = $derived(params.get("app") ?? "");
 const openerOrigin = $derived(params.get("origin") ?? "");
+const redirect = $derived(params.get("mode") === "redirect");
+const challenge = $derived(params.get("challenge") ?? "");
+const returnPath = $derived(
+	appReturnPath(params.get("returnTo") ?? "/", openerOrigin),
+);
 
 let phase = $state<BrokerState>("loading");
 let errorMessage = $state("");
@@ -33,7 +45,15 @@ let errorMessage = $state("");
 let locale: Locale = $derived(getLocale());
 let appDetail = $state<AppDetail | null>(null);
 let host = $state<ReturnType<typeof createAppBridgeHost> | null>(null);
-let originAccepted = false;
+let originAccepted = $state(false);
+const accountName = $derived(
+	authStore.profile?.displayName ||
+		authStore.profile?.username ||
+		authStore.email ||
+		authStore.userUuid ||
+		"",
+);
+let continuing = $state(false);
 
 // The validated origin of the opener window, confirmed from the actual
 // MessageEvent (not just the URL param). Used as targetOrigin for replies.
@@ -78,11 +98,19 @@ async function resolveOriginOwner(): Promise<string> {
 }
 
 async function init() {
-	if (!appId) {
+	if (!isUuidOrShortUuid(appId)) {
 		fail(m.app_auth_invalid_entry({}, { locale }));
 		return;
 	}
-	if (typeof window === "undefined" || !window.opener) {
+	if (
+		typeof window === "undefined" ||
+		(!redirect && !window.opener) ||
+		// A framed page could trick the viewer into confirming a sign-in.
+		(redirect &&
+			(window.top !== window.self ||
+				!returnPath ||
+				!APP_BROWSER_SECRET_PATTERN.test(challenge)))
+	) {
 		fail(m.app_auth_invalid_entry({}, { locale }));
 		return;
 	}
@@ -101,24 +129,37 @@ async function init() {
 		return;
 	}
 	originAccepted =
-		originOwner === "unbound"
-			? isLegacyAppOriginAllowed(openerOrigin, standaloneAppHostTemplate)
-			: originOwner === appId;
+		originOwner === appId ||
+		(!redirect &&
+			originOwner === "unbound" &&
+			isLegacyAppOriginAllowed(openerOrigin, standaloneAppHostTemplate));
 	if (!originAccepted) {
 		fail(m.app_auth_origin_denied({}, { locale }));
+		return;
+	}
+	if (
+		redirect &&
+		(
+			performance.getEntriesByType("navigation")[0] as
+				| PerformanceNavigationTiming
+				| undefined
+		)?.type === "back_forward"
+	) {
+		cancelLogin();
 		return;
 	}
 	const token = await getAuthToken();
 	if (!token) {
 		phase = "need-login";
-		window.opener.postMessage(
-			{ type: "cohub.app.broker.progress", phase: "login" },
-			openerOrigin,
-		);
+		if (!redirect)
+			window.opener?.postMessage(
+				{ type: "cohub.app.broker.progress", phase: "login" },
+				openerOrigin,
+			);
 		// Only one automatic redirect per attempt; keep the sign-in action
 		// available when an OAuth callback cannot establish a session.
 		try {
-			const key = `cohub:broker-login:${appId}`;
+			const key = `cohub:broker-login:${appId}${redirect ? ":redirect" : ""}`;
 			const previous = Number(sessionStorage.getItem(key) ?? 0);
 			if (Date.now() - previous > 600_000) {
 				sessionStorage.setItem(key, String(Date.now()));
@@ -127,6 +168,14 @@ async function init() {
 		} catch {
 			/* The explicit sign-in action remains available. */
 		}
+		return;
+	}
+
+	if (redirect) {
+		await authStore.ensureLoaded(true);
+		if (!authStore.userUuid)
+			return fail(m.app_auth_unavailable({}, { locale }));
+		phase = "confirm";
 		return;
 	}
 
@@ -204,6 +253,61 @@ async function handleLogin() {
 	);
 }
 
+async function continueSignIn() {
+	if (!returnPath || continuing) return;
+	continuing = true;
+	const token = await getAuthToken();
+	const response = await fetch(
+		`${PUBLIC_API_ORIGIN ?? ""}/api/apps/${encodeURIComponent(appId)}/browser-session/code`,
+		{
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				origin: openerOrigin,
+				challenge,
+				returnTo: returnPath,
+				userUuid: authStore.userUuid,
+			}),
+		},
+	).catch(() => null);
+	if (response?.status === 409) {
+		// Another tab switched accounts; show the current one before continuing.
+		await authStore.ensureLoaded(true);
+		continuing = false;
+		return;
+	}
+	if (!response?.ok) {
+		continuing = false;
+		return fail(m.app_auth_unavailable({}, { locale }));
+	}
+	const { code } = (await response.json()) as { code: string };
+	const callback = new URL(
+		APP_BROWSER_SESSION_PATH + "/callback",
+		openerOrigin,
+	);
+	callback.search = new URLSearchParams({
+		app: appId,
+		code,
+		challenge,
+		returnTo: returnPath,
+	}).toString();
+	window.location.replace(callback.href);
+}
+
+function cancelLogin() {
+	if (redirect && originAccepted && returnPath)
+		window.location.replace(new URL(returnPath, openerOrigin).href);
+	else if (!redirect) window.close();
+}
+
+function onPageShow(event: PageTransitionEvent) {
+	if (event.persisted && originAccepted && phase === "need-login")
+		cancelLogin();
+}
+
 onMount(() => {
 	void init().catch((error) => {
 		fail(
@@ -213,9 +317,13 @@ onMount(() => {
 		);
 	});
 	window.addEventListener("message", onMessage);
+	window.addEventListener("pageshow", onPageShow);
 });
 
-onDestroy(() => window.removeEventListener("message", onMessage));
+onDestroy(() => {
+	window.removeEventListener("message", onMessage);
+	window.removeEventListener("pageshow", onPageShow);
+});
 </script>
 
 <svelte:head>
@@ -236,12 +344,35 @@ onDestroy(() => window.removeEventListener("message", onMessage));
 			<button type="button" class="broker-login-btn" onclick={handleLogin}>
 				{m.app_auth_sign_in({}, { locale })}
 			</button>
+			<button type="button" class="secondary-key min-h-9 px-3 text-[13px]" onclick={cancelLogin}>{m.common_cancel({}, { locale })}</button>
+		</div>
+	{:else if phase === "confirm"}
+		<div class="broker-center">
+			<UserAvatar
+				name={accountName}
+				avatarUrl={authStore.profile?.avatarUrl}
+				size="lg"
+			/>
+			<p class="broker-login-title">
+				{m.app_auth_storefront_title({ site: new URL(openerOrigin).host }, { locale })}
+			</p>
+			<p class="broker-login-copy">
+				{m.app_auth_storefront_account({ name: accountName }, { locale })}
+			</p>
+			<button type="button" class="broker-login-btn" disabled={continuing} onclick={continueSignIn}>
+				{m.app_auth_storefront_continue({}, { locale })}
+			</button>
+			<button type="button" class="secondary-key min-h-9 px-3 text-[13px]" disabled={continuing} onclick={cancelLogin}>{m.common_cancel({}, { locale })}</button>
 		</div>
 	{:else if phase === "error"}
 		<div class="broker-center">
 			<AlertTriangle class="h-5 w-5 text-error-soft" />
 			<p class="broker-error-msg">{errorMessage}</p>
-			<p class="broker-error-hint">{m.app_auth_close({}, { locale })}</p>
+			{#if redirect && originAccepted && returnPath}
+				<button type="button" class="secondary-key min-h-9 px-3 text-[13px]" onclick={cancelLogin}>{m.common_cancel({}, { locale })}</button>
+			{:else}
+				<p class="broker-error-hint">{m.app_auth_close({}, { locale })}</p>
+			{/if}
 		</div>
 	{/if}
 

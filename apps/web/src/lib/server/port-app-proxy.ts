@@ -1,3 +1,5 @@
+import { isAppBrowserCookie } from "./app-browser-session.ts";
+
 /** Default cap for a proxied request body; uploads are streamed, never buffered. */
 export const PORT_APP_MAX_BODY_BYTES = 30 * 1024 * 1024;
 
@@ -36,6 +38,15 @@ function forwardedRequestHeaders(
 			continue;
 		if (UNTRUSTED_REQUEST_PREFIXES.some((prefix) => name.startsWith(prefix)))
 			continue;
+		if (name === "cookie") {
+			const cookies = value
+				.split(";")
+				.filter((pair) => !isAppBrowserCookie(pair))
+				.join(";")
+				.trim();
+			if (cookies) headers.set(name, cookies);
+			continue;
+		}
 		headers.set(name, value);
 	}
 	if (websocket) {
@@ -143,7 +154,11 @@ export async function proxyPortApp(input: {
 		return offlineResponse();
 	}
 
-	if (upstream.status === 101) return upstream;
+	if (upstream.status === 101) {
+		return upstream.headers.getSetCookie().some(isAppBrowserCookie)
+			? textResponse(502, "Invalid App cookie")
+			: upstream;
+	}
 	// 52x are Cloudflare's own "origin unreachable" answers, not the App's.
 	if (upstream.status >= 520 && upstream.status <= 526)
 		return offlineResponse();
@@ -158,8 +173,10 @@ export async function proxyPortApp(input: {
 				: value,
 		);
 	}
-	for (const cookie of upstream.headers.getSetCookie())
-		headers.append("set-cookie", hostOnlyCookie(cookie));
+	for (const cookie of upstream.headers.getSetCookie()) {
+		if (!isAppBrowserCookie(cookie))
+			headers.append("set-cookie", hostOnlyCookie(cookie));
+	}
 
 	return new Response(request.method === "HEAD" ? null : upstream.body, {
 		status: upstream.status,

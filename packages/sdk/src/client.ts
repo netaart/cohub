@@ -221,6 +221,8 @@ export class CohubClient {
   }
 
   readonly auth = {
+    signIn: (options?: { returnTo?: string }) => this.appRuntime.signIn(options),
+    signOut: () => this.appRuntime.signOut(),
     /** Resolve the same credential used by this client's HTTP requests, including App runtime refresh. */
     getAccessToken: async (options?: { forceRefresh?: boolean }): Promise<string | null> =>
       sanitizeAccessToken(await this.getAccessToken(options)),

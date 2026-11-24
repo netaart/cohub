@@ -129,6 +129,12 @@ are absent.
 Pause heavy rendering while `ctx.window.visible` is false; background tabs stay
 mounted so they can resume instantly.
 
+## Sign in from a storefront
+
+On a bound custom domain or managed standalone host, call `await client.auth.signIn({ returnTo: location.href })` from the sign-in button. The viewer confirms the Cohub account once, then returns to that App page, including its query and hash. The host uses a first-party, App-scoped session for up to 14 days. Reloads and new tabs restore the viewer through `client.context()`. Use `client.auth.signOut()` to end that storefront session. Signing out of Cohub on the web ends it, and App tokens issued through the sign-in window, on every device. Apps embedded in Cohub follow that device's Cohub session. Inside Cohub, `signIn()` uses the embedding host's login and return location.
+
+App Actions verifying an individual purchase can use `client.appCommerce.getOrder(appId, orderId)` with the Action credential. The server checks the bound buyer.
+
 ## Calling your backend
 
 After obtaining the required viewer grants, use `client.auth.getAccessToken()`

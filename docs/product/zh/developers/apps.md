@@ -108,6 +108,12 @@ body {
 
 `ctx.window.visible` 为 false 时暂停高开销的渲染；后台标签页保持挂载，切回时可立即恢复。
 
+## 从店铺登录
+
+在已绑定的自定义域名或托管的独立域名上，登录按钮可以调用 `await client.auth.signIn({ returnTo: location.href })`。访客确认使用的 Cohub 账号后会回到原页面，并保留查询参数和哈希路由。店铺会话最长保留 14 天，刷新或打开新标签页后可通过 `client.context()` 恢复访客身份。`client.auth.signOut()` 会退出当前店铺，在网页上退出 Cohub 会结束所有设备上的店铺登录，以及通过登录小窗签发的 App 凭证；内嵌在 Cohub 里的 App 跟随该设备的 Cohub 登录。在 Cohub 内嵌的 App 中，`signIn()` 使用宿主的登录流程和返回地址。
+
+店铺 App Action 可以用自己的执行凭证调用 `client.appCommerce.getOrder(appId, orderId)`，服务端会核对当前买家的身份。
+
 ## 调用自己的后端
 
 取得所需的 viewer grant 后，使用 `client.auth.getAccessToken()`，以 SDK 调用 Cohub API 时使用的同一凭证请求可信后端。已发布 App 默认取得的是 App session，不是宿主的账户凭证。该方法复用现有 runtime，兼容 iframe 和独立页面 broker 模式；无需另建 runtime 或读取存储键。
