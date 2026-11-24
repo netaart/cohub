@@ -61,7 +61,7 @@ import { getLikeCount } from "@cohub/core/labels";
 import { ensureUserProfileByUuid, fallbackPublicUserProfile, type PublicUserProfile } from "../user-profiles.js";
 import { publicAppPath, redirectTarget, resolvePublicSpace } from "../slug-history.js";
 import {
-  getAppTotalViews,
+  getAppWebViews,
   getAppViewStats,
   recordAppViewStatsHourly,
   resolveAppViewSource,
@@ -594,7 +594,7 @@ async function getPublicAppDetail(app: typeof apps.$inferSelect) {
   if (!identity) return null;
   const [content, totalViews, likeCount, publisher] = await Promise.all([
     getPublishedAppContent(app),
-    getAppTotalViews(app.id),
+    getAppWebViews(app.id),
     getLikeCount(db, "app", app.id),
     resolveAppPublisher(app.userUuid),
   ]);
@@ -728,7 +728,7 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
   recordResolvedAppView(c, row.app, "web");
   const [content, totalViews, likeCount] = await Promise.all([
     getAppVersionContent(row.app, version),
-    getAppTotalViews(row.app.id),
+    getAppWebViews(row.app.id),
     getLikeCount(db, "app", row.app.id),
   ]);
 
@@ -857,7 +857,7 @@ router.get("/:id", async (c) => {
   if (shouldRecordCliView) recordResolvedAppView(c, app, "cli");
   const [content, totalViews, likeCount] = await Promise.all([
     getPublishedAppContent(app),
-    getAppTotalViews(app.id),
+    getAppWebViews(app.id),
     getLikeCount(db, "app", app.id),
   ]);
   return c.json({

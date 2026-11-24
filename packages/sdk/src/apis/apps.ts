@@ -183,7 +183,7 @@ export type AppDetailResponse = {
   content: AppContent | null;
   /** Version whose content is served; the current version when omitted. */
   version?: PublicAppVersionSummary | null;
-  /** All-time view count; `null` when the rollup total is unavailable. */
+  /** All-time web (human) view count; `null` when the rollup total is unavailable. */
   totalViews?: number | null;
   likeCount?: number;
 };
