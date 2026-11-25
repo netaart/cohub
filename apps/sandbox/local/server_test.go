@@ -14,6 +14,7 @@ import (
 
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/process"
+	"github.com/cohub/apps/sandbox/protocol"
 	"github.com/cohub/apps/sandbox/rpc"
 )
 
@@ -132,7 +133,7 @@ func TestWritesInstallAtomicallyAndHonourVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	version := "&expectedSize=" + strconv.FormatInt(info.Size(), 10) + "&expectedMtimeMs=" + strconv.FormatInt(info.ModTime().UnixMilli(), 10)
+	version := "&expectedSize=" + strconv.FormatInt(info.Size(), 10) + "&expectedMtimeMs=" + strconv.FormatInt(protocol.FileTimeMs(info.ModTime()), 10)
 	_, data = call(t, http.MethodPut, base+"/files?path=docs/new.txt"+version, strings.NewReader("second"), nil)
 	if result := decode(t, data).Result; result["created"] != false {
 		t.Fatalf("replace = %s", data)

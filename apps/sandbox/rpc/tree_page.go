@@ -67,7 +67,7 @@ func (d *Dispatcher) listTreePage(request protocol.RPCRequest, params fsTreePara
 		} else if stats.IsDir() {
 			nodeType = "dir"
 		}
-		entries = append(entries, fsTreeEntry{Name: name, Path: name, Type: nodeType, Size: stats.Size(), MtimeMs: stats.ModTime().UnixMilli()})
+		entries = append(entries, fsTreeEntry{Name: name, Path: name, Type: nodeType, Size: stats.Size(), MtimeMs: protocol.FileTimeMs(stats.ModTime())})
 	}
 	var next interface{}
 	if end < len(names) {

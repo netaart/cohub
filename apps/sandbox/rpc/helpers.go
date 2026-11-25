@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cohub/apps/sandbox/env"
+	"github.com/cohub/apps/sandbox/protocol"
 )
 
 // errPathConflict reports that the target file no longer matches the caller's
@@ -158,7 +159,7 @@ func writeAndClose(file *os.File, content []byte) error {
 // to capture the response version so it always belongs to this mutation.
 func statMtimeMs(path string) int64 {
 	if info, err := os.Stat(path); err == nil {
-		return info.ModTime().UnixMilli()
+		return protocol.FileTimeMs(info.ModTime())
 	}
 	return 0
 }

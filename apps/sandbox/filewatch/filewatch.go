@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cohub/apps/sandbox/protocol"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -287,7 +288,7 @@ func (w *Watcher) handleBackendEvent(event backendEvent) {
 		}
 		nodeType = nodeTypeFor(info)
 		size = info.Size()
-		mtimeMs = info.ModTime().UnixMilli()
+		mtimeMs = protocol.FileTimeMs(info.ModTime())
 		if kind == "delete" {
 			kind = "modify"
 		}
@@ -358,7 +359,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 			discoverSubtree = true
 		}
 		size = info.Size()
-		mtimeMs = info.ModTime().UnixMilli()
+		mtimeMs = protocol.FileTimeMs(info.ModTime())
 	}
 
 	w.enqueue(Change{Path: rel, Kind: kind, NodeType: nodeType, Size: size, MtimeMs: mtimeMs})
@@ -464,7 +465,7 @@ func (w *Watcher) discoverAndWatchSubtree(root string, emit func(Change) bool) {
 			Kind:     "create",
 			NodeType: nodeTypeFor(info),
 			Size:     info.Size(),
-			MtimeMs:  info.ModTime().UnixMilli(),
+			MtimeMs:  protocol.FileTimeMs(info.ModTime()),
 		})
 		return nil
 	})

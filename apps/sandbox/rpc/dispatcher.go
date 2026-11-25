@@ -358,7 +358,7 @@ func (d *Dispatcher) handleFSRead(request protocol.RPCRequest) interface{} {
 		}
 		if info, statErr := os.Stat(resolved.path); statErr == nil {
 			result["size"] = info.Size()
-			result["mtimeMs"] = info.ModTime().UnixMilli()
+			result["mtimeMs"] = protocol.FileTimeMs(info.ModTime())
 			if ctimeMs, ok := fileCtimeMs(info); ok {
 				result["ctimeMs"] = ctimeMs
 			}
@@ -397,7 +397,7 @@ func (d *Dispatcher) handleFSRead(request protocol.RPCRequest) interface{} {
 	}
 	if info, statErr := os.Stat(resolved.path); statErr == nil {
 		result["size"] = info.Size()
-		result["mtimeMs"] = info.ModTime().UnixMilli()
+		result["mtimeMs"] = protocol.FileTimeMs(info.ModTime())
 		if ctimeMs, ok := fileCtimeMs(info); ok {
 			result["ctimeMs"] = ctimeMs
 		}
@@ -510,7 +510,7 @@ func (d *Dispatcher) writeFile(write fileWrite) fileWriteOutcome {
 				}
 				return err
 			}
-			if info.Size() != write.expected.Size || info.ModTime().UnixMilli() != write.expected.MtimeMs {
+			if info.Size() != write.expected.Size || protocol.FileTimeMs(info.ModTime()) != write.expected.MtimeMs {
 				return errPathConflict
 			}
 		}
@@ -708,7 +708,7 @@ func (d *Dispatcher) handleFSMkdir(request protocol.RPCRequest) interface{} {
 	return map[string]interface{}{
 		"path":        resolved.path,
 		"createdDirs": createdDirs,
-		"mtimeMs":     info.ModTime().UnixMilli(),
+		"mtimeMs":     protocol.FileTimeMs(info.ModTime()),
 	}
 }
 
@@ -746,7 +746,7 @@ func (d *Dispatcher) handleFSStat(request protocol.RPCRequest) interface{} {
 		"isDirectory": info.IsDir(),
 		"isFile":      info.Mode().IsRegular(),
 		"size":        info.Size(),
-		"mtimeMs":     info.ModTime().UnixMilli(),
+		"mtimeMs":     protocol.FileTimeMs(info.ModTime()),
 	}
 	if ctimeMs, ok := fileCtimeMs(info); ok {
 		result["ctimeMs"] = ctimeMs
@@ -928,7 +928,7 @@ func (d *Dispatcher) handleFSTree(request protocol.RPCRequest) interface{} {
 				Path:    relPath,
 				Type:    nodeType,
 				Size:    stats.Size(),
-				MtimeMs: stats.ModTime().UnixMilli(),
+				MtimeMs: protocol.FileTimeMs(stats.ModTime()),
 			})
 			if nodeType == "dir" && current.level+1 < depth {
 				queue = append(queue, queued{absPath: absChild, relPath: relPath, level: current.level + 1})

@@ -5,6 +5,8 @@ package rpc
 import (
 	"os"
 	"syscall"
+
+	"github.com/cohub/apps/sandbox/protocol"
 )
 
 func fileCtimeMs(info os.FileInfo) (int64, bool) {
@@ -12,5 +14,5 @@ func fileCtimeMs(info os.FileInfo) (int64, bool) {
 	if !ok {
 		return 0, false
 	}
-	return stat.Ctim.Sec*1000 + stat.Ctim.Nsec/1_000_000, true
+	return protocol.TimespecMs(stat.Ctim.Sec, stat.Ctim.Nsec), true
 }

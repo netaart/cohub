@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/process"
@@ -435,7 +436,7 @@ func TestFSWriteSourceExpectedVersion(t *testing.T) {
 	res := d.handleFSWrite(writeRequest(t, fsWriteParams{
 		Path:       "source.txt",
 		SourcePath: staging,
-		Expected:   &fsWriteVersion{Size: info.Size(), MtimeMs: info.ModTime().UnixMilli()},
+		Expected:   &fsWriteVersion{Size: info.Size(), MtimeMs: protocol.FileTimeMs(info.ModTime())},
 	}))
 	if _, ok := res.(map[string]interface{}); !ok {
 		t.Fatalf("expected source install to succeed, got %T (%v)", res, res)
@@ -449,6 +450,32 @@ func TestFSWriteSourceExpectedVersion(t *testing.T) {
 	}
 	if _, err := os.Stat(staging); !os.IsNotExist(err) {
 		t.Fatalf("staging file should be consumed, stat error = %v", err)
+	}
+}
+
+func TestFSWriteSourceExpectedVersionMatchesNodeMtime(t *testing.T) {
+	root := setupTree(t)
+	d := newTreeDispatcher(t, root)
+	target := filepath.Join(root, "copied.txt")
+	staging := filepath.Join(root, ".cohub-upload.copied")
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	mtime := time.Unix(1795066953, 793999910)
+	if err := os.Chtimes(target, mtime, mtime); err != nil {
+		t.Fatalf("set mtime: %v", err)
+	}
+	if err := os.WriteFile(staging, []byte("copied"), 0o600); err != nil {
+		t.Fatalf("write staging file: %v", err)
+	}
+
+	res := d.handleFSWrite(writeRequest(t, fsWriteParams{
+		Path:       "copied.txt",
+		SourcePath: staging,
+		Expected:   &fsWriteVersion{Size: 3, MtimeMs: 1795066953794},
+	}))
+	if _, ok := res.(map[string]interface{}); !ok {
+		t.Fatalf("expected source install to succeed, got %T (%v)", res, res)
 	}
 }
 
@@ -474,7 +501,7 @@ func TestFSWriteSourceExpectedVersionConflict(t *testing.T) {
 	res := d.handleFSWrite(writeRequest(t, fsWriteParams{
 		Path:       "source-conflict.txt",
 		SourcePath: staging,
-		Expected:   &fsWriteVersion{Size: info.Size(), MtimeMs: info.ModTime().UnixMilli()},
+		Expected:   &fsWriteVersion{Size: info.Size(), MtimeMs: protocol.FileTimeMs(info.ModTime())},
 	}))
 	failed, ok := res.(protocol.RPCFailed)
 	if !ok {
