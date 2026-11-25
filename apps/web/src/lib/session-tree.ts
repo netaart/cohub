@@ -36,6 +36,8 @@ export type ChatMessage = {
 		stopReason?: string | null;
 		errorMessage?: string | null;
 		llmTiming?: unknown;
+		/** The owning Turn's meta when the message renders apart from its Turn; feeds statistics only. */
+		parentTurnMeta?: unknown;
 	};
 	toolCallsLoader?: (() => Promise<MessageToolCallsFile | null>) | null;
 };

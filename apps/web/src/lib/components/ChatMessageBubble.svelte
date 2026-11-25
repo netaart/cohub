@@ -11,6 +11,7 @@ import {
 	requestMetricSchema,
 } from "@cohub/protocol/model";
 import {
+	isModelThinkingLevel,
 	harnessLabel as labelForHarness,
 	resolveHarness,
 } from "@neta-art/cohub";
@@ -28,10 +29,9 @@ import { untrack } from "svelte";
 import HarnessIcon from "#lib/components/composer/HarnessIcon.svelte";
 import MessageContentFlow from "#lib/components/MessageContentFlow.svelte";
 import RelatedSessionLink from "#lib/components/RelatedSessionLink.svelte";
-import StatsContent from "#lib/components/StatsContent.svelte";
-import StatsGroup, {
-	type StatsGroupItem,
-} from "#lib/components/StatsGroup.svelte";
+import StatsContent, {
+	type StatsIdentity,
+} from "#lib/components/StatsContent.svelte";
 import StatsPopover from "#lib/components/StatsPopover.svelte";
 import TurnSpeechButton from "#lib/components/TurnSpeechButton.svelte";
 import UserIdentity from "#lib/components/UserIdentity.svelte";
@@ -41,10 +41,10 @@ import {
 	isDisplayableDurationMs,
 } from "#lib/format-duration.ts";
 import {
-	formatInputTokens,
 	formatTokenCount,
 	formatUsageBreakdown,
 	formatUsageCost,
+	formatUsageDetail,
 	getContextUsagePercent,
 	getDisplayInputTokens,
 	getUsageCostTotal,
@@ -56,15 +56,20 @@ import { provideMarkdownWorkspaceAsset } from "#lib/markdown-asset-context.ts";
 import { extractSpaceMentionsFromText } from "#lib/mentions/space.ts";
 import {
 	findModelCatalogItem,
+	formatThinkingLevelFull,
 	formatThinkingLevelShort,
 	getModelDisplayName,
+	getRequestedServiceTier,
 	getRequestedThinkingLevel,
+	isFastServiceTier,
+	LOCAL_DEFAULT_MODEL_ID,
 	type ModelCatalogItem,
 } from "#lib/model-catalog.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { readSentFrom } from "#lib/sent-turns.ts";
 import type { ChatMessage } from "#lib/session-tree.ts";
 import { createSpaceWorkspaceAssetResolver } from "#lib/space-workspace-assets.ts";
+import type { StatsContext } from "#lib/stats-view-model.ts";
 import { sessionInitiatorName } from "#lib/stores/chats-filter.ts";
 import {
 	formatCompactAbsoluteTime,
@@ -526,40 +531,9 @@ const tokenDisplay = $derived.by(() => {
 	return "";
 });
 
-const tokenDetailText = $derived.by(() => {
-	const u = message.meta?.usage;
-	if (!u) return "";
-	const parts: string[] = [];
-	const input = formatInputTokens(u, locale);
-	if (input) parts.push(m.chat_input_label({ value: input }, { locale }));
-	if (u.output)
-		parts.push(
-			m.chat_output_label({ value: formatTokenCount(u.output) }, { locale }),
-		);
-	if (u.cacheWrite)
-		parts.push(
-			m.chat_cache_write_label(
-				{ value: formatTokenCount(u.cacheWrite) },
-				{ locale },
-			),
-		);
-	if (u.totalTokens)
-		parts.push(
-			m.chat_total_label(
-				{ value: formatTokenCount(u.totalTokens) },
-				{ locale },
-			),
-		);
-	const costTotal = getUsageCostTotal(u);
-	if (costTotal != null)
-		parts.push(
-			m.chat_cost_label(
-				{ value: formatUsageCost(costTotal, locale) },
-				{ locale },
-			),
-		);
-	return parts.join("  ·  ");
-});
+const tokenDetailText = $derived(
+	formatUsageDetail(message.meta?.usage, locale),
+);
 
 const modelContextWindow = $derived.by(() => {
 	const contextWindow =
@@ -577,43 +551,72 @@ const inputContextPercent = $derived(
 		: getContextUsagePercent(message.meta?.usage, modelContextWindow),
 );
 
-const finalResponseItems = $derived.by((): StatsGroupItem[] => {
-	if (!message.meta?.turn || isDirectGeneration) return [];
-	const u = message.meta.usage;
-	const input = getDisplayInputTokens(u);
-	const items: StatsGroupItem[] = [];
-	if (input > 0)
-		items.push({
-			key: "input",
-			label: m.stats_input({}, { locale }),
-			value: formatTokenCount(input),
-		});
-	if (u?.cacheRead)
-		items.push({
-			key: "cache",
-			label: m.stats_cache_tokens({}, { locale }),
-			value: formatTokenCount(u.cacheRead),
-		});
-	if (u?.output)
-		items.push({
-			key: "output",
-			label: m.stats_output({}, { locale }),
-			value: formatTokenCount(u.output),
-		});
-	if (inputContextPercent != null)
-		items.push({
-			key: "context",
-			label: m.stats_context_usage({}, { locale }),
-			value: `${Math.round(inputContextPercent)}%`,
-		});
-	if (hasDuration)
-		items.push({
-			key: "duration",
-			label: m.stats_response_time({}, { locale }),
-			value: durationDisplay,
-		});
-	return items;
+const statsTurnMeta = $derived(
+	turnMeta ?? asRecord(message.meta?.parentTurnMeta),
+);
+const statsHarness = $derived(resolveHarness(statsTurnMeta));
+
+const statsIdentity = $derived.by((): StatsIdentity | null => {
+	const model = message.meta?.model?.trim();
+	if (!model) return null;
+	const provider = message.meta?.provider?.trim() ?? "";
+	const requested =
+		typeof statsTurnMeta?.model === "string" ? statsTurnMeta.model.trim() : "";
+	const effectiveThinking = statsTurnMeta?.effectiveThinkingLevel;
+	const thinking = isModelThinkingLevel(effectiveThinking)
+		? effectiveThinking
+		: getRequestedThinkingLevel(statsTurnMeta);
+	const serviceTier =
+		typeof statsTurnMeta?.effectiveServiceTier === "string"
+			? statsTurnMeta.effectiveServiceTier
+			: getRequestedServiceTier(statsTurnMeta);
+	const details: string[] = [];
+	if (modelName !== model) details.push(model);
+	if (requested && requested !== model)
+		details.push(
+			requested === LOCAL_DEFAULT_MODEL_ID
+				? m.stats_model_default({}, { locale })
+				: m.stats_model_requested(
+						{
+							model: getModelDisplayName(modelsCatalog, {
+								provider:
+									typeof statsTurnMeta?.provider === "string"
+										? statsTurnMeta.provider
+										: provider,
+								model: requested,
+							}),
+						},
+						{ locale },
+					),
+		);
+	if (thinking) details.push(formatThinkingLevelFull(thinking));
+	if (isFastServiceTier(modelMatch ?? undefined, serviceTier))
+		details.push(m.model_selector_fast({}, { locale }));
+	return {
+		name: modelName,
+		title: provider ? `${provider}/${model}` : model,
+		harness:
+			statsHarness === "cohub"
+				? null
+				: {
+						kind: statsHarness,
+						label: `${labelForHarness(statsHarness)} · ${m.runtime_local({}, { locale })}`,
+					},
+		details,
+	};
 });
+
+const statsContext = $derived.by((): StatsContext | null => {
+	if (isDirectGeneration) return null;
+	const usage = message.meta?.usage;
+	const tokens =
+		usage?.contextTokens ??
+		(statsHarness === "codex" ? 0 : getDisplayInputTokens(usage));
+	return tokens > 0 ? { tokens, window: modelContextWindow } : null;
+});
+
+const statsModelName = (provider: string, model: string) =>
+	getModelDisplayName(modelsCatalog, { provider, model });
 
 function getTokenDisplayClass(percent: number | null) {
 	const base = "tabular-nums shrink-0 cursor-default transition-colors";
@@ -822,10 +825,7 @@ function handleCopy() {
                 {#if hasDuration}<span class="shrink-0 whitespace-nowrap tabular-nums text-text-placeholder/65">{durationDisplay}</span>{/if}
                 {#if !tokenDisplay && !hasDuration}<span class="text-text-placeholder/65">{m.stats_turn({}, { locale })}</span>{/if}
               {/snippet}
-              {#if finalResponseItems.length}
-                <StatsGroup title={m.stats_final_response({}, { locale })} items={finalResponseItems} class="mb-4 border-b border-border-subtle pb-3" />
-              {/if}
-              <StatsContent stats={footerStats} scope="turn" requests={footerRequests} />
+              <StatsContent stats={footerStats} scope="turn" requests={footerRequests} identity={statsIdentity} context={statsContext} modelName={statsModelName} />
             </StatsPopover>
           {:else}
             {#if hasUsage && tokenDisplay}<span class={getTokenDisplayClass(inputContextPercent)} title={tokenDetailText}>{tokenDisplay}</span>{/if}

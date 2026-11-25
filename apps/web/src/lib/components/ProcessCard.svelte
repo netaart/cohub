@@ -14,10 +14,10 @@ import {
 	isDisplayableDurationMs,
 } from "#lib/format-duration.ts";
 import {
-	formatInputTokens,
 	formatTokenCount,
 	formatUsageBreakdown,
 	formatUsageCost,
+	formatUsageDetail,
 	getUsageCostTotal,
 	getUsageTotalTokens,
 	sumUsages,
@@ -275,8 +275,6 @@ const intermediateUsage = $derived.by(() => {
 	if (effectiveMessages.length === 0) return null;
 	return sumUsages(effectiveMessages.map((message) => message.usage));
 });
-const usageInputLabel = $derived(formatInputTokens(intermediateUsage, locale));
-const usageOutputTokens = $derived(intermediateUsage?.output ?? 0);
 const usageTokens = $derived(getUsageTotalTokens(intermediateUsage));
 const usageCostTotal = $derived(getUsageCostTotal(intermediateUsage));
 const usageCostLabel = $derived(
@@ -308,35 +306,15 @@ const durationTitle = $derived(
 			)
 		: "",
 );
-const usageTitle = $derived.by(() => {
-	if (!intermediateUsage && !durationTitle && !compactionDetailLabel) return "";
-	const parts: string[] = [];
-	if (usageInputLabel)
-		parts.push(m.chat_input_label({ value: usageInputLabel }, { locale }));
-	if (usageOutputTokens > 0)
-		parts.push(
-			m.chat_output_label(
-				{ value: formatTokenCount(usageOutputTokens) },
-				{ locale },
-			),
-		);
-	if (intermediateUsage?.cacheWrite)
-		parts.push(
-			m.chat_cache_write_label(
-				{ value: formatTokenCount(intermediateUsage.cacheWrite) },
-				{ locale },
-			),
-		);
-	if (usageTokens > 0)
-		parts.push(
-			m.chat_total_label({ value: formatTokenCount(usageTokens) }, { locale }),
-		);
-	if (usageCostLabel)
-		parts.push(m.chat_cost_label({ value: usageCostLabel }, { locale }));
-	if (durationTitle) parts.push(durationTitle);
-	if (compactionDetailLabel) parts.push(compactionDetailLabel);
-	return parts.join(" · ");
-});
+const usageTitle = $derived(
+	[
+		formatUsageDetail(intermediateUsage, locale),
+		durationTitle,
+		compactionDetailLabel,
+	]
+		.filter(Boolean)
+		.join(" · "),
+);
 const labelParts = $derived(
 	[
 		stepCount > 0
@@ -403,7 +381,7 @@ const entries = $derived(
 			{#if entry.kind === 'run'}
 				<ProcessRun {turn} messages={entry.messages} {modelsCatalog} {onLoadToolCalls} {onOpenFile} {onOpenUrl} />
 			{:else}
-				<IntermediateMessageBubble message={entry.message} streaming={entry.live} showMeta={hasStepText(entry.message)} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message: entry.message }) : undefined} {onOpenFile} {onOpenUrl} {onMarkdownRenderStart} {onMarkdownRendered} />
+				<IntermediateMessageBubble message={entry.message} turnMeta={turn.meta} streaming={entry.live} showMeta={hasStepText(entry.message)} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message: entry.message }) : undefined} {onOpenFile} {onOpenUrl} {onMarkdownRenderStart} {onMarkdownRendered} />
 			{/if}
 		{/each}
 	</div>

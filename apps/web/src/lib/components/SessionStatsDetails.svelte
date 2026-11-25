@@ -55,8 +55,11 @@ onMount(() => {
 {#if stats}
   <StatsContent stats={stats.own} scope="session" />
   {#if stats.inherited.turns || stats.inherited.compactions}
-    <details class="mt-3 border-t border-border-subtle pt-3">
-      <summary class="cursor-pointer text-text-secondary">{m.stats_inherited({}, { locale })}</summary>
+    <details class="mt-4 border-t border-border-subtle pt-3">
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-[11px] text-text-secondary marker:hidden">
+        <span class="font-medium">{m.stats_inherited({}, { locale })}</span>
+        {#if stats.inherited.turns}<span class="shrink-0 tabular-nums text-text-placeholder">{m.stats_turns({}, { locale })} {stats.inherited.turns.toLocaleString(locale)}</span>{/if}
+      </summary>
       <div class="mt-3"><StatsContent stats={stats.inherited} scope="session" /></div>
     </details>
   {/if}

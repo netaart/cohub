@@ -12,6 +12,7 @@ import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
 
 type Props = {
 	message: StoredIntermediateMessage;
+	turnMeta?: unknown;
 	streaming?: boolean;
 	showMeta?: boolean;
 	modelsCatalog?: ModelCatalogItem[];
@@ -24,6 +25,7 @@ type Props = {
 
 const {
 	message,
+	turnMeta,
 	streaming = false,
 	showMeta = true,
 	modelsCatalog,
@@ -69,6 +71,7 @@ const chatMessage = $derived({
 		provider: message.provider,
 		usage: message.usage,
 		llmTiming: message.meta?.llmTiming,
+		parentTurnMeta: turnMeta,
 		durationMs: message.durationMs,
 		stopReason: message.stopReason,
 		errorMessage: message.errorMessage,

@@ -79,7 +79,7 @@ const label = $derived(
 {#if open}
 	<div class="ml-[calc(var(--chat-msg-inset)+3px)] flex flex-col gap-2 border-l border-border-subtle/70 pl-[11px] [--chat-msg-inset:0px]">
 		{#each messages as message}
-			<IntermediateMessageBubble {message} showMeta={false} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message }) : undefined} {onOpenFile} {onOpenUrl} />
+			<IntermediateMessageBubble {message} turnMeta={turn.meta} showMeta={false} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message }) : undefined} {onOpenFile} {onOpenUrl} />
 		{/each}
 	</div>
 {/if}

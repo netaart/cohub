@@ -36,6 +36,8 @@ export type LocalModelRequest =
 			serviceTier?: string;
 	  };
 
+export const LOCAL_DEFAULT_MODEL_ID = "default";
+
 /** The tier the Fast switch selects (Codex `priority`); models without it show no switch. */
 export const FAST_SERVICE_TIER = "priority";
 

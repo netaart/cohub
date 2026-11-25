@@ -8,7 +8,13 @@ import {
 	type StatsTimelineModel,
 } from "#lib/stats-view-model.ts";
 
-let { requests = [] }: { requests?: readonly RequestMetric[] } = $props();
+let {
+	requests = [],
+	modelName = (_provider: string, model: string) => model,
+}: {
+	requests?: readonly RequestMetric[];
+	modelName?: (provider: string, model: string) => string;
+} = $props();
 const locale = $derived(getLocale());
 const timeline = $derived<StatsTimelineModel | null>(
 	buildStatsTimeline(requests),
@@ -29,12 +35,12 @@ function statusTextClass(status: RequestMetric["status"]) {
 }
 
 function requestName(provider: string, model: string, id: string) {
-	return model || provider || id.slice(0, 8);
+	return (model && modelName(provider, model)) || provider || id.slice(0, 8);
 }
 </script>
 
 {#if timeline}
-	<details class="mt-4 border-t border-border-subtle pt-3">
+	<details class="border-t border-border-subtle pt-3">
 		<summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-[11px] text-text-secondary marker:hidden">
 			<span class="font-medium">{m.stats_request_timeline({}, { locale })}</span>
 			<span class="shrink-0 tabular-nums text-text-placeholder">{timeline.requests.length} · {formatDurationMs(timeline.durationMs, locale)}</span>

@@ -40,7 +40,7 @@ export function getDisplayInputTokens(usage: Usage | null | undefined): number {
 	return (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
 }
 
-export function formatInputTokens(
+function formatInputTokens(
 	usage: Usage | null | undefined,
 	locale: Locale,
 ): string {
@@ -62,6 +62,29 @@ export function formatUsageBreakdown(
 	return [input && `↑${input}`, output > 0 && `↓${formatTokenCount(output)}`]
 		.filter(Boolean)
 		.join(" ");
+}
+
+export function formatUsageDetail(
+	usage: Usage | null | undefined,
+	locale: Locale,
+): string {
+	if (!usage) return "";
+	const options = { locale };
+	const fresh = (usage.input ?? 0) + (usage.cacheWrite ?? 0);
+	const cost = getUsageCostTotal(usage);
+	return [
+		usage.cacheRead &&
+			`${m.stats_cached({}, options)} ${formatTokenCount(usage.cacheRead)}`,
+		fresh && `${m.stats_input({}, options)} ${formatTokenCount(fresh)}`,
+		usage.output &&
+			`${m.stats_output({}, options)} ${formatTokenCount(usage.output)}`,
+		usage.totalTokens &&
+			`${m.stats_tokens({}, options)} ${formatTokenCount(usage.totalTokens)}`,
+		cost != null &&
+			`${m.stats_cost({}, options)} ${formatUsageCost(cost, locale)}`,
+	]
+		.filter(Boolean)
+		.join(" · ");
 }
 
 export function getContextUsagePercent(

@@ -129,6 +129,9 @@ async function holdsPrompt(path: string, turnId: string, signal: AbortSignal): P
 /** `partial` holds streamed blocks by index until the complete block arrives, so an interrupted reply keeps them. */
 type Message = { ordinal: number; content: ContentBlock[]; partial: Map<number, Extract<ContentBlock, { type: "text" | "thinking" }>>; model: string | null; usage?: JsonRecord };
 
+/** Claude Code labels locally built replies (API errors, interrupts) `<synthetic>`; they name no model. */
+const nativeModel = (value: unknown) => { const model = text(value); return model && model !== "<synthetic>" ? model : null; };
+
 /** Maps stream-json output onto Cohub's streaming protocol; sub-agent traffic stays in the native transcript. */
 /** `spent`: the cumulative `total_cost_usd` a kept process already reported. */
 export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; model: string | null }, spent = 0) {
@@ -149,6 +152,7 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
     const existing = messages.get(id);
     if (existing) return existing;
     if (current) emit({ type: "message.commit", message: snapshot(current) });
+    if (messageModel) model = messageModel;
     const message: Message = { ordinal: messages.size, content: [], partial: new Map(), model: messageModel };
     messages.set(id, message);
     current = message;
@@ -162,12 +166,12 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
     last,
     push(event: JsonRecord): boolean {
       if (event.parent_tool_use_id) return false;
-      if (event.type === "system" && event.subtype === "init") { model = text(event.model) || model; return false; }
+      if (event.type === "system" && event.subtype === "init") { model = nativeModel(event.model) ?? model; return false; }
       if (event.type === "stream_event") {
         const stream = record(event.event);
         if (stream.type === "message_start") {
           const native = record(stream.message);
-          streaming = begin(text(native.id) || randomUUID(), text(native.model) || null);
+          streaming = begin(text(native.id) || randomUUID(), nativeModel(native.model));
           streaming.usage = counts(native.usage);
         }
         if (streaming && stream.type === "message_delta") streaming.usage = { ...streaming.usage, ...counts(stream.usage) };
@@ -184,7 +188,7 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
       }
       if (event.type === "assistant") {
         const native = record(event.message);
-        const message = begin(text(native.id) || randomUUID(), text(native.model) || null);
+        const message = begin(text(native.id) || randomUUID(), nativeModel(native.model));
         message.usage = { ...message.usage, ...counts(native.usage) };
         // Complete blocks supersede what streamed so far.
         message.partial.clear();

@@ -8,292 +8,274 @@ export type StatsScope = "turn" | "session";
 
 export type StatsLabelKey =
 	| "turns"
-	| "calls"
-	| "tools"
 	| "elapsed"
+	| "tokens"
+	| "modelCost"
+	| "generationCost"
 	| "queue"
 	| "modelTime"
 	| "toolTime"
-	| "retries"
+	| "otherTime"
+	| "calls"
+	| "tools"
 	| "ttft"
 	| "tps"
+	| "retries"
+	| "cached"
 	| "input"
-	| "tokens"
 	| "output"
 	| "cache"
-	| "cacheTokens"
+	| "context"
+	| "generations"
 	| "compaction"
 	| "imageToText"
-	| "generations"
-	| "modelCost"
-	| "generationCost";
+	| "failedCalls"
+	| "toolErrors";
 
-export type StatsSectionKey = "summary" | "timing" | "usage" | "additional";
+export type StatsItem = { key: StatsLabelKey; value: string };
 
-export type StatsItem = {
-	key: string;
-	label: StatsLabelKey;
-	value: string;
-};
-
-export type StatsBarSegment = {
-	key: string;
-	label: StatsLabelKey;
-	value: string;
+export type StatsSegment = StatsItem & {
 	share: number;
-	tone: "brand" | "strong" | "subtle";
+	tone: "brand" | "strong" | "muted" | "faint";
 };
 
-export type StatsGroup = {
-	key: StatsSectionKey;
-	items: StatsItem[];
+export type StatsBreakdown = { segments: StatsSegment[]; facts: StatsItem[] };
+
+export type StatsModelRow = {
+	key: string;
+	provider: string;
+	model: string;
+	calls: string;
+	tokens: string;
+	cost: string;
 };
 
 export type StatsViewModel = {
-	hero: StatsItem[];
-	timing: StatsBarSegment[];
-	usage: StatsBarSegment[];
-	groups: StatsGroup[];
-	elapsed: string | null;
+	totals: StatsItem[];
+	time: StatsBreakdown | null;
+	tokens: StatsBreakdown | null;
+	models: StatsModelRow[];
+	extra: StatsItem[];
+	partial: boolean;
 };
 
-const numberFormatter = (locale: Locale) =>
-	new Intl.NumberFormat(locale, { maximumFractionDigits: 1 });
+export type StatsContext = { tokens: number; window: number | null };
 
 const finite = (value: number | null | undefined): value is number =>
 	typeof value === "number" && Number.isFinite(value) && value >= 0;
+const positive = (value: number | null | undefined): value is number =>
+	finite(value) && value > 0;
 
-function formatNumber(value: number, locale: Locale) {
-	return numberFormatter(locale).format(value);
-}
-
-function formatRetries(stats: ExecutionStats, locale: Locale) {
-	return `${formatNumber(stats.retryCount ?? 0, locale)} · ${formatDurationMs(stats.retryWaitMs ?? 0, locale)}`;
-}
-
-function formatTps(stats: ExecutionStats, locale: Locale) {
-	return `${formatNumber((stats.timedOutputTokens / stats.outputMs) * 1000, locale)} tok/s`;
-}
-
-function makeBar(
-	entries: Array<{
-		key: string;
-		label: StatsLabelKey;
-		value: number | null | undefined;
-		tone: StatsBarSegment["tone"];
-	}>,
-) {
-	const visible = entries.filter(
-		(entry): entry is typeof entry & { value: number } =>
-			finite(entry.value) && entry.value > 0,
-	);
-	const total = visible.reduce((sum, entry) => sum + entry.value, 0);
-	if (!total) return [];
-	return visible.map((entry) => ({
-		key: entry.key,
-		label: entry.label,
-		value: entry.value === 0 ? "0" : "",
-		share: (entry.value / total) * 100,
-		tone: entry.tone,
-	}));
-}
-
-function add(
+function item(
 	items: StatsItem[],
-	key: string,
-	label: StatsLabelKey,
+	key: StatsLabelKey,
 	value: string | null | undefined,
 ) {
-	if (value == null || value === "") return;
-	items.push({ key, label, value });
+	if (value) items.push({ key, value });
+}
+
+function breakdown(
+	entries: Array<{
+		key: StatsLabelKey;
+		value: number | null | undefined;
+		tone: StatsSegment["tone"];
+	}>,
+	format: (value: number) => string,
+	facts: StatsItem[],
+): StatsBreakdown | null {
+	const visible = entries.filter(
+		(entry): entry is typeof entry & { value: number } => positive(entry.value),
+	);
+	const total = visible.reduce((sum, entry) => sum + entry.value, 0);
+	if (!total && !facts.length) return null;
+	return {
+		segments: visible.map((entry) => ({
+			key: entry.key,
+			value: format(entry.value),
+			share: (entry.value / total) * 100,
+			tone: entry.tone,
+		})),
+		facts,
+	};
+}
+
+export function buildStatsModels(
+	requests: readonly RequestMetric[],
+	locale: Locale,
+): StatsModelRow[] {
+	const groups = new Map<
+		string,
+		{
+			provider: string;
+			model: string;
+			calls: number;
+			tokens: number | null;
+			cost: number | null;
+		}
+	>();
+	for (const request of requests) {
+		const key = `${request.provider}/${request.model}`;
+		const group = groups.get(key) ?? {
+			provider: request.provider,
+			model: request.model,
+			calls: 0,
+			tokens: 0,
+			cost: 0,
+		};
+		group.calls += 1;
+		const tokens = request.usage?.totalTokens;
+		group.tokens =
+			group.tokens == null || !finite(tokens) ? null : group.tokens + tokens;
+		const cost = request.usage?.cost?.total;
+		group.cost = group.cost == null || !finite(cost) ? null : group.cost + cost;
+		groups.set(key, group);
+	}
+	if (groups.size < 2) return [];
+	const number = new Intl.NumberFormat(locale);
+	return [...groups]
+		.sort(
+			([, a], [, b]) => (b.tokens ?? 0) - (a.tokens ?? 0) || b.calls - a.calls,
+		)
+		.map(([key, group]) => ({
+			key,
+			provider: group.provider,
+			model: group.model,
+			calls: number.format(group.calls),
+			tokens: group.tokens == null ? "" : formatTokenCount(group.tokens),
+			cost:
+				group.cost == null ? "" : formatCurrency(group.cost, "USD", { locale }),
+		}));
 }
 
 export function buildStatsViewModel(
 	stats: ExecutionStats,
-	scope: StatsScope,
-	locale: Locale,
+	options: {
+		scope: StatsScope;
+		locale: Locale;
+		requests?: readonly RequestMetric[];
+		context?: StatsContext | null;
+	},
 ): StatsViewModel {
-	const input = getDisplayInputTokens(stats.usage);
-	const cache =
+	const { scope, locale } = options;
+	const number = (value: number) =>
+		new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value);
+	const duration = (value: number) => formatDurationMs(value, locale);
+	const usd = (value: number | null) =>
+		value == null ? null : formatCurrency(value, "USD", { locale });
+	const usage = stats.usage;
+	const tokens = usage?.totalTokens;
+	const modelCost = usd(stats.modelCostUsd);
+	const generationCost = usd(stats.generationCostUsd);
+
+	const totals: StatsItem[] = [];
+	if (scope === "session") item(totals, "turns", number(stats.turns));
+	if (finite(stats.elapsedMs))
+		item(totals, "elapsed", duration(stats.elapsedMs));
+	if (tokens != null) item(totals, "tokens", formatTokenCount(tokens));
+	if (modelCost) item(totals, "modelCost", modelCost);
+	else item(totals, "generationCost", generationCost);
+
+	const toolMs = stats.toolCalls ? stats.toolMs : null;
+	// Execution time the model and tool intervals do not explain (local harnesses report no model time).
+	const otherMs = finite(stats.elapsedMs)
+		? stats.elapsedMs - (stats.modelMs ?? 0) - (toolMs ?? 0)
+		: null;
+	const timeFacts: StatsItem[] = [];
+	if (stats.calls) item(timeFacts, "calls", number(stats.calls));
+	if (stats.toolCalls) item(timeFacts, "tools", number(stats.toolCalls));
+	if (stats.ttftSamples)
+		item(timeFacts, "ttft", duration(stats.ttftMs / stats.ttftSamples));
+	if (stats.outputMs > 0)
+		item(
+			timeFacts,
+			"tps",
+			`${number((stats.timedOutputTokens / stats.outputMs) * 1000)} tok/s`,
+		);
+	if (stats.retryCount)
+		item(
+			timeFacts,
+			"retries",
+			`${number(stats.retryCount)} · ${duration(stats.retryWaitMs ?? 0)}`,
+		);
+	const time = breakdown(
+		[
+			{ key: "queue", value: stats.queueMs, tone: "faint" },
+			{ key: "modelTime", value: stats.modelMs, tone: "brand" },
+			{ key: "toolTime", value: toolMs, tone: "strong" },
+			{
+				key: "otherTime",
+				value:
+					otherMs != null && otherMs > (stats.elapsedMs ?? 0) * 0.01
+						? otherMs
+						: null,
+				tone: "muted",
+			},
+		],
+		duration,
+		timeFacts,
+	);
+
+	const input = getDisplayInputTokens(usage);
+	const tokenFacts: StatsItem[] = [];
+	if (
 		input > 0 &&
 		stats.unknownUsageCalls === 0 &&
-		stats.usage?.input != null &&
-		stats.usage.cacheRead != null &&
-		stats.usage.cacheWrite != null
-			? (stats.usage.cacheRead / input) * 100
-			: null;
-	const duration = (value: number) => formatDurationMs(value, locale);
-	const number = (value: number) => formatNumber(value, locale);
-
-	const hero: StatsItem[] = [];
-	if (scope === "session") add(hero, "turns", "turns", number(stats.turns));
-	if (stats.elapsedMs != null)
-		add(hero, "elapsed", "elapsed", duration(stats.elapsedMs));
-	if (scope === "turn" && stats.calls != null)
-		add(hero, "calls", "calls", number(stats.calls));
-	if (stats.usage?.totalTokens != null)
-		add(hero, "tokens", "tokens", formatTokenCount(stats.usage.totalTokens));
-	if (scope === "session" && stats.calls != null && hero.length < 3)
-		add(hero, "calls", "calls", number(stats.calls));
-	if (stats.generations && hero.length < 3)
-		add(hero, "generations", "generations", number(stats.generations));
-
-	const timing = makeBar([
-		{ key: "queue", label: "queue", value: stats.queueMs, tone: "subtle" },
-		{ key: "model", label: "modelTime", value: stats.modelMs, tone: "brand" },
-		{ key: "tools", label: "toolTime", value: stats.toolMs, tone: "strong" },
-	]);
-	if (timing.length) {
-		for (const segment of timing) {
-			const raw =
-				segment.key === "queue"
-					? stats.queueMs
-					: segment.key === "model"
-						? stats.modelMs
-						: stats.toolMs;
-			segment.value = raw == null ? "" : duration(raw);
-		}
-	}
-
-	const usage = makeBar([
-		{ key: "input", label: "input", value: input, tone: "strong" },
-		{
-			key: "output",
-			label: "output",
-			value: stats.usage?.output,
-			tone: "brand",
-		},
-	]);
-	for (const segment of usage) {
-		const raw = segment.key === "input" ? input : stats.usage?.output;
-		segment.value = raw == null ? "" : formatTokenCount(raw);
-	}
-
-	const scale: StatsItem[] = [];
-	if (scope === "turn" && stats.turns)
-		add(scale, "turns", "turns", number(stats.turns));
-	if (scope === "session" && stats.calls != null)
-		add(scale, "calls", "calls", number(stats.calls));
-	if (stats.toolCalls != null)
-		add(scale, "tools", "tools", number(stats.toolCalls));
-	if (stats.generations)
-		add(scale, "generations", "generations", number(stats.generations));
-
-	const timingItems: StatsItem[] = [];
-	add(
-		timingItems,
-		"queue",
-		"queue",
-		stats.queueMs == null ? null : duration(stats.queueMs),
-	);
-	add(
-		timingItems,
-		"model",
-		"modelTime",
-		stats.modelMs == null ? null : duration(stats.modelMs),
-	);
-	add(
-		timingItems,
-		"tools",
-		"toolTime",
-		stats.toolMs == null || !stats.toolCalls ? null : duration(stats.toolMs),
-	);
-	add(
-		timingItems,
-		"retries",
-		"retries",
-		stats.retryCount ? formatRetries(stats, locale) : null,
-	);
-	add(
-		timingItems,
-		"ttft",
-		"ttft",
-		stats.ttftSamples ? duration(stats.ttftMs / stats.ttftSamples) : null,
-	);
-	add(
-		timingItems,
-		"tps",
-		"tps",
-		stats.outputMs > 0 ? formatTps(stats, locale) : null,
-	);
-
-	const usageItems: StatsItem[] = [];
-	if (
-		stats.usage &&
-		(stats.usage.input != null ||
-			stats.usage.cacheRead != null ||
-			stats.usage.cacheWrite != null)
+		usage?.input != null &&
+		usage.cacheRead != null &&
+		usage.cacheWrite != null
 	)
-		add(usageItems, "input", "input", formatTokenCount(input));
-	add(
-		usageItems,
-		"tokens",
-		"tokens",
-		stats.usage?.totalTokens == null
-			? null
-			: formatTokenCount(stats.usage.totalTokens),
-	);
-	add(
-		usageItems,
-		"output",
-		"output",
-		stats.usage?.output == null ? null : formatTokenCount(stats.usage.output),
-	);
-	add(
-		usageItems,
-		"cacheTokens",
-		"cacheTokens",
-		stats.usage?.cacheRead ? formatTokenCount(stats.usage.cacheRead) : null,
-	);
-	add(usageItems, "cache", "cache", cache == null ? null : `${number(cache)}%`);
-	add(
-		usageItems,
-		"modelCost",
-		"modelCost",
-		stats.modelCostUsd == null
-			? null
-			: formatCurrency(stats.modelCostUsd, "USD", { locale }),
-	);
-	add(
-		usageItems,
-		"generationCost",
-		"generationCost",
-		stats.generationCostUsd == null
-			? null
-			: formatCurrency(stats.generationCostUsd, "USD", { locale }),
-	);
+		item(tokenFacts, "cache", `${number((usage.cacheRead / input) * 100)}%`);
+	const context = options.context;
+	if (context && context.tokens > 0)
+		item(
+			tokenFacts,
+			"context",
+			context.window
+				? `${formatTokenCount(context.tokens)} / ${formatTokenCount(context.window)} · ${Math.round(Math.min(100, (context.tokens / context.window) * 100))}%`
+				: formatTokenCount(context.tokens),
+		);
+	const tokenBreakdown = usage
+		? breakdown(
+				[
+					{ key: "cached", value: usage.cacheRead, tone: "muted" },
+					{
+						key: "input",
+						value: (usage.input ?? 0) + (usage.cacheWrite ?? 0),
+						tone: "strong",
+					},
+					{ key: "output", value: usage.output, tone: "brand" },
+				],
+				formatTokenCount,
+				tokenFacts,
+			)
+		: null;
 
-	const additional: StatsItem[] = [];
-	add(
-		additional,
-		"compaction",
-		"compaction",
-		stats.compactions
-			? `${number(stats.compactions)}${stats.compactionMs != null ? ` · ${duration(stats.compactionMs)}` : ""}`
-			: null,
-	);
-	add(
-		additional,
-		"imageToText",
-		"imageToText",
-		stats.imageToTextCalls
-			? `${number(stats.imageToTextCalls)}${stats.imageToTextMs != null ? ` · ${duration(stats.imageToTextMs)}` : ""}`
-			: null,
-	);
-
-	const groups = [
-		{ key: "summary" as const, items: scale },
-		{ key: "timing" as const, items: timingItems },
-		{ key: "usage" as const, items: usageItems },
-		{ key: "additional" as const, items: additional },
-	].filter((group): group is StatsGroup => group.items.length > 0);
+	const extra: StatsItem[] = [];
+	if (scope === "session" && stats.generations)
+		item(extra, "generations", number(stats.generations));
+	if (modelCost) item(extra, "generationCost", generationCost);
+	if (stats.failedCalls) item(extra, "failedCalls", number(stats.failedCalls));
+	if (stats.toolErrors) item(extra, "toolErrors", number(stats.toolErrors));
+	if (stats.compactions)
+		item(
+			extra,
+			"compaction",
+			`${number(stats.compactions)}${stats.compactionMs != null ? ` · ${duration(stats.compactionMs)}` : ""}`,
+		);
+	if (stats.imageToTextCalls)
+		item(
+			extra,
+			"imageToText",
+			`${number(stats.imageToTextCalls)}${stats.imageToTextMs != null ? ` · ${duration(stats.imageToTextMs)}` : ""}`,
+		);
 
 	return {
-		hero: hero.slice(0, 3),
-		timing,
-		usage,
-		groups,
-		elapsed: stats.elapsedMs == null ? null : duration(stats.elapsedMs),
+		totals,
+		time,
+		tokens: tokenBreakdown,
+		models: buildStatsModels(options.requests ?? [], locale),
+		extra,
+		partial: stats.partial,
 	};
 }
 
