@@ -82,11 +82,23 @@ export type CommerceCheckout = {
 
 export type CommercePage<T> = { items: T[]; pagination: { has_more: boolean } };
 
-type PageInput = { business_key: string; page: number; limit: number; include_count?: boolean };
+type PageInput = { business_key: string; page: number; limit: number; include_count?: false };
 type ProductRef = { business_key: string; product_key: string };
 type BenefitRef = { business_key: string; benefit_key: string };
 type ProductStatus = "draft" | "active" | "archived";
 type ProductVisibility = "public" | "private";
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type OrderStatus =
+  | "pending_checkout"
+  | "pending_payment"
+  | "paid"
+  | "refunded"
+  | "checkout_canceled"
+  | "payment_canceled"
+  | "checkout_expired"
+  | "payment_conflicted";
+type OrderSortField = "created_at" | "updated_at" | "paid_at" | "amount_snapshot" | "paid_amount_snapshot" | "status";
+type OrderSorting = OrderSortField | `${OrderSortField}:asc` | `${OrderSortField}:desc` | `-${OrderSortField}`;
 
 type BenefitCreateInput = {
   business_key: string;
@@ -96,10 +108,10 @@ type BenefitCreateInput = {
   status: "active";
 } & (
   | { type: "feature"; config: FeatureBenefitConfig }
-  | { type: "credits"; config: CreditsBenefitConfig }
+  | { type: "credits"; config: PurchasedCreditsBenefitConfig }
 );
 
-// Method syntax keeps parameters bivariant, so the SDK's wider inputs still fit.
+// Inputs must stay within what the SDK accepts: provider.ts assigns the real SDK to this type.
 export interface CommerceSdk {
   admin: {
     businesses: {
@@ -113,13 +125,13 @@ export interface CommerceSdk {
         key: string;
         name: string;
         description?: string;
-        status: ProductStatus;
+        status: Exclude<ProductStatus, "archived">;
         visibility: ProductVisibility;
         amount: number;
-        currency: string;
+        currency: "USD";
         billing_type: "one_time";
         billing_period: "one_time";
-        billing_interval_count: number;
+        billing_interval_count: 1;
         meta?: Record<string, unknown>;
       }): Promise<Product>;
       update(input: {
@@ -144,7 +156,7 @@ export interface CommerceSdk {
       listProductsByBenefit(input: BenefitRef): Promise<Array<{ product: Pick<Product, "meta"> }>>;
       http: {
         request(input: {
-          method: string;
+          method: HttpMethod;
           path: string;
           pathParams?: Record<string, string>;
           query?: Record<string, string>;
@@ -167,7 +179,7 @@ export interface CommerceSdk {
       }): Promise<Benefit>;
     };
     orders: {
-      list(input: PageInput & { status?: string; sorting?: string }): Promise<CommercePage<CommerceOrder>>;
+      list(input: PageInput & { status?: OrderStatus; sorting?: OrderSorting }): Promise<CommercePage<CommerceOrder>>;
       get(input: { business_key: string; order_id: string }): Promise<CommerceOrder>;
       create(
         input: {
