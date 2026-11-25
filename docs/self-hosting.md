@@ -37,7 +37,7 @@ Billing is **disabled by default**.
 
 To enable the hosted Talesofai Billing provider:
 
-1. Install `@talesofai-billing/sdk` (private package used by the official hosted product).
+1. Set `GITEA_NPM_TOKEN` before `pnpm install`, so it fetches the private `@talesofai-billing/sdk` used by the official hosted product. `@cohub/billing` only compiles its hosted adapter when the SDK is present, and API/worker refuse to start when billing is configured without it.
 2. Set:
 
 ```bash

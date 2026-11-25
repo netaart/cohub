@@ -479,10 +479,6 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
-    optionalDependencies:
-      '@talesofai-billing/sdk':
-        specifier: 1.31.0
-        version: 1.31.0
 
   apps/app-runtime-edge:
     devDependencies:
@@ -1091,6 +1087,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0(supports-color@10.2.2)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1098,10 +1097,6 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
-    optionalDependencies:
-      '@talesofai-billing/sdk':
-        specifier: 1.31.0
-        version: 1.31.0
 
   packages/cli:
     dependencies:
@@ -4141,9 +4136,6 @@ packages:
     resolution: {integrity: sha512-BCNiY0a1ZjdOHVqw7kyb7U72BwfMF3dfUuN+tQsLWky/J5JOI/r7abibglXfygrZhVO/3u3V+E25kkKTeMkXaQ==}
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
-
-  '@talesofai-billing/sdk@1.31.0':
-    resolution: {integrity: sha512-aXm+Kcz2G8A7XrpoTIhvmLlvvW7MgmDeUV2HoL6DJEr1YF+XqlkSQqrLhcUyA9f7XblJxZGTc1aRdfAn45vUOg==, tarball: https://git.talesofai.com/api/packages/talesofai/npm/%40talesofai-billing%2Fsdk/-/1.31.0/sdk-1.31.0.tgz}
 
   '@trickfilm400/rollup-plugin-off-main-thread@3.0.0-pre1':
     resolution: {integrity: sha512-/67zpWDBLV+oYAEL682s1ktXL0HgqX76f6gaVGkGnVZlBbm1zd0v4Bz8MFF2GGhoX9rvfq3KSQHubFHwa6w6/Q==}
@@ -9519,11 +9511,6 @@ snapshots:
       '@tailwindcss/oxide': 4.3.5
       tailwindcss: 4.3.5
       vite: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
-
-  '@talesofai-billing/sdk@1.31.0':
-    dependencies:
-      zod: 4.6.7
-    optional: true
 
   '@trickfilm400/rollup-plugin-off-main-thread@3.0.0-pre1':
     dependencies:

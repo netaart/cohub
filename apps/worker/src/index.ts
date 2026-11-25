@@ -1,6 +1,6 @@
 import "dotenv/config";
 import "./tracing.js";
-import { configureBillingRuntime } from "@cohub/billing";
+import { assertBillingProviderAvailable, configureBillingRuntime } from "@cohub/billing";
 import { createLogger } from "@cohub/infra/logging";
 
 
@@ -29,6 +29,7 @@ configureBillingRuntime({
   config,
   redis: (await import("./redis.js")).redisCommandClient,
 });
+await assertBillingProviderAvailable();
 
 const connection = createBullmqRedisConnection(config.bullmqRedisUrl);
 

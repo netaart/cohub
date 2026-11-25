@@ -24,6 +24,7 @@
     "format": "biome format --write .",
     "lint:biome": "biome lint .",
     "prepare": "husky",
+    "postinstall": "node packages/billing/scripts/install-sdk.mjs",
     "ws:client": "tsx scripts/ws-client.ts",
     "rollout:sandbox": "tsx scripts/rollout-sandbox.ts",
     "rollout:sandbox:prod": "tsx scripts/rollout-sandbox-prod.ts",

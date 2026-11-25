@@ -52,8 +52,6 @@ jobs:
       fail-fast: false
       matrix:
         app: [api, gateway]
-    env:
-      GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -69,7 +67,6 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
-              - '.npmrc'
               - 'tsconfig.base.json'
             gateway:
               - 'apps/gateway/**'
@@ -77,7 +74,6 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
-              - '.npmrc'
               - 'tsconfig.base.json'
 
       - name: Set up Docker Buildx
@@ -114,7 +110,6 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
-      GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
@@ -126,15 +121,6 @@ jobs:
         with:
           cache: true
           install: false
-
-      - name: Configure Talesofai npm auth
-        run: |
-          if [ -z "$GITEA_NPM_TOKEN" ]; then
-            echo "GITEA_NPM_TOKEN not set; installing without private billing packages"
-          fi
-          if [ -n "$GITEA_NPM_TOKEN" ]; then
-            printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> ~/.npmrc
-          fi
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -150,7 +136,6 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
-              - '.npmrc'
               - 'tsconfig.base.json'
 
       - name: Setup web environment
@@ -247,7 +232,6 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
-              - '.npmrc'
               - 'tsconfig.base.json'
             gateway:
               - 'apps/gateway/**'
@@ -255,7 +239,6 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
-              - '.npmrc'
               - 'tsconfig.base.json'
 
       - name: Create preview ServiceAccount and RBAC

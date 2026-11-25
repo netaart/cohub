@@ -23,7 +23,9 @@ pnpm build
 - Keep UI copy in English.
 - Do not commit secrets, real deploy values, or private registry tokens.
 - Copy `deploy/**/values.example.yaml` to `values.yaml` for local deploy experiments.
-- Billing is optional. Leave `TALESOFAI_BILLING_*` unset to run with billing disabled.
+- Billing is optional. Leave `TALESOFAI_BILLING_*` unset to run with billing disabled. No registry token is needed to install, build, or test.
+- Hosted billing uses the private `@talesofai-billing/sdk`, kept out of the lockfile. With `GITEA_NPM_TOKEN` set (or `pnpm config set //git.talesofai.com/api/packages/talesofai/npm/:_authToken <token>`), `pnpm install` fetches the pinned, integrity-checked version from `packages/billing/scripts/install-sdk.mjs`.
+- Only `packages/billing/src/talesofai/` may import the SDK; other code uses the `CommerceSdk` and `BillingOperations` interfaces from `@cohub/billing`.
 
 ## Changes
 

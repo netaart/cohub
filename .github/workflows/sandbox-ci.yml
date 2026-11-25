@@ -56,8 +56,6 @@ jobs:
   windows-checks:
     name: Windows runtime (sandbox, CLI)
     runs-on: windows-latest
-    env:
-      GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
     defaults:
       run:
         shell: bash
@@ -88,21 +86,8 @@ jobs:
           cache: true
           install: false
 
-      - name: Configure Talesofai npm auth
-        run: |
-          if [ -n "$GITEA_NPM_TOKEN" ]; then
-            printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> ~/.npmrc
-          fi
-
-      # Fork PRs get no secrets, and lockfile policy verification would 401 on
-      # the private optional billing SDK. Nothing here builds billing, so skip it.
       - name: Install dependencies
-        run: |
-          if [ -n "$GITEA_NPM_TOKEN" ]; then
-            pnpm install --frozen-lockfile
-          else
-            pnpm install --frozen-lockfile --trust-lockfile
-          fi
+        run: pnpm install --frozen-lockfile
 
       - name: Build CLI dependencies
         run: pnpm --filter "@neta-art/cohub-cli^..." build

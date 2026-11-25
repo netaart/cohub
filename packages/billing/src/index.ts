@@ -1,4 +1,5 @@
 export {
+  assertBillingProviderAvailable,
   BillingConfigurationError,
   billingOperations,
   spaceWalletBillingOperations,
@@ -10,6 +11,7 @@ export {
   createDisabledBillingOperations,
   configureBillingRuntime,
   createTalesofaiBillingOperations,
+  createTalesofaiCommerceSdk,
   getBillingOperations,
   isBillingConfigured,
   resolveBillingClientConfig,
@@ -83,6 +85,20 @@ export {
   COHUB_BILLING_TOKEN_TYPES,
   COHUB_BILLING_USAGE_TYPES,
 } from "./interfaces.js";
+export type {
+  Benefit,
+  CommerceCheckout,
+  CommerceOrder,
+  CommercePage,
+  CommerceSdk,
+  CreditsBenefit,
+  CreditsBenefitConfig,
+  FeatureBenefit,
+  FeatureBenefitConfig,
+  Product,
+  ProductBenefit,
+  PurchasedCreditsBenefitConfig,
+} from "./commerce.js";
 export { COHUB_BILLING_POLICY } from "./constants.js";
 export { decodeLedgerCursor as parseBalanceActivityCursor } from "./balance-ledger.js";
 export {

@@ -22,7 +22,7 @@ import {
   type SerializedCommerceBuyerProfile,
   type SerializedCommerceProductBenefitBinding,
 } from "../../lib/commerce-serialize.js";
-import type { Benefit, CreditsBenefit, Product, ProductBenefit } from "../../lib/commerce-types.js";
+import type { Benefit, CreditsBenefit, Product, ProductBenefit } from "@cohub/billing";
 import { createLogger } from "@cohub/infra/logging";
 import type { SpaceCommerceSdk } from "../../lib/space-commerce.js";
 import { fallbackPublicUserProfile, getProfilesByUuids } from "../../user-profiles.js";

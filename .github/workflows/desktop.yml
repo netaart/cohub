@@ -116,14 +116,6 @@ jobs:
         with:
           cache: true
           install: false
-      - name: Configure Talesofai npm auth
-        shell: bash
-        env:
-          GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
-        run: |
-          if [ -n "$GITEA_NPM_TOKEN" ]; then
-            printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> ~/.npmrc
-          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @neta-art/cohub-cli... build
       - uses: actions/setup-go@v7
@@ -232,14 +224,6 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: apps/desktop/windows/global.json
-      - name: Configure Talesofai npm auth
-        shell: bash
-        env:
-          GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
-        run: |
-          if [ -n "$GITEA_NPM_TOKEN" ]; then
-            printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> ~/.npmrc
-          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @neta-art/cohub-cli... build
       - uses: actions/setup-go@v7
@@ -328,14 +312,6 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: apps/desktop/linux/global.json
-      - name: Configure Talesofai npm auth
-        shell: bash
-        env:
-          GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
-        run: |
-          if [ -n "$GITEA_NPM_TOKEN" ]; then
-            printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> ~/.npmrc
-          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @neta-art/cohub-cli... build
       - uses: actions/setup-go@v7

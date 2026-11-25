@@ -550,10 +550,9 @@ a `200` cancellation receipt or a Checkout return never proves closure or paymen
 The old `paymentConflict`, when present on inspection, describes the earlier money
 and does not automatically block a new subscription after confirmed close.
 
-Both Cohub Billing SDK consumers are pinned to the registry-published
-`@talesofai-billing/sdk@1.30.0-beta.0`, which includes
-`Subscription.renewal_recovery` and `subscriptions.paymentAction`. The lockfile
-records the registry integrity; no local SDK artifact is used as a dependency.
+Cohub Billing pins the registry-published `@talesofai-billing/sdk@1.31.0`, which
+includes `Subscription.renewal_recovery` and `subscriptions.paymentAction`, with
+its registry integrity in `packages/billing/scripts/install-sdk.mjs`.
 This Beta integration remains WIP and does not deploy Cohub or publish packages.
 
 For new ordinary purchases, Cohub stores the stable purchase ID and request hash

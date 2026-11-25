@@ -2,12 +2,10 @@ import { createHash } from "node:crypto";
 import {
   COHUB_BILLING_CREDIT_UNITS,
   COHUB_BILLING_TOKEN_TYPES,
+  type CreditsBenefit,
+  type Product,
+  type PurchasedCreditsBenefitConfig,
 } from "@cohub/billing";
-import type {
-  CreditsBenefit,
-  Product,
-  PurchasedCreditsBenefitConfig,
-} from "./commerce-types.js";
 
 export const COHUB_BALANCE_POLICY_VERSION = "balance-bundle-v1";
 export const COHUB_BALANCE_MIN_USD = 1;

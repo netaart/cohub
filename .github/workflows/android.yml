@@ -86,13 +86,8 @@ jobs:
 
       - name: Build the CLI the APK carries
         working-directory: .
-        env:
-          GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -n "$GITEA_NPM_TOKEN" ]; then
-            printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> ~/.npmrc
-          fi
           pnpm install --frozen-lockfile
           pnpm --filter @neta-art/cohub-cli... build
 
@@ -321,13 +316,8 @@ jobs:
 
       - name: Build the CLI the APK carries
         working-directory: .
-        env:
-          GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -n "$GITEA_NPM_TOKEN" ]; then
-            printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> ~/.npmrc
-          fi
           pnpm install --frozen-lockfile
           pnpm --filter @neta-art/cohub-cli... build
 

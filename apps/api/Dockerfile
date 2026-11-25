@@ -6,13 +6,14 @@ COPY package.json ./
 RUN npm install -g "$(node -p 'require("./package.json").packageManager')" && rm package.json
 
 FROM base AS builder
-COPY .npmrc pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/identity/package.json ./packages/identity/package.json
 COPY packages/identity/tsconfig.json ./packages/identity/tsconfig.json
 COPY packages/identity/tsconfig.build.json ./packages/identity/tsconfig.build.json
 COPY packages/billing/package.json ./packages/billing/package.json
 COPY packages/billing/tsconfig.json ./packages/billing/tsconfig.json
 COPY packages/billing/tsconfig.build.json ./packages/billing/tsconfig.build.json
+COPY packages/billing/scripts ./packages/billing/scripts
 COPY packages/core/package.json ./packages/core/package.json
 COPY packages/core/tsconfig.json ./packages/core/tsconfig.json
 COPY packages/core/tsconfig.build.json ./packages/core/tsconfig.build.json
@@ -39,18 +40,13 @@ COPY packages/db/tsconfig.json ./packages/db/tsconfig.json
 COPY packages/db/tsconfig.build.json ./packages/db/tsconfig.build.json
 COPY apps/api/package.json ./apps/api/package.json
 
+ARG COHUB_REQUIRE_BILLING_SDK
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   --mount=type=secret,id=gitea_npm_token \
-  GITEA_NPM_TOKEN="$(cat /run/secrets/gitea_npm_token 2>/dev/null || true)" && \
-  export GITEA_NPM_TOKEN && \
-  if [ -n "$GITEA_NPM_TOKEN" ]; then \
-    printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> /root/.npmrc; \
-  fi && \
   pnpm config set store-dir /pnpm/store && \
   pnpm install --frozen-lockfile --ignore-scripts --filter @cohub/api... && \
-  if [ -n "$GITEA_NPM_TOKEN" ]; then \
-    if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
-  fi
+  GITEA_NPM_TOKEN="$(cat /run/secrets/gitea_npm_token 2>/dev/null || true)" \
+  node packages/billing/scripts/install-sdk.mjs
 
 COPY packages/identity ./packages/identity
 COPY packages/billing ./packages/billing
@@ -69,14 +65,11 @@ COPY apps/api/drizzle ./apps/api/drizzle
 RUN pnpm --filter @cohub/api... build
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   --mount=type=secret,id=gitea_npm_token \
-  GITEA_NPM_TOKEN="$(cat /run/secrets/gitea_npm_token 2>/dev/null || true)" && \
-  export GITEA_NPM_TOKEN && \
-  if [ -n "$GITEA_NPM_TOKEN" ]; then \
-    printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> /root/.npmrc; \
-  fi && \
   pnpm --filter @cohub/api --prod deploy /prod/api && \
-  if [ -n "$GITEA_NPM_TOKEN" ]; then \
-    if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
+  GITEA_NPM_TOKEN="$(cat /run/secrets/gitea_npm_token 2>/dev/null || true)" \
+  node packages/billing/scripts/install-sdk.mjs /prod/api/node_modules/@cohub/billing
+RUN if [ "$COHUB_REQUIRE_BILLING_SDK" = 1 ]; then \
+    node --input-type=module -e 'await import("/prod/api/node_modules/@cohub/billing/dist/talesofai/provider.js")'; \
   fi
 
 FROM node:26-slim AS runtime

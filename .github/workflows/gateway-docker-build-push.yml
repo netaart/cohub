@@ -23,8 +23,6 @@ jobs:
   build-and-push:
     if: ${{ !startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
-    env:
-      GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
     outputs:
       image_tag: ${{ steps.meta.outputs.tags }}
       image_version: ${{ steps.meta.outputs.version }}
@@ -47,15 +45,6 @@ jobs:
         with:
           cache: true
           install: false
-
-      - name: Configure Talesofai npm auth
-        run: |
-          if [ -z "$GITEA_NPM_TOKEN" ]; then
-            echo "GITEA_NPM_TOKEN not set; installing without private billing packages"
-          fi
-          if [ -n "$GITEA_NPM_TOKEN" ]; then
-            printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> ~/.npmrc
-          fi
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -101,8 +90,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
-          secrets: |
-            gitea_npm_token=${{ secrets.GITEA_NPM_TOKEN }}
 
   deploy-dev:
     needs: build-and-push

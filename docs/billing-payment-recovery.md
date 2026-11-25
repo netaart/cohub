@@ -5,9 +5,9 @@ admission. Cohub uses its `renewal_recovery` summary; `past_due`, a return URL o
 a successful cancellation request does not establish paid access. See the
 [current Billing contract](https://git.talesofai.com/talesofai/talesofai-billing/src/branch/codex/stripe-recovery-p0/.agents/docs/current/stripe-payment-recovery.md).
 
-Both direct consumers pin the registry-published
-`@talesofai-billing/sdk@1.30.0`. The lockfile contains its registry integrity;
-no local SDK artifact is used.
+`@cohub/billing` is the only direct consumer and pins the registry-published
+`@talesofai-billing/sdk@1.31.0` with its registry integrity in
+`packages/billing/scripts/install-sdk.mjs`; no local SDK artifact is used.
 
 ## Purchase behavior
 

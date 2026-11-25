@@ -2,13 +2,17 @@ import { and, eq } from "drizzle-orm";
 import { spaceCommerceBusinesses, spaces, apps } from "@cohub/db";
 import { db } from "../db/index.js";
 import {
+  BillingConfigurationError,
   billingOperations,
   COHUB_BILLING_FEATURES,
+  createBusinessBillingOperations,
+  createTalesofaiCommerceSdk,
+  type CommerceSdk,
+  type CreditsBenefit,
 } from "@cohub/billing";
 import { createLogger } from "@cohub/infra/logging";
-import type { CreditsBenefit } from "./commerce-types.js";
+import { config } from "../config.js";
 import { isBillingApiError } from "./billing-api-error.js";
-import type { SpaceCommerceSdk } from "./space-commerce-provider.js";
 
 const BILLING_NAMESPACE = "cohub_space";
 
@@ -47,35 +51,47 @@ export class SpaceCommerceNotInitializedError extends Error {
   }
 }
 
-type SpaceCommerceProvider = typeof import("./space-commerce-provider.js");
+export type SpaceCommerceSdk = CommerceSdk;
 
-let providerPromise: Promise<SpaceCommerceProvider> | null = null;
-
-function loadProvider(): Promise<SpaceCommerceProvider> {
-  providerPromise ??= import("./space-commerce-provider.js").catch((error: unknown) => {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Space commerce provider is unavailable. Install @talesofai-billing/sdk for hosted commerce. (${detail})`,
-    );
-  });
-  return providerPromise;
+function requireBillingClientConfig() {
+  const baseUrl = config.talesofaiBillingBaseUrl?.trim();
+  const adminApiKey = config.talesofaiBillingAdminApiKey?.trim();
+  if (!baseUrl || !adminApiKey) throw new BillingConfigurationError();
+  return { baseUrl, adminApiKey };
 }
 
-export type { SpaceCommerceSdk };
-
 export async function createSpaceCommerceSdk(): Promise<SpaceCommerceSdk> {
-  return (await loadProvider()).createSpaceCommerceSdk();
+  return createTalesofaiCommerceSdk(requireBillingClientConfig());
 }
 
 export async function createSpaceBusinessBillingOperations(businessKey: string) {
-  return (await loadProvider()).createSpaceBusinessBillingOperations(businessKey);
+  return createBusinessBillingOperations({
+    clientConfig: { ...requireBillingClientConfig(), businessKey },
+    businessKey,
+  });
 }
 
 export async function loadBusinessCreditBenefits(input: {
   sdk: SpaceCommerceSdk;
   businessKey: string;
 }): Promise<Map<string, CreditsBenefit>> {
-  return (await loadProvider()).loadBusinessCreditBenefits(input);
+  const creditBenefits = new Map<string, CreditsBenefit>();
+  let page = 1;
+  while (true) {
+    const result = await input.sdk.admin.benefits.list({
+      business_key: input.businessKey,
+      include_count: false,
+      limit: 100,
+      page,
+    });
+    for (const benefit of result.items) {
+      if (benefit.type !== "credits") continue;
+      creditBenefits.set(benefit.key, benefit);
+    }
+    if (!result.pagination.has_more) break;
+    page += 1;
+  }
+  return creditBenefits;
 }
 
 export async function loadBoundBenefitKeys(input: {
@@ -83,7 +99,11 @@ export async function loadBoundBenefitKeys(input: {
   businessKey: string;
   productKey: string;
 }): Promise<string[]> {
-  return (await loadProvider()).loadBoundBenefitKeys(input);
+  const bindings = await input.sdk.admin.products.listBenefits({
+    business_key: input.businessKey,
+    product_key: input.productKey,
+  });
+  return bindings.map((binding) => binding.benefit_key);
 }
 
 function normalizeBusinessKeyValue(value: string) {
@@ -128,14 +148,14 @@ export async function ensureSpaceCommerceBusiness(spaceId: string) {
   if (!space) throw new Error("Space not found");
 
   const businessKey = buildBillingBusinessKey(space.id);
-  const provider = await loadProvider();
+  const sdk = await createSpaceCommerceSdk();
   try {
-    await provider.createBillingBusiness({
-      businessKey,
+    await sdk.admin.businesses.create({
+      key: businessKey,
       name: buildBillingBusinessName({ spaceName: space.name, spaceId: space.id }),
+      status: "active",
     });
   } catch (error) {
-    // Provider rethrows non-409; 409 is treated as already exists.
     if (!isBillingApiError(error) || error.status !== 409) throw error;
   }
 

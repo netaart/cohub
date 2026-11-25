@@ -4,7 +4,7 @@ import {
   COHUB_BILLING_CREDIT_UNITS,
   COHUB_BILLING_TOKEN_TYPES,
 } from "@cohub/billing";
-import type { CreditsBenefit, Product } from "./commerce-types.js";
+import type { CreditsBenefit, Product } from "@cohub/billing";
 import { serializeProduct } from "./commerce-serialize.js";
 import {
   buildCohubBalanceBenefitConfig,

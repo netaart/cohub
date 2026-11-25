@@ -7,7 +7,7 @@ RUN npm install -g "$(node -p 'require("./package.json").packageManager')" && rm
 
 FROM base AS builder
 
-COPY .npmrc pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/identity/package.json ./packages/identity/package.json
 COPY packages/identity/tsconfig.json ./packages/identity/tsconfig.json
 COPY packages/identity/tsconfig.build.json ./packages/identity/tsconfig.build.json
@@ -23,17 +23,8 @@ COPY packages/media/tsconfig.build.json ./packages/media/tsconfig.build.json
 COPY apps/gateway/package.json ./apps/gateway/package.json
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-  --mount=type=secret,id=gitea_npm_token \
-  GITEA_NPM_TOKEN="$(cat /run/secrets/gitea_npm_token 2>/dev/null || true)" && \
-  export GITEA_NPM_TOKEN && \
-  if [ -n "$GITEA_NPM_TOKEN" ]; then \
-    printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> /root/.npmrc; \
-  fi && \
   pnpm config set store-dir /pnpm/store && \
-  pnpm install --frozen-lockfile --ignore-scripts --filter @cohub/gateway... && \
-  if [ -n "$GITEA_NPM_TOKEN" ]; then \
-    if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
-  fi
+  pnpm install --frozen-lockfile --ignore-scripts --filter @cohub/gateway...
 
 COPY packages/identity ./packages/identity
 COPY packages/protocol ./packages/protocol
@@ -44,16 +35,7 @@ COPY apps/gateway/tsconfig.json apps/gateway/tsconfig.build.json ./apps/gateway/
 
 RUN pnpm --filter @cohub/gateway... build
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-  --mount=type=secret,id=gitea_npm_token \
-  GITEA_NPM_TOKEN="$(cat /run/secrets/gitea_npm_token 2>/dev/null || true)" && \
-  export GITEA_NPM_TOKEN && \
-  if [ -n "$GITEA_NPM_TOKEN" ]; then \
-    printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> /root/.npmrc; \
-  fi && \
-  pnpm --filter @cohub/gateway --prod deploy /prod/gateway && \
-  if [ -n "$GITEA_NPM_TOKEN" ]; then \
-    if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
-  fi
+  pnpm --filter @cohub/gateway --prod deploy /prod/gateway
 
 FROM node:26-slim AS runtime
 

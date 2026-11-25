@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createTalesofaiBillingOperations } from "../src/client.js";
+import { createTalesofaiBillingOperations } from "../../src/client.js";
 
 const jsonResponse = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), {

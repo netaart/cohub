@@ -38,7 +38,7 @@ import {
 } from "@talesofai-billing/sdk/admin/subscriptions";
 import { ApiError, createSdk } from "@talesofai-billing/sdk/base";
 import { createHash, randomUUID } from "node:crypto";
-import { readLedger, type LedgerRow, type LedgerSource } from "./balance-ledger.js";
+import { readLedger, type LedgerRow, type LedgerSource } from "../balance-ledger.js";
 import {
   COHUB_BILLING_BENEFITS,
   COHUB_BILLING_CREDIT_UNITS,
@@ -84,9 +84,11 @@ import {
   type BillingUsageRecordInput,
   type BillingUsageRecordResult,
   type BillingUserRef,
-} from "./interfaces.js";
-import type { BillingClientConfig } from "./types.js";
-import { checkoutLockRedisRef } from "./runtime.js";
+} from "../interfaces.js";
+import type { TalesofaiProviderModule } from "../client.js";
+import type { CommerceSdk } from "../commerce.js";
+import type { BillingClientConfig } from "../types.js";
+import { checkoutLockRedisRef } from "../runtime.js";
 
 class BillingConfigurationError extends Error {
   constructor(message = "Talesofai Billing is not configured") {
@@ -95,7 +97,9 @@ class BillingConfigurationError extends Error {
   }
 }
 
-function createConfiguredSdk(input: BillingClientConfig) {
+type SdkClientConfig = Pick<BillingClientConfig, "baseUrl" | "adminApiKey">;
+
+function createConfiguredSdk(input: SdkClientConfig) {
   return createSdk({
     baseURL: input.baseUrl,
     adminApiKey: input.adminApiKey,
@@ -113,6 +117,10 @@ function createConfiguredSdk(input: BillingClientConfig) {
 }
 
 type ConfiguredBillingSdk = ReturnType<typeof createConfiguredSdk>;
+
+export function createCommerceSdk(input: SdkClientConfig): CommerceSdk {
+  return createConfiguredSdk(input);
+}
 
 type FirstPurchaseCampaign = {
   key: string;
@@ -3347,3 +3355,9 @@ export function createBusinessBillingOperations(input: {
     consume,
   };
 }
+
+({
+  createTalesofaiBillingOperations,
+  createBusinessBillingOperations,
+  createCommerceSdk,
+}) satisfies TalesofaiProviderModule;

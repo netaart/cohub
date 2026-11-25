@@ -30,6 +30,7 @@ import {
   type BusinessBillingOperations,
   type BusinessCreditConsumeResult,
 } from "./interfaces.js";
+import type { CommerceSdk } from "./commerce.js";
 import { checkoutLockRedisRef } from "./runtime.js";
 
 export type { BillingClientConfig, BillingRuntimeConfig } from "./types.js";
@@ -488,21 +489,35 @@ export function createDisabledBusinessBillingOperations(
 }
 
 
-type TalesofaiProviderModule = {
+type SdkClientConfig = Pick<BillingClientConfig, "baseUrl" | "adminApiKey">;
+
+export type TalesofaiProviderModule = {
   createTalesofaiBillingOperations: (clientConfig: BillingClientConfig) => BillingOperations;
   createBusinessBillingOperations: (input: {
     clientConfig: BillingClientConfig;
     businessKey: string;
   }) => BusinessBillingOperations;
+  createCommerceSdk: (clientConfig: SdkClientConfig) => CommerceSdk;
 };
 
+// Non-literal so tsc never follows it into the SDK-backed adapter.
+const TALESOFAI_PROVIDER_MODULE = "./talesofai/provider.js";
+
 function loadTalesofaiProviderModule(): Promise<TalesofaiProviderModule> {
-  return import("./provider-talesofai.js").catch((error: unknown) => {
+  return (import(TALESOFAI_PROVIDER_MODULE) as Promise<TalesofaiProviderModule>).catch((error: unknown) => {
     const detail = error instanceof Error ? error.message : String(error);
     throw new BillingConfigurationError(
       `Talesofai Billing provider is unavailable. Install @talesofai-billing/sdk for hosted billing, or leave billing unconfigured. (${detail})`,
     );
   });
+}
+
+export async function assertBillingProviderAvailable(): Promise<void> {
+  if (isBillingConfigured()) await loadTalesofaiProviderModule();
+}
+
+export async function createTalesofaiCommerceSdk(clientConfig: SdkClientConfig): Promise<CommerceSdk> {
+  return (await loadTalesofaiProviderModule()).createCommerceSdk(clientConfig);
 }
 
 function lazyBillingOperations(

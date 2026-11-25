@@ -67,8 +67,5 @@
     "tsx": "catalog:",
     "typescript": "catalog:"
   },
-  "optionalDependencies": {
-    "@talesofai-billing/sdk": "1.31.0"
-  },
   "license": "Apache-2.0"
 }

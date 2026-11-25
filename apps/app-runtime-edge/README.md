@@ -89,7 +89,7 @@ pnpm --filter @cohub/app-runtime-edge build
 
 ## Deployment
 
-The `App Runtime Deploy to Cloudflare Workers` workflow runs lint, typecheck, and build checks for PRs. Pushes to `main` deploy Dev; stable service tags `vX.Y.Z` deploy Production; manual dispatch selects either environment. Deployments to each environment are serialized. It reuses the repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, just like the Web deployment workflow. The optional `GITEA_NPM_TOKEN` follows the existing install convention.
+The `App Runtime Deploy to Cloudflare Workers` workflow runs lint, typecheck, and build checks for PRs. Pushes to `main` deploy Dev; stable service tags `vX.Y.Z` deploy Production; manual dispatch selects either environment. Deployments to each environment are serialized. It reuses the repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, just like the Web deployment workflow.
 
 For an authorized manual deployment, set the standard Wrangler environment variables and run:
 

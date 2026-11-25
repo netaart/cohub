@@ -1,6 +1,6 @@
 import "dotenv/config";
 import "./tracing.js";
-import { configureBillingRuntime } from "@cohub/billing";
+import { assertBillingProviderAvailable, configureBillingRuntime } from "@cohub/billing";
 import { createLogger } from "@cohub/infra/logging";
 import { SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
 import { COHUB_SOURCE_HEADER_NAMES } from "@cohub/protocol/provenance";
@@ -267,6 +267,7 @@ configureBillingRuntime({
   config,
   redis: (await import("./redis.js")).redisCommandClient,
 });
+await assertBillingProviderAvailable();
 const server = serve({
   fetch: app.fetch,
   port,

@@ -38,13 +38,23 @@
                 "importNames": ["z"],
                 "message": "Use `import * as z from \"zod\"` so bundlers can tree-shake Zod."
               }
-            }
+            },
+            "patterns": [
+              {
+                "group": ["@talesofai-billing/**"],
+                "message": "Only packages/billing/src/talesofai/ may import the private billing SDK."
+              }
+            ]
           }
         }
       }
     }
   },
   "overrides": [
+    {
+      "includes": ["packages/billing/src/talesofai/**"],
+      "linter": { "rules": { "style": { "noRestrictedImports": "off" } } }
+    },
     {
       "includes": ["**/templates/**"],
       "linter": {

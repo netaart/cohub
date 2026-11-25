@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   createBusinessBillingOperations,
   createTalesofaiBillingOperations,
-} from "../src/client.js";
+} from "../../src/client.js";
 
 const response = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {

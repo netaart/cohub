@@ -1,14 +1,12 @@
 import {
   COHUB_BILLING_CREDIT_UNITS,
   COHUB_BILLING_TOKEN_TYPES,
+  type Benefit,
+  type CreditsBenefit,
+  type CreditsBenefitConfig,
+  type Product,
+  type PurchasedCreditsBenefitConfig,
 } from "@cohub/billing";
-import type {
-  Benefit,
-  CreditsBenefit,
-  CreditsBenefitConfig,
-  Product,
-  PurchasedCreditsBenefitConfig,
-} from "./commerce-types.js";
 import type { CohubBalanceDescriptor } from "./space-commerce-balance.js";
 import { serializeCohubBalance } from "./space-commerce-balance.js";
 
