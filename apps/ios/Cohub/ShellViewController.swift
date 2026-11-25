@@ -1,9 +1,11 @@
 import CohubCore
+import Network
 import UIKit
 import WebKit
 
 final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
     static let revealTimeout: Duration = .milliseconds(2_500)
+    static let slowTimeout: Duration = .seconds(8)
 
     private let shell: Shell
     private let startPath: String
@@ -14,13 +16,20 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     private var edge: RGB
     private var observation: NSKeyValueObservation?
     private var loadStarted: ContinuousClock.Instant? = .now
-    private var revealed = false
     private var needsReload = false
     private var foreground = true
+    private var committed = false
+    private var revealDue = false
+    private var coverClock: Task<Void, Never>?
+    private var crashedBeforeReady = false
+    private var retryPath: String
+    private var network: NWPathMonitor?
+    private var networkReported = false
 
     init(shell: Shell, path: String, dark: Bool) {
         self.shell = shell
         startPath = path
+        retryPath = path
         edge = ShellState.edge(dark: dark) ?? (dark ? RGB(0x10, 0x12, 0x13) : RGB(0xFF, 0xFF, 0xFF))
         super.init(nibName: nil, bundle: nil)
     }
@@ -41,17 +50,15 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         view.addSubview(webView)
         cover.frame = view.bounds
         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        cover.onAction = { [weak self] in self?.retry() }
         view.addSubview(cover)
         self.view = view
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        holdCover()
         load(startPath)
-        Task { [weak self] in
-            try? await Task.sleep(for: Self.revealTimeout)
-            self?.reveal()
-        }
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
             let dark = self.traitCollection.userInterfaceStyle == .dark
             if let stored = ShellState.edge(dark: dark) { self.paint(stored) }
@@ -90,20 +97,103 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     func load(_ path: String) {
         guard let url = shell.config.origin.url(for: path) else { return }
         needsReload = false
+        if cover.failure != nil { holdCover() }
+        retryPath = path
         webView.load(URLRequest(url: url))
     }
 
-    func reveal() {
+    func appReady() {
+        crashedBeforeReady = false
         if let started = loadStarted {
             loadStarted = nil
             logger.info("First screen in \(Int((ContinuousClock.now - started) / .milliseconds(1))) ms")
         }
-        guard !revealed else { return }
-        revealed = true
-        UIView.animate(withDuration: 0.18, animations: { self.cover.alpha = 0 }) { _ in
+        lift()
+    }
+
+    private func holdCover() {
+        committed = false
+        revealDue = false
+        watchNetwork(false)
+        present()
+        cover.state = .loading
+        coverClock?.cancel()
+        coverClock = Task { [weak self] in
+            try? await Task.sleep(for: Self.revealTimeout)
+            guard let self, !Task.isCancelled else { return }
+            self.revealDue = true
+            if self.committed { self.lift() }
+            try? await Task.sleep(for: Self.slowTimeout - Self.revealTimeout)
+            if !Task.isCancelled { self.cover.state = .slow }
+        }
+    }
+
+    private func present() {
+        cover.layer.removeAllAnimations()
+        cover.alpha = 1
+        guard cover.superview == nil else { return }
+        cover.frame = view.bounds
+        view.addSubview(cover)
+        setNeedsStatusBarAppearanceUpdate()
+    }
+
+    private func lift() {
+        coverClock?.cancel()
+        watchNetwork(false)
+        guard cover.superview != nil, cover.alpha > 0 else { return }
+        UIView.animate(withDuration: 0.18, animations: { self.cover.alpha = 0 }) { finished in
+            guard finished else { return }
             self.cover.removeFromSuperview()
             self.setNeedsStatusBarAppearanceUpdate()
         }
+    }
+
+    private func failed(_ error: Error) {
+        guard let failure = LaunchFailure(error) else { return }
+        // WebKit keeps a page that is on screen; only an empty surface needs the cover.
+        guard cover.superview != nil, cover.alpha > 0 else { return Toast.show(L("Can't reach Cohub"), in: view) }
+        let path = (error as? URLError)?.failingURL.flatMap(shell.config.origin.path(of:))
+        fail(failure, path: path ?? retryPath)
+    }
+
+    private func fail(_ failure: LaunchFailure, path: String) {
+        coverClock?.cancel()
+        retryPath = path
+        present()
+        cover.state = .failed(failure)
+        UIAccessibility.post(notification: .screenChanged, argument: cover)
+        watchNetwork(failure == .offline)
+    }
+
+    private func retry() {
+        holdCover()
+        load(retryPath)
+    }
+
+    // The first-launch cellular data prompt also returns here.
+    func becameActive() {
+        if cover.failure == .offline { retry() }
+    }
+
+    private func watchNetwork(_ on: Bool) {
+        guard on != (network != nil) else { return }
+        network?.cancel()
+        network = nil
+        networkReported = false
+        guard on else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            MainActor.assumeIsolated { self?.networkChanged(satisfied) }
+        }
+        monitor.start(queue: .main)
+        network = monitor
+    }
+
+    private func networkChanged(_ satisfied: Bool) {
+        let changed = networkReported
+        networkReported = true
+        if satisfied, changed { retry() }
     }
 
     func apply(edge: RGB) {
@@ -128,7 +218,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
 
     func enteredForeground() {
         foreground = true
-        if needsReload { reloadPage() }
+        if needsReload { recover() }
         router.emit(HostProtocol.Event.appForeground)
     }
 
@@ -137,9 +227,11 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         router.emit(HostProtocol.Event.appBackground)
     }
 
-    private func reloadPage() {
-        if webView.url == nil { load(ShellState.lastPage ?? startPath) } else { webView.reload() }
+    private func recover() {
         needsReload = false
+        retryPath = ShellState.lastPage ?? startPath
+        holdCover()
+        if webView.url == nil { load(ShellState.lastPage ?? startPath) } else { webView.reload() }
     }
 
     fileprivate func receive(_ message: WKScriptMessage) {
@@ -191,9 +283,29 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         return false
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        committed = true
+        if revealDue, cover.failure == nil { lift() }
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        failed(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        failed(error)
+    }
+
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         logger.warning("Web content process terminated")
-        if foreground { reloadPage() } else { needsReload = true }
+        guard foreground else {
+            needsReload = true
+            return
+        }
+        // Reloading a page that dies again before it is back would only loop; start over from home.
+        if crashedBeforeReady { return fail(.broken, path: "/") }
+        crashedBeforeReady = true
+        recover()
     }
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
@@ -242,20 +354,6 @@ private final class ScriptMessageProxy: NSObject, WKScriptMessageHandler {
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         target?.receive(message)
     }
-}
-
-private final class LaunchCover: UIView {
-    init() {
-        super.init(frame: .zero)
-        backgroundColor = UIColor(named: "LaunchBackground")
-        let logo = UIImageView(image: UIImage(named: "LaunchLogo"))
-        logo.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(logo)
-        NSLayoutConstraint.activate([logo.centerXAnchor.constraint(equalTo: centerXAnchor), logo.centerYAnchor.constraint(equalTo: centerYAnchor)])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
 extension UIViewController {

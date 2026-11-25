@@ -46,6 +46,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         Shell.shared.surface?.enteredForeground()
     }
 
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        Shell.shared.surface?.becameActive()
+    }
+
     func sceneDidEnterBackground(_ scene: UIScene) {
         Shell.shared.surface?.enteredBackground()
     }

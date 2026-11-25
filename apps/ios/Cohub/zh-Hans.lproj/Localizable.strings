@@ -9,3 +9,10 @@
 "Source code" = "源代码";
 "OK" = "好";
 "Cancel" = "取消";
+"Loading" = "正在加载";
+"Taking longer than usual" = "加载比平时久";
+"Reload" = "重新加载";
+"Can't reach Cohub" = "无法连接 Cohub";
+"Cohub will try again when you're back online." = "网络恢复后会自动重试。";
+"Couldn't load Cohub" = "Cohub 加载失败";
+"Try again" = "重试";

@@ -34,7 +34,7 @@ enum HostBridge {
                 return true
             },
             M.appReady: { [weak surface] _ in
-                surface?.reveal()
+                surface?.appReady()
                 if await auth.signedIn { QuickActions.refresh(signedIn: true) }
                 return true
             },

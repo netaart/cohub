@@ -126,13 +126,35 @@ once, before the system asks for All files access. A shared screen asks each tim
 
 ## Launch
 
-The host holds its launch screen while the WebView starts and the page boots,
-then lifts it on `app.ready` or after 2.5 s, whichever comes first, so a cold
-start never flashes an empty surface. The page calls `app.ready` two frames
-after its first screen renders — from local data, not after the network. The
-same call marks the activity fully drawn, so time to full display is
-measurable (`adb logcat -s ActivityTaskManager` prints `Fully drawn`). iOS holds
-a twin of its launch screen over the WebView the same way and logs `First screen in … ms`.
+The page calls `app.ready` two frames after its first screen renders — from
+local data, not after the network. Until then iOS and Android hold a cover over
+the WebView: a twin of the system launch screen, drawn in its place before that
+one leaves, so the hand-over shows nothing.
+
+The logo's C is the app's spinner. Nothing waits for the animation, and it
+only plays on a cover, never on navigation inside the app:
+
+| When | The cover |
+| --- | --- |
+| 0–300 ms | Still, as the system drew it; a fast start lifts before anything moves |
+| After 300 ms | The C turns once every 900 ms: 600 ms on the app's ease-out, 300 ms at rest |
+| `app.ready` | Fades out over 180 ms from wherever the C is |
+| 2.5 s | Lifts anyway, once the document has committed |
+| 8 s, nothing committed | Adds “Taking longer than usual” and Reload; the logo stays where it is |
+| The document fails to load | The C stops; a title and Try again. A connection failure also retries when the network changes for the better or the app returns to the front, a TLS failure only by hand |
+| Reduce Motion (iOS) | One turn every 2.4 s |
+| Animations off (Android) | Still |
+
+A page whose process dies in front reloads under the same cover. If it dies again
+before `app.ready`, the cover stops and offers a restart from `/` instead of looping.
+One that dies in the background reloads when the app returns.
+A failed load of a page already on screen leaves it there on iOS, which only
+says so; Android's WebView replaces it with an error page, so the cover returns.
+
+`app.ready` also marks the activity fully drawn, so time to full display is
+measurable (`adb logcat -s ActivityTaskManager` prints `Fully drawn`); iOS logs
+`First screen in … ms`. Desktop shells keep the plain rule: reveal on `app.ready`
+or after 2.5 s.
 
 ## Back
 

@@ -7,12 +7,17 @@ import android.content.Intent
 import android.graphics.Color
 import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.view.HapticFeedbackConstants
+import android.view.ViewGroup
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.URLUtil
@@ -30,6 +35,7 @@ import androidx.core.content.edit
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.net.toUri
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.doOnPreDraw
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -55,6 +61,7 @@ import live.cohub.android.host.HostPermissions
 import live.cohub.android.host.HostProtocol
 import live.cohub.android.host.IncomingShare
 import live.cohub.android.host.LastPage
+import live.cohub.android.host.LaunchFailure
 import live.cohub.android.host.LauncherShortcuts
 import live.cohub.android.host.ScreenCaptureGrant
 import live.cohub.android.host.SurfaceListener
@@ -64,6 +71,7 @@ import live.cohub.android.host.WebWarmup
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.RuntimeService
 import live.cohub.android.runtime.toJson
+import live.cohub.android.ui.LaunchCover
 import live.cohub.android.ui.ShellAppearance
 import live.cohub.android.ui.SurfaceContainer
 import kotlin.coroutines.resume
@@ -78,6 +86,7 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var bridge: HostBridge
     private lateinit var lastPage: LastPage
     private lateinit var container: SurfaceContainer
+    private lateinit var cover: LaunchCover
     private lateinit var appearance: ShellAppearance
     private lateinit var fileChooser: FileChooser
     private lateinit var mediaCapture: MediaCapture
@@ -98,8 +107,19 @@ class MainActivity : ComponentActivity(), HostActions {
     private var startPath = "/"
     private var surfaceLost = false
 
-    private var launched = false
     private var reportedDrawn = false
+    private var committed = false
+    private var revealDue = false
+    private var crashedBeforeReady = false
+    private var retryPath = "/"
+    private var networkWatch: ConnectivityManager.NetworkCallback? = null
+
+    private val revealTimeout = Runnable {
+        revealDue = true
+        if (committed) lift()
+    }
+
+    private val slowTimeout = Runnable { cover.show(LaunchCover.State.Slow) }
 
     private val historyBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -118,6 +138,13 @@ class MainActivity : ComponentActivity(), HostActions {
             layerBack.isEnabled = false
             app.display?.page?.value = null
         }
+
+        override fun onPageCommitted() {
+            committed = true
+            if (revealDue && cover.failure == null) lift()
+        }
+
+        override fun onLoadFailed(failure: LaunchFailure, url: Uri) = fail(failure, WebOrigin.pathOf(url) ?: startPath)
 
         override fun onNavigated(url: String) {
             historyBack.isEnabled = surface?.canGoBack() == true
@@ -156,11 +183,10 @@ class MainActivity : ComponentActivity(), HostActions {
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen().apply {
-            setKeepOnScreenCondition { !launched }
-            setOnExitAnimationListener { splash ->
-                splash.view.animate().alpha(0f).setDuration(SPLASH_FADE_MS).withEndAction(splash::remove).start()
-            }
+        installSplashScreen().setOnExitAnimationListener { splash ->
+            cover.alignTo(splash.iconView)
+            cover.doOnPreDraw { cover.post(splash::remove) }
+            cover.invalidate()
         }
         super.onCreate(savedInstanceState)
         appearance = ShellAppearance(this)
@@ -213,7 +239,8 @@ class MainActivity : ComponentActivity(), HostActions {
         onBackPressedDispatcher.addCallback(this, layerBack)
         container = SurfaceContainer(this)
         setContentView(container)
-        container.postDelayed(::lift, LAUNCH_TIMEOUT_MS)
+        cover = LaunchCover(this, container) { start(retryPath) }
+        addContentView(cover, ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         // Recents replays the launching intent after a process death.
         val link = intent?.data?.takeIf {
             savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
@@ -221,12 +248,13 @@ class MainActivity : ComponentActivity(), HostActions {
         val fromRecents = (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
         val shared = savedInstanceState == null && !fromRecents && receiveShare(intent)
         startPath = if (shared) LauncherShortcuts.NEW_CHAT_PATH else link?.takeUnless(::isSignInRedirect)?.let(WebOrigin::pathOf) ?: lastPage.read() ?: "/"
-        WebSurface.startUp(this) { if (!isDestroyed) mountSurface(startPath) }
+        WebSurface.startUp(this) { if (!isDestroyed) start(startPath) }
         link?.takeIf(::isSignInRedirect)?.let(::handleSignInRedirect)
     }
 
     override fun onDestroy() {
         app.display?.page?.value = null
+        stopWaiting()
         container.removeAllViews()
         surface?.destroy()
         super.onDestroy()
@@ -247,6 +275,58 @@ class MainActivity : ComponentActivity(), HostActions {
         next.load(path)
     }
 
+    private fun start(path: String) {
+        stopWaiting()
+        retryPath = path
+        surfaceLost = false
+        committed = false
+        revealDue = false
+        cover.show(LaunchCover.State.Loading)
+        cover.postDelayed(revealTimeout, LAUNCH_TIMEOUT_MS)
+        cover.postDelayed(slowTimeout, SLOW_TIMEOUT_MS)
+        surface?.load(path) ?: mountSurface(path)
+    }
+
+    private fun lift() {
+        stopWaiting()
+        cover.dismiss()
+    }
+
+    private fun fail(failure: LaunchFailure, path: String) {
+        stopWaiting()
+        retryPath = path
+        cover.show(LaunchCover.State.Failed(failure))
+        if (failure == LaunchFailure.OFFLINE) watchNetwork()
+    }
+
+    private fun stopWaiting() {
+        cover.removeCallbacks(revealTimeout)
+        cover.removeCallbacks(slowTimeout)
+        networkWatch?.let { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) }
+        networkWatch = null
+    }
+
+    private fun watchNetwork() {
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        val failed = connectivity.activeNetwork
+        val watch = object : ConnectivityManager.NetworkCallback() {
+            private var validated: Boolean? = null
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                val was = validated
+                val now = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                validated = now
+                if (now && (network != failed || was == false)) runOnUiThread { retryOffline() }
+            }
+        }
+        connectivity.registerDefaultNetworkCallback(watch)
+        networkWatch = watch
+    }
+
+    private fun retryOffline() {
+        if (!isDestroyed && cover.failure == LaunchFailure.OFFLINE) start(retryPath)
+    }
+
     private fun recoverSurface(crashed: Boolean) {
         val dead = surface ?: return
         surface = null
@@ -259,11 +339,16 @@ class MainActivity : ComponentActivity(), HostActions {
             surfaceLost = true
             return
         }
+        // Reloading a page that dies again before it is back would only loop; offer a restart from home.
+        if (crashedBeforeReady) return fail(LaunchFailure.BROKEN, "/")
+        crashedBeforeReady = true
         if (crashed) toast(R.string.web_view_recovering)
-        mountSurface(startPath)
+        start(startPath)
     }
 
     private fun navigate(path: String) {
+        if (cover.failure != null) return start(path)
+        retryPath = path
         surface?.load(path) ?: run { startPath = path }
     }
 
@@ -273,10 +358,7 @@ class MainActivity : ComponentActivity(), HostActions {
             auth.load()
             withStarted { runtime?.resume() }
         }
-        if (surfaceLost) {
-            surfaceLost = false
-            mountSurface(startPath)
-        }
+        if (surfaceLost) start(startPath) else retryOffline()
         surface?.resume()
         app.display?.phone?.multiWindow = isInMultiWindowMode
         bridge.emit(HostProtocol.Events.APP_FOREGROUND)
@@ -372,6 +454,7 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     override fun appReady() {
+        crashedBeforeReady = false
         lift()
         if (reportedDrawn) return
         reportedDrawn = true
@@ -388,10 +471,6 @@ class MainActivity : ComponentActivity(), HostActions {
             .setPositiveButton(android.R.string.ok, null)
             .setNeutralButton(R.string.about_source) { _, _ -> openExternally(Uri.parse(REPOSITORY)) }
             .show()
-    }
-
-    private fun lift() {
-        launched = true
     }
 
     override fun performHaptic(kind: HostProtocol.Haptic): Boolean {
@@ -576,6 +655,6 @@ class MainActivity : ComponentActivity(), HostActions {
         const val OP_ACCESS_RESTRICTED_SETTINGS = "android:access_restricted_settings"
 
         const val LAUNCH_TIMEOUT_MS = 2_500L
-        const val SPLASH_FADE_MS = 180L
+        const val SLOW_TIMEOUT_MS = 8_000L
     }
 }

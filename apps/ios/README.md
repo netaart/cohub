@@ -15,7 +15,8 @@ capability), so the page never offers it. Nor does it advertise `notifications` 
 Cohub/
   AppDelegate.swift        app and scene entry: links, quick actions, foreground
   Shell.swift              app-wide state: session, inbox, sign-in, where pages go
-  ShellViewController.swift the WKWebView, launch cover, navigation policy, dialogs, crash recovery
+  ShellViewController.swift the WKWebView, when its cover shows, navigation policy, dialogs, crash recovery
+  LaunchCover.swift        the launch screen's twin: the turning C, slow and failed starts
   HostBridge.swift         what each bridge method does here; haptics, About
   SignIn.swift             ASWebAuthenticationSession + PKCE, HTTPS callback
   KeychainStore.swift      the session's only copy, this device only
@@ -49,7 +50,8 @@ xcodegen generate && open Cohub.xcodeproj
 
 The **Cohub** scheme builds prod (`live.cohub.ios`), **Cohub Dev** builds the dev
 environment (`live.cohub.ios.dev`, installs beside prod). iOS 18 or later.
-Regenerate the icon and launch logo from `apps/web/static/favicon.svg` with
+Regenerate the icon and launch logo (whole, and as the tile and C the cover layers)
+from `apps/web/static/favicon.svg` with
 `node apps/desktop/scripts/icons.mjs --ios apps/ios/Cohub/Assets.xcassets`
 (after `pnpm install`).
 
@@ -69,8 +71,9 @@ Android uses).
 - **Start-up.** The first launch after an install clears any Keychain session an
   earlier install left. The session loads while the window is made; the WebView is
   created and starts loading at once, over the last edge color the page reported for
-  the current appearance, under a twin of the launch screen that lifts on `app.ready`
-  or after 2.5 s. A cold start opens a link if there is one, else the last page, else `/`.
+  the current appearance, under a twin of the launch screen whose C turns until
+  `app.ready`; a slow or failed start is explained there (see the bridge doc's Launch
+  section). A cold start opens a link if there is one, else the last page, else `/`.
 - **Pages.** Only the web origin loads in the WebView; other links open in their app or
   Safari. `WKAppBoundDomains` names the origin, which lets its service worker cache the
   app shell. iOS may end a hidden page's process; it reloads where it was when seen again.

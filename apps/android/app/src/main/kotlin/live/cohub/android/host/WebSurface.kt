@@ -25,6 +25,8 @@ import live.cohub.android.runtime.LocalWorkspaces
 interface SurfaceListener {
     fun onExternalLink(url: Uri)
     fun onPageStarted()
+    fun onPageCommitted()
+    fun onLoadFailed(failure: LaunchFailure, url: Uri)
     fun onNavigated(url: String)
     fun onRenderProcessGone(crashed: Boolean)
     fun onShowFileChooser(callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean

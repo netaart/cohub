@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.util.Log
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -40,6 +41,15 @@ class CohubWebViewClient(
         listener.onPageStarted()
     }
 
+    override fun onPageCommitVisible(view: WebView, url: String) {
+        listener.onPageCommitted()
+    }
+
+    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+        if (!request.isForMainFrame) return
+        LaunchFailure.of(error.errorCode)?.let { listener.onLoadFailed(it, request.url) }
+    }
+
     override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
         listener.onNavigated(url)
     }
@@ -53,5 +63,23 @@ class CohubWebViewClient(
 
     private companion object {
         const val TAG = "CohubShell"
+    }
+}
+
+enum class LaunchFailure {
+    OFFLINE,
+    BROKEN,
+    ;
+
+    companion object {
+        fun of(code: Int): LaunchFailure? = when (code) {
+            WebViewClient.ERROR_HOST_LOOKUP,
+            WebViewClient.ERROR_CONNECT,
+            WebViewClient.ERROR_TIMEOUT,
+            WebViewClient.ERROR_IO,
+            -> OFFLINE
+            WebViewClient.ERROR_FAILED_SSL_HANDSHAKE -> BROKEN
+            else -> null
+        }
     }
 }

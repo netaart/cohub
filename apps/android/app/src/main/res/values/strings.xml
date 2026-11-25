@@ -48,4 +48,11 @@
     <string name="about_message">Version %1$s\nWeb %2$s\nCommand line %3$s\n\nOpen source under Apache-2.0.</string>
     <string name="about_cli_unavailable">not included on this device</string>
     <string name="about_source">Source code</string>
+    <string name="launch_loading">Loading</string>
+    <string name="launch_slow">Taking longer than usual</string>
+    <string name="launch_reload">Reload</string>
+    <string name="launch_offline">Can\'t reach Cohub</string>
+    <string name="launch_offline_detail">Cohub will try again when you\'re back online.</string>
+    <string name="launch_failed">Couldn\'t load Cohub</string>
+    <string name="launch_retry">Try again</string>
 </resources>

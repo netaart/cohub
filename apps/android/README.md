@@ -60,6 +60,7 @@ app/src/main/kotlin/live/cohub/android/
   ui/
     SurfaceContainer.kt      holds the WebView, pads insets it misreports
     ShellAppearance.kt       the page's edge color, persisted for cold start
+    LaunchCover.kt           the splash's twin: the turning C, slow and failed starts
 ```
 
 The device Runtime is described in `docs/local-runtime.md` ("Android device").
@@ -87,8 +88,9 @@ A cold start opens a shared link if there is one, otherwise the last in-app page
 (`LastPage`, cleared on sign-out), otherwise `/`. Start-up overlaps its slow
 parts: the WebView provider loads on a background thread
 (`WebViewCompat.startUpWebView`) while credentials decrypt on another, the first
-document is prefetched and the API origin preconnected, and the launch screen
-stays until the page reports its first screen (see the bridge doc's Launch section).
+document is prefetched and the API origin preconnected, and `ui/LaunchCover.kt`
+takes over from the system splash until the page reports its first screen; a slow
+or failed start is explained there (see the bridge doc's Launch section).
 
 `-PcohubEnv=dev|prod` (default prod) selects origins and the Logto native app;
 single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohubGatewayOrigin`,

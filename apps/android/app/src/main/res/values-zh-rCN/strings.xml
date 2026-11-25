@@ -47,4 +47,11 @@
     <string name="about_message">版本 %1$s\n网页版 %2$s\n命令行 %3$s\n\n基于 Apache-2.0 开源。</string>
     <string name="about_cli_unavailable">此设备未包含</string>
     <string name="about_source">源代码</string>
+    <string name="launch_loading">正在加载</string>
+    <string name="launch_slow">加载比平时久</string>
+    <string name="launch_reload">重新加载</string>
+    <string name="launch_offline">无法连接 Cohub</string>
+    <string name="launch_offline_detail">网络恢复后会自动重试。</string>
+    <string name="launch_failed">Cohub 加载失败</string>
+    <string name="launch_retry">重试</string>
 </resources>
