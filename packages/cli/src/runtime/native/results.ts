@@ -1,8 +1,8 @@
 import { readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { RUNTIME_RECOVERY_BATCH_SIZE, runtimeEventSchema, type RuntimeExecutionEvent, type RuntimeMessage, type RuntimePendingExecution, type RuntimeTurnInput } from "@neta-art/cohub";
+import { RUNTIME_RECOVERY_BATCH_SIZE, runtimeEventSchema, type LocalHarness, type RuntimeExecutionEvent, type RuntimeMessage, type RuntimePendingExecution, type RuntimeTurnInput } from "@neta-art/cohub";
 import { atomicRuntimeJson } from "../archive-store.js";
-import { confirmQuiescentProcessGroup } from "../process-group.js";
+import { confirmQuiescentProcessGroup, ProcessCleanupUncertainError, processStart, stopProcessGroup } from "../process-group.js";
 import { readTranscript } from "./adapters.js";
 import type { NativeSession } from "./sessions.js";
 
@@ -17,16 +17,34 @@ type Receipt = {
   turnId: string;
   session: NativeSession;
   events?: RuntimeExecutionEvent[];
+  processGroup?: { id: number; start: string };
   uncertainCleanup?: { processGroupId: number; error: string; confirmedAt?: string };
 };
 
+/** A Turn whose prompt was not sent yet; kept apart from receipts, which earlier Runtimes read. */
+type Dispatched = { requestId: string | null; sessionId: string; turnId: string; harness: LocalHarness };
+
 export type RecoveredResult = { session: NativeSession; events: RuntimeExecutionEvent[] };
+export const NOT_STARTED = "not_started";
+
+async function stopLeftover(receipt: Receipt) {
+  const group = receipt.processGroup;
+  if (group?.start && await processStart(group.id) === group.start) await stopProcessGroup(group.id);
+}
 
 /** One small receipt per Cohub-executed Turn until the server acknowledges its result. */
 export class ExecutionResults {
   constructor(private readonly root: string) {}
 
   private path(sessionId: string) { return join(this.root, "executions", `${sessionId}.json`); }
+  private dispatchedPath(sessionId: string) { return join(this.root, "dispatched", `${sessionId}.json`); }
+
+  private async dispatched(sessionId: string): Promise<Dispatched | null> {
+    try {
+      const value = JSON.parse(await readFile(this.dispatchedPath(sessionId), "utf8")) as Dispatched;
+      return value.sessionId === sessionId ? value : null;
+    } catch (error) { if (missing(error)) return null; throw error; }
+  }
 
   private async read(sessionId: string): Promise<Receipt | null> {
     try {
@@ -46,6 +64,7 @@ export class ExecutionResults {
     const { resolvedTurnIds, settledTurnIds, complete } = input.context;
     const resolved = resolvedTurnIds?.includes(receipt.turnId) === true;
     if (resolved || settledTurnIds?.includes(receipt.turnId)) {
+      if (resolved) await stopLeftover(receipt).catch((error: unknown) => { throw error instanceof ProcessCleanupUncertainError ? new Error(error.message) : error; });
       await rm(this.path(input.sessionId), { force: true });
       return resolved ? receipt.session.path : null;
     }
@@ -53,18 +72,36 @@ export class ExecutionResults {
     throw new Error(`Local turn ${receipt.turnId} has unconfirmed results; reconcile it before continuing`);
   }
 
-  async start(session: NativeSession, input: Pick<RuntimeTurnInput, "sessionId" | "turnId">, requestId: string | null): Promise<void> {
-    await atomicRuntimeJson(this.path(input.sessionId), { version: 2, requestId, sessionId: input.sessionId, turnId: input.turnId, session } satisfies Receipt);
+  async dispatch(input: Pick<RuntimeTurnInput, "sessionId" | "turnId" | "harness">, requestId: string | null): Promise<void> {
+    await atomicRuntimeJson(this.dispatchedPath(input.sessionId), { requestId, sessionId: input.sessionId, turnId: input.turnId, harness: input.harness } satisfies Dispatched);
+  }
+
+  async undispatch(input: Pick<RuntimeTurnInput, "sessionId" | "turnId">): Promise<void> {
+    if ((await this.dispatched(input.sessionId))?.turnId === input.turnId) await rm(this.dispatchedPath(input.sessionId), { force: true });
+  }
+
+  async start(session: NativeSession, input: Pick<RuntimeTurnInput, "sessionId" | "turnId">, requestId: string | null, processGroup: number | null = null): Promise<void> {
+    const start = processGroup != null && process.platform !== "win32" ? await processStart(processGroup) : null;
+    const group = processGroup != null && start ? { processGroup: { id: processGroup, start } } : {};
+    await atomicRuntimeJson(this.path(input.sessionId), { version: 2, requestId, sessionId: input.sessionId, turnId: input.turnId, session, ...group } satisfies Receipt);
+    await rm(this.dispatchedPath(input.sessionId), { force: true });
   }
 
   async record(session: NativeSession, input: Pick<RuntimeTurnInput, "sessionId" | "turnId">, requestId: string | null, events: RuntimeExecutionEvent[], uncertainCleanup?: Receipt["uncertainCleanup"]): Promise<void> {
     await atomicRuntimeJson(this.path(input.sessionId), { version: 2, requestId, sessionId: input.sessionId, turnId: input.turnId, session, events, ...(uncertainCleanup ? { uncertainCleanup } : {}) } satisfies Receipt);
   }
 
-  async recover(input: Pick<RuntimeTurnInput, "sessionId" | "turnId" | "harness">, requestId?: string): Promise<RecoveredResult | null> {
+  async recover(input: Pick<RuntimeTurnInput, "sessionId" | "turnId" | "harness">, requestId?: string): Promise<RecoveredResult | typeof NOT_STARTED | null> {
     const receipt = await this.read(input.sessionId);
-    if (!receipt || receipt.turnId !== input.turnId || receipt.session.harness !== input.harness) return null;
+    if (!receipt || receipt.turnId !== input.turnId) {
+      const dispatched = await this.dispatched(input.sessionId);
+      if (dispatched?.turnId !== input.turnId || dispatched.harness !== input.harness) return null;
+      if (requestId && dispatched.requestId != null && dispatched.requestId !== requestId) throw new Error("Runtime result execution identity mismatch");
+      return NOT_STARTED;
+    }
+    if (receipt.session.harness !== input.harness) return null;
     if (requestId && receipt.requestId != null && receipt.requestId !== requestId) throw new Error("Runtime result execution identity mismatch");
+    const { session } = receipt;
     if (receipt.events) {
       // A quiescent process group upgrades the receipt to confirmed; a live one stays uncertain.
       if (receipt.uncertainCleanup && !receipt.uncertainCleanup.confirmedAt) {
@@ -72,12 +109,12 @@ export class ExecutionResults {
         receipt.uncertainCleanup.confirmedAt = new Date().toISOString();
         await atomicRuntimeJson(this.path(input.sessionId), receipt);
       }
-      return { session: receipt.session, events: receipt.events.map((event) => runtimeEventSchema.parse(event)) };
+      return { session, events: receipt.events.map((event) => runtimeEventSchema.parse(event)) };
     }
-    const events = await this.fromTranscript(receipt);
+    const events = await this.fromTranscript(session, receipt.turnId);
     if (!events) return null;
-    await this.record(receipt.session, receipt, receipt.requestId, events);
-    return { session: receipt.session, events };
+    await this.record(session, receipt, receipt.requestId, events);
+    return { session, events };
   }
 
   async acknowledge(sessionId: string, turnId: string): Promise<void> {
@@ -91,22 +128,33 @@ export class ExecutionResults {
     return receipt ? [receipt.turnId] : [];
   }
 
-  async *pendingBatches(): AsyncGenerator<RuntimePendingExecution[]> {
-    const names = await readdir(join(this.root, "executions")).catch((error) => { if (missing(error)) return []; throw error; });
-    let batch: RuntimePendingExecution[] = [];
-    for (const name of names) {
-      if (!name.endsWith(".json")) continue;
-      const receipt = await this.read(name.slice(0, -5)).catch(() => null);
-      if (!receipt) continue;
-      batch.push({ sessionId: receipt.sessionId, turnId: receipt.turnId, harness: receipt.session.harness });
-      if (batch.length >= RUNTIME_RECOVERY_BATCH_SIZE) { yield batch; batch = []; }
-    }
-    if (batch.length) yield batch;
+  async unconfirmed(): Promise<boolean> {
+    for (const name of await this.names("executions")) if (await this.read(name).catch(() => null)) return true;
+    return false;
   }
 
-  private async fromTranscript(receipt: Receipt): Promise<RuntimeExecutionEvent[] | null> {
-    const transcript = await readTranscript(receipt.session.path, receipt.session.harness).catch(() => null);
-    const turn = transcript?.turns.find((entry) => entry.cloudTurnId === receipt.turnId);
+  async *pendingBatches(): AsyncGenerator<RuntimePendingExecution[]> {
+    const pending: RuntimePendingExecution[] = [];
+    for (const name of await this.names("executions")) {
+      const receipt = await this.read(name).catch(() => null);
+      if (receipt) pending.push({ sessionId: receipt.sessionId, turnId: receipt.turnId, harness: receipt.session.harness });
+    }
+    const started = new Set(pending.map((execution) => execution.sessionId));
+    for (const name of await this.names("dispatched")) {
+      const dispatched = started.has(name) ? null : await this.dispatched(name).catch(() => null);
+      if (dispatched) pending.push({ sessionId: dispatched.sessionId, turnId: dispatched.turnId, harness: dispatched.harness });
+    }
+    for (let index = 0; index < pending.length; index += RUNTIME_RECOVERY_BATCH_SIZE) yield pending.slice(index, index + RUNTIME_RECOVERY_BATCH_SIZE);
+  }
+
+  private async names(directory: string) {
+    const names = await readdir(join(this.root, directory)).catch((error) => { if (missing(error)) return []; throw error; });
+    return names.filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5));
+  }
+
+  private async fromTranscript(session: NativeSession, turnId: string): Promise<RuntimeExecutionEvent[] | null> {
+    const transcript = await readTranscript(session.path, session.harness).catch(() => null);
+    const turn = transcript?.turns.find((entry) => entry.cloudTurnId === turnId);
     const result = turn?.result;
     if (!result || result.status === "interrupted" || turn !== transcript?.turns.at(-1)) return null;
     const messages = result.messages.filter((message) => message.content.length);

@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import {
   isModelThinkingLevel,
   thinkingLevelMapFor,
@@ -30,7 +28,8 @@ import {
   readAntigravityTranscript,
 } from "./antigravity-transcript.js";
 import { projectChainedSession } from "./chained-projection.js";
-import { array, closeHost, harnessCommand, type ImageBlock, localStateDirectory, missing, text, turnEnvironment, watchHost, writeImage } from "./process.js";
+import { fitHandoff, type HandoffBudget, imageChars } from "./handoff-budget.js";
+import { array, closeHost, harnessCommand, type ImageBlock, probe, localStateDirectory, missing, text, turnEnvironment, writeImage } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn, LocalHarnessAdapter } from "./types.js";
 
 const BINARY = "agy";
@@ -46,7 +45,13 @@ const STARTUP_TIMEOUT_MS = 60_000;
 const ABORT_ESCALATION_MS = 5_000;
 /** After input closes, the CLI finishes writing its transcript; it is reaped when it does not exit by then. */
 const FLUSH_TIMEOUT_MS = 10_000;
-const MAX_HANDOFF_CHARS = 80_000;
+const TOOL_RESULT_CHARS = 1_000;
+const BLOCK_FRAME_CHARS = 16;
+const HANDOFF_BUDGET: HandoffBudget = {
+  chars: 80_000,
+  blockChars: (block) => BLOCK_FRAME_CHARS + (block.type === "system_note" ? block.text.length : summarizeBlocks([block]).length) + imageChars(block),
+};
+const CLIP_HEAD_CHARS = 4_000;
 /**
  * Deny rules win over every mode, allow rule and `--dangerously-skip-permissions`. `--settings` replaces
  * the user's own deny list, so a read-only Turn carries it along.
@@ -55,11 +60,7 @@ const READ_ONLY_DENY = ["write_file(*)", "command(*)", "mcp(*)", "read_url(*)", 
 /** Headless mode cannot ask: anything needing approval is denied. Cohub only chooses how much is pre-approved. */
 const APPROVAL_MODES: ApprovalMode[] = ["inherit", "full_access", "read_only"];
 
-const execute = promisify(execFile);
-
-async function command(executable: string, args: string[], cwd: string, timeout: number) {
-  return await execute(...harnessCommand(executable, args, cwd), { cwd, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
-}
+const command = (executable: string, args: string[], cwd: string, timeout: number) => probe(harnessCommand(executable, args, cwd), cwd, timeout);
 
 /** The CLI's own explanation, such as asking to sign in, rather than "Command failed". */
 function commandError(error: unknown): Error {
@@ -217,7 +218,8 @@ async function readHandoff(path: string, directory: () => Promise<string>): Prom
   }
   if (!lines.length) return null;
   const joined = lines.join("\n\n");
-  const clipped = joined.length > MAX_HANDOFF_CHARS ? `...(earlier history truncated)\n\n${joined.slice(-MAX_HANDOFF_CHARS)}` : joined;
+  const limit = HANDOFF_BUDGET.chars;
+  const clipped = joined.length > limit ? `${joined.slice(0, CLIP_HEAD_CHARS)}\n\n...(${joined.length - limit} characters left out)...\n\n${joined.slice(-(limit - CLIP_HEAD_CHARS))}` : joined;
   return `<${HANDOFF_TAG}>\nEarlier turns of this Cohub chat, before it continued in Antigravity (open listed images with read_file):\n\n${clipped}\n</${HANDOFF_TAG}>`;
 }
 
@@ -228,7 +230,7 @@ function summarizeBlocks(blocks: ContentBlock[]): string {
     else if (block.type === "tool_use") parts.push(`[tool_use:${block.name} ${JSON.stringify(block.input)}]`);
     else if (block.type === "tool_result") {
       const body = typeof block.content === "string" ? block.content : block.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
-      parts.push(`[tool_result:${block.is_error ? "error" : "ok"} ${body.slice(0, 1000)}]`);
+      parts.push(`[tool_result:${block.is_error ? "error" : "ok"} ${body.slice(0, TOOL_RESULT_CHARS)}]`);
     }
   }
   return parts.join("\n");
@@ -289,7 +291,7 @@ async function runAntigravity(executor: Executor, turn: HarnessTurn): Promise<Ha
     signal.throwIfAborted();
     const rpc = new JsonRpcProcess(...harnessCommand(executor.executables.antigravity || BINARY, args, executor.cwd), executor.cwd, "stream", turnEnvironment(input));
     host = rpc;
-    watchHost(rpc, executor.diagnostics, context);
+    turn.spawned(rpc);
     let ready: (conversation: string) => void = () => {};
     let fail: (error: unknown) => void = () => {};
     let finish: (error?: unknown) => void = () => {};
@@ -394,7 +396,7 @@ export const antigravityHarness: LocalHarnessAdapter = {
     // Only a staging file: projected history is handed over inside the first prompt, never as Antigravity's own state.
     path: (nativeSessionId) => join(localStateDirectory(), "antigravity-handoff", `${nativeSessionId}.jsonl`),
     startsWithoutFile: true,
-    project: (input) => projectChainedSession(input, "antigravity", { id: "cohubId", parent: "cohubParentId" }, (segment) => {
+    project: (input) => projectChainedSession(fitHandoff(input, HANDOFF_BUDGET), "antigravity", { id: "cohubId", parent: "cohubParentId" }, (segment) => {
       const summary = summarizeBlocks(segment.blocks);
       // Embedded images, uploaded or returned by a tool; URL images are omitted, as for Cursor, rather than fetched.
       const images = segment.blocks.flatMap((block) => block.type === "tool_result" && Array.isArray(block.content) ? block.content : [block])

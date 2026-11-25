@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join, resolve, win32 } from "node:path";
+import { promisify } from "node:util";
 import type { ContentBlock, RuntimeTurnInput } from "@neta-art/cohub";
 import { RpcProcessClosedError, type JsonRpcProcess } from "../json-rpc.js";
 import { ProcessCleanupUncertainError } from "../process-group.js";
@@ -12,6 +14,8 @@ import type { HarnessResult } from "./types.js";
 export const text = (value: unknown) => typeof value === "string" ? value : "";
 export const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 export const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
+/** Epoch seconds; larger values (milliseconds) are rejected. */
+export const epochSecondsIso = (value: unknown) => typeof value === "number" && value > 0 && value < 253_402_300_800 ? new Date(value * 1000).toISOString() : null;
 
 /** Aborted streams leave tool calls with an empty id or name. */
 export const identifiable = (value: unknown): value is string => typeof value === "string" && value.length > 0;
@@ -50,6 +54,13 @@ export function harnessCommand(binary: string, args: string[], cwd: string): [st
   throw new Error(`Cannot run ${path} without a shell; pass its executable option with an .exe or Node script`);
 }
 
+const execute = promisify(execFile);
+
+/** A discovery command: mise shims never install tools for it, and it is killed at its timeout. */
+export function probe(command: [string, string[]], cwd: string, timeout: number, env: NodeJS.ProcessEnv = process.env) {
+  return execute(...command, { cwd, encoding: "utf8", timeout, killSignal: "SIGKILL", maxBuffer: 4 * 1024 * 1024, windowsHide: true, env: { ...env, MISE_OFFLINE: "1" } });
+}
+
 /** Private per-user state shared by this machine's Runtimes, outside any harness's own data. */
 export const localStateDirectory = () => join(process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state"), "cohub");
 
@@ -73,12 +84,13 @@ export async function writeImage(block: ImageBlock, directory: string, name: str
   return path;
 }
 
-export function watchHost(host: JsonRpcProcess, diagnostics: RuntimeDiagnostics | undefined, context: RuntimeDiagnosticContext | undefined) {
-  if (!diagnostics) return;
-  host.onFailure((error) => {
+export function watchHost(host: JsonRpcProcess, diagnostics: RuntimeDiagnostics | undefined, context: RuntimeDiagnosticContext | undefined): () => void {
+  if (!diagnostics) return () => undefined;
+  const offFailure = host.onFailure((error) => {
     if (!(error instanceof RpcProcessClosedError)) diagnostics.log("error", "harness.rpc_process_failed", { error: serializeDiagnosticError(error) }, { ...context, component: "harness" });
   });
-  host.onTimeout((method, timeoutMs) => diagnostics.log("error", "harness.rpc_timeout", { method, timeoutMs }, { ...context, component: "harness" }));
+  const offTimeout = host.onTimeout((method, timeoutMs) => diagnostics.log("error", "harness.rpc_timeout", { method, timeoutMs }, { ...context, component: "harness" }));
+  return () => { offFailure(); offTimeout(); };
 }
 
 /** Close a harness process Cohub started. An unconfirmable cleanup marks the result uncertain; it never masks it. */

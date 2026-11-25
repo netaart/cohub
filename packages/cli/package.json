@@ -26,6 +26,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsdown && node --import tsx scripts/stamp-build.ts",
     "startup": "node scripts/startup.mjs",
+    "record:claude-replay": "node --import tsx scripts/record-claude-replay.ts",
     "verify:sandboxd": "node --import tsx scripts/verify-sandboxd-release.ts",
     "verify:rtc": "node --import tsx scripts/verify-rtc-release.ts",
     "prepublishOnly": "pnpm verify:sandboxd && pnpm verify:rtc",

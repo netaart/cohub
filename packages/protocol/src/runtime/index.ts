@@ -276,6 +276,8 @@ export type RuntimeMessage = {
   usage?: Usage | null;
   stopReason?: string | null;
   errorMessage?: string | null;
+  /** The harness refused the Turn for its account's usage or rate limit; `resetAt` when it said. */
+  usageLimit?: { resetAt: string | null } | null;
 };
 
 export type RuntimeExecutionEvent =
@@ -286,7 +288,7 @@ export type RuntimeExecutionEvent =
   | { type: "turn.end"; message: RuntimeMessage; archive?: HarnessArchive | null; resume: "native" | "restored" | "handoff" | "new" }
   | { type: "context.required"; pendingTurnIds?: string[] }
   | { type: "turn.acknowledged" }
-  | { type: "turn.error"; message: string; uncertain?: boolean };
+  | { type: "turn.error"; message: string; uncertain?: boolean; notStarted?: boolean };
 
 const id = z.string().uuid();
 const ordinal = z.number().int().min(0).max(100_000);
@@ -303,6 +305,7 @@ const runtimeMessageSchema = z.object({
   usage: usageSchema.nullable().optional(),
   stopReason: z.string().max(64).nullable().optional(),
   errorMessage: z.string().max(16_384).nullable().optional(),
+  usageLimit: z.object({ resetAt: z.string().datetime().nullable() }).nullable().optional(),
 });
 export const runtimeEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("message.start"), ordinal }),
@@ -312,7 +315,7 @@ export const runtimeEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn.end"), message: runtimeMessageSchema, archive: harnessArchiveSchema.nullable().optional(), resume: z.enum(["native", "restored", "handoff", "new"]) }),
   z.object({ type: z.literal("context.required"), pendingTurnIds: z.array(id).max(LOCAL_HARNESSES.length).optional() }),
   z.object({ type: z.literal("turn.acknowledged") }),
-  z.object({ type: z.literal("turn.error"), message: z.string().max(16_384), uncertain: z.boolean().optional() }),
+  z.object({ type: z.literal("turn.error"), message: z.string().max(16_384), uncertain: z.boolean().optional(), notStarted: z.boolean().optional() }),
 ]);
 export const runtimeClientFrameSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runtime.hello"), version: z.literal(RUNTIME_PROTOCOL_VERSION), spaceId: id, token: z.string().min(1).max(16_384), capabilities: runtimeCapabilitiesSchema, client: runtimeClientSchema.optional() }).strict(),

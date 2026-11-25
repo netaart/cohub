@@ -19,6 +19,7 @@ import { NativeSessions } from "./sessions.js";
 import { codexTranslator, LiveProgress, piTranslator, type Translator } from "./translate.js";
 import { nativeWebSocketTransport } from "./transport.js";
 import { readRuntimeSpaceBindings } from "../space-binding.js";
+import { WarmHosts } from "../harnesses/warm-hosts.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
 /** Streamed previews reach the web at most this often. */
@@ -130,6 +131,7 @@ export class NativeRuntime {
       pi: this.pi,
       codex: this.codex,
       approvals: this.approvals,
+      warm: new WarmHosts(),
       piExtension: piExtensionSource(),
       diagnostics: options.diagnostics,
     };
@@ -218,7 +220,7 @@ export class NativeRuntime {
   async close(signal: AbortSignal): Promise<void> {
     for (const stream of this.streams.values()) stream.progress.dispose();
     for (const preview of this.filePreviews.values()) { preview.progress.dispose(); if (preview.timer) clearTimeout(preview.timer); }
-    await Promise.allSettled([this.pi.close(), this.codex.close(), this.ingest.close(signal)]);
+    await Promise.allSettled([this.pi.close(), this.codex.close(), this.executor.warm.close(), this.ingest.close(signal)]);
   }
 
   private sink(harness: Harness, nativeSessionId: string) {

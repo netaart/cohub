@@ -1,20 +1,20 @@
-import { execFile } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
-import { promisify, stripVTControlCharacters } from "node:util";
+import { stripVTControlCharacters } from "node:util";
 import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
 import { describeError } from "../../network-error.js";
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import type { Executor } from "../native/execution.js";
 import type { TranscriptState } from "../native/ingest.js";
 import { projectChainedSession, projectionToolId } from "./chained-projection.js";
+import { fitHandoff } from "./handoff-budget.js";
 import {
   acceptsCursorDirectory, acceptsCursorTranscript, cursorChatsRoot, cursorConfigDirectory, cursorProjectsRoot, cursorSessionHeader, cursorTranscriptPath, readCursorTranscript,
 } from "./cursor-transcript.js";
-import { array, harnessCommand, harnessExecutableCandidates, localStateDirectory, missing, text, turnEnvironment, watchHost, writeImage } from "./process.js";
+import { array, harnessCommand, harnessExecutableCandidates, localStateDirectory, missing, probe, text, turnEnvironment, writeImage } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn, LocalHarnessAdapter } from "./types.js";
 
 const BINARY = "cursor-agent";
@@ -35,6 +35,7 @@ const FLUSH_TIMEOUT_MS = 10_000;
 /** The prompt is an argument: Linux caps one at 128 KiB, Windows a whole command line at 32K characters. */
 const MAX_PROMPT_BYTES = process.platform === "win32" ? 30_000 : 120_000;
 const HISTORY_KINDS = ["user", "assistant", "tool"];
+const HANDOFF_BUDGET = { chars: 160_000 };
 
 const VERSION_DIRECTORY = /^(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-\d{2}-\d{2}-\d{2})?-[a-f0-9]+$/;
 
@@ -74,10 +75,9 @@ export function cursorCommand(executable: string, args: string[], cwd: string): 
   };
 }
 
-const exec = promisify(execFile);
 const command = (executable: string, args: string[], cwd: string, timeout: number) => {
   const run = cursorCommand(executable, args, cwd);
-  return exec(...run.command, { cwd, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024, windowsHide: true, env: { ...process.env, ...run.env, NO_COLOR: "1" } });
+  return probe(run.command, cwd, timeout, { ...process.env, ...run.env, NO_COLOR: "1" });
 };
 const exists = (path: string) => access(path).then(() => true, () => false);
 
@@ -425,7 +425,7 @@ async function runCursor(executor: Executor, turn: HarnessTurn): Promise<Harness
     try {
       const run = cursorCommand(executor.executables.cursor || BINARY, args, executor.cwd);
       host = new JsonRpcProcess(...run.command, executor.cwd, "stream", { ...run.env, ...turnEnvironment(input) });
-      watchHost(host, executor.diagnostics, context);
+      turn.spawned(host);
       const child = host;
       await new Promise<void>((resolve, reject) => {
         let escalation: ReturnType<typeof setTimeout> | undefined;
@@ -505,7 +505,7 @@ export const cursorHarness: LocalHarnessAdapter = {
     // Records are Cursor's ConversationHistory messages, turned into the history file when the Turn starts.
     project: (input) => {
       const names = new Map<string, string>();
-      return projectChainedSession(input, "cursor", { id: "cohubId", parent: "cohubParentId" }, (segment) => {
+      return projectChainedSession(fitHandoff(input, HANDOFF_BUDGET), "cursor", { id: "cohubId", parent: "cohubParentId" }, (segment) => {
         if (segment.role === "user" && segment.blocks.some((block) => block.type === "tool_result")) {
           return segment.blocks.flatMap((block) => block.type !== "tool_result" ? [] : [{ tool: {
             toolCallId: projectionToolId(block.tool_use_id), toolName: names.get(block.tool_use_id) ?? "tool", isError: block.is_error ?? false,

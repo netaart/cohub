@@ -22,7 +22,7 @@ import {
 import { describeError } from "../network-error.js";
 import { CLI_VERSION } from "../version.js";
 import { executeTurn, type Executor, type HarnessResult } from "./native/execution.js";
-import { ContextRequiredError } from "./native/results.js";
+import { ContextRequiredError, NOT_STARTED } from "./native/results.js";
 import { SizeLimitError } from "./native/transcript.js";
 import { ProcessCleanupUncertainError } from "./process-group.js";
 import {
@@ -30,6 +30,8 @@ import {
   type RuntimeDiagnosticContext,
   type RuntimeDiagnostics,
 } from "./diagnostics.js";
+
+const NOT_STARTED_ERROR = { type: "turn.error", notStarted: true, message: "The local harness never received this message; nothing ran" } as const;
 
 export type Execution = {
   controller: AbortController;
@@ -393,7 +395,8 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
     let saved: Awaited<ReturnType<typeof options.executor.results.recover>> = null;
     try { saved = await options.executor.results.recover(input, executionRequestId); }
     catch (error) { log("error", "runtime.recovery_failed", { error: serializeDiagnosticError(error) }, context); }
-    if (saved) for (const event of saved.events) send({ type: "runtime.event", requestId, event });
+    if (saved === NOT_STARTED) send({ type: "runtime.event", requestId, event: NOT_STARTED_ERROR });
+    else if (saved) for (const event of saved.events) send({ type: "runtime.event", requestId, event });
     else send({ type: "runtime.event", requestId, event: { type: "turn.error", uncertain: true, message: "Result unavailable; files retained" } });
   };
   let closeHandled = false;
@@ -638,6 +641,11 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
             }
             const saved = await options.executor.results.recover(identity);
             recovery.controller.signal.throwIfAborted();
+            if (saved === NOT_STARTED) {
+              send({ type: "runtime.event", requestId: frame.requestId, event: NOT_STARTED_ERROR });
+              if (active.get(frame.requestId) === recovery) active.delete(frame.requestId);
+              return;
+            }
             const last = saved?.events.at(-1);
             if (!saved || last?.type !== "turn.end") throw new Error("No confirmed result");
             recovery.result = { session: saved.session, event: last };
@@ -746,7 +754,12 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
       execution.promise = (async () => {
         try {
           const saved = await options.executor.results.recover(frame.input, frame.requestId);
-          if (saved) {
+          if (saved === NOT_STARTED && (frame.resumeOnly || repeated)) {
+            emit(NOT_STARTED_ERROR);
+            active.delete(frame.requestId);
+            return;
+          }
+          if (saved && saved !== NOT_STARTED) {
             const last = saved.events.at(-1);
             if (last?.type !== "turn.end") throw new Error("Incomplete saved Runtime result");
             execution.result = { session: saved.session, event: last };
@@ -776,12 +789,11 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
           }
           emit(execution.result.event);
         } catch (error) {
-          log("error", "runtime.turn_failed", {
-            uncertain: Boolean(execution.result) || frame.resumeOnly === true || error instanceof ProcessCleanupUncertainError,
-            error: serializeDiagnosticError(error),
-          }, context);
+          const uncertain = Boolean(execution.result) || frame.resumeOnly === true || error instanceof ProcessCleanupUncertainError;
+          log("error", "runtime.turn_failed", { uncertain, error: serializeDiagnosticError(error) }, context);
           try {
-            emit({ type: "turn.error", message: describeError(error), uncertain: !!execution.result || frame.resumeOnly === true || error instanceof ProcessCleanupUncertainError });
+            emit({ type: "turn.error", message: describeError(error), uncertain });
+            if (!uncertain && socket.readyState === WebSocket.OPEN) await options.executor.results.undispatch(frame.input).catch(() => undefined);
           } catch {
             // Native files remain for recovery.
           }

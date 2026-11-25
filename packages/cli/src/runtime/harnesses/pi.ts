@@ -10,7 +10,7 @@ import { PI_DISCONNECTED, type PiSessionLink } from "../native/pi-link.js";
 import { copyNativeArchive } from "../native/archive.js";
 import { readFirstRecord, readNativeTranscript } from "../native/transcript.js";
 import { piTranslator } from "../native/translate.js";
-import { array, closeHost, harnessCommand, inlineImage, text, turnEnvironment, watchHost } from "./process.js";
+import { array, closeHost, harnessCommand, inlineImage, text, turnEnvironment } from "./process.js";
 import type { HarnessRun, HarnessTurn, LocalHarnessAdapter } from "./types.js";
 
 /** A stop request that the harness does not honour within this long ends its private process. */
@@ -39,7 +39,7 @@ function piSessionPath(nativeSessionId: string, cwd: string): string {
 }
 
 async function runPi(executor: Executor, turn: HarnessTurn): Promise<HarnessRun> {
-  const { input, signal, context } = turn;
+  const { input, signal } = turn;
   // Cohub drives every Pi through its extension, which needs the control socket and a recent Pi.
   if (executor.pi.unavailable) throw new Error(executor.pi.unavailable);
   const prepared = await executor.sessions.prepare({
@@ -56,7 +56,7 @@ async function runPi(executor: Executor, turn: HarnessTurn): Promise<HarnessRun>
   try {
     if (!link) {
       host = new JsonRpcProcess(...harnessCommand(executor.executables.pi || "pi", ["--mode", "rpc", "--session", session.path, "-e", executor.piExtension], executor.cwd), executor.cwd, "pi", turnEnvironment(input));
-      watchHost(host, executor.diagnostics, context);
+      turn.spawned(host);
       const rpc = host;
       // Nobody is at this Pi's terminal to answer an extension's question.
       rpc.onEvent((event) => {

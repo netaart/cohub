@@ -5,6 +5,7 @@ import { RUNTIME_MAX_FRAME_BYTES, runtimeEventSchema, runtimeReadySchema, type R
 
 export class RuntimeExecutionUncertainError extends Error {}
 export class RuntimeResultUnavailableError extends RuntimeExecutionUncertainError {}
+export class RuntimeNotStartedError extends Error {}
 export type RuntimeExchangeOptions = {
   input: RuntimeTurnInput;
   endpoint: () => Promise<string>;
@@ -102,7 +103,7 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
             if (frame.type !== "runtime.event" || frame.requestId !== requestId) throw new Error("Runtime event identity mismatch");
             const event = runtimeEventSchema.parse(frame.event);
             if (event.type === "turn.error") {
-              finalError = event.uncertain ? new RuntimeResultUnavailableError(event.message) : new Error(event.message);
+              finalError = event.notStarted ? new RuntimeNotStartedError(event.message) : event.uncertain ? new RuntimeResultUnavailableError(event.message) : new Error(event.message);
               finish(finalError);
               return;
             }

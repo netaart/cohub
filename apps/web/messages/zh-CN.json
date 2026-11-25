@@ -1527,6 +1527,8 @@
 	"chat_bg_bash_task": "后台 Bash 任务",
 	"chat_bg_bash_task_id": "后台 Bash 任务 {id}",
 	"chat_bg_task_label": "后台任务",
+	"chat_usage_limit_header": "已达用量上限",
+	"chat_usage_limit_resets": "{time} 恢复可用",
 	"chat_error_header": "错误",
 	"chat_copy_message": "复制消息",
 	"chat_fork_here": "从此处派生",

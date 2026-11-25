@@ -86,7 +86,13 @@ Live control of terminal sessions stays harness-specific: the Pi extension and C
 适配器必须实现 `transcript` 读取器：每个 Harness 都同步终端会话，并支持导入与无回执恢复。
 CLI 参数、Web 选择器、API 校验与归档结构均由注册表派生。终端会话的实时控制仍由 Pi 扩展与 Codex 共享 app-server 各自实现。
 
-Claude Code and WorkBuddy run one stream-json process per Turn (`-p --input-format stream-json`). Full
+Claude Code and WorkBuddy run a stream-json process (`-p --input-format stream-json`). WorkBuddy's ends
+with its Turn. Claude Code takes one prompt after another on the same input. After a clean Turn, its process
+is kept for the next Turn of that Session, which then skips the cold start: it must continue the same native
+file with the same model, effort and permission flags. Otherwise, after a stop or error, or once the Turn
+started background work (which would wake an idle process), the process ends as before. A kept process is
+closed when it starts output of its own, after two minutes idle, when more than four are kept, and when the
+Runtime stops. A Session never has two. Full
 access maps to `--permission-mode acceptEdits`, except that a Claude Code offering approval modes
 follows its own settings when no mode is chosen (below). Read-only maps to `plan` with only the Read, Glob and Grep
 tools and no MCP servers, since plan mode still honours the user's allow rules. Other tools follow the
@@ -126,6 +132,11 @@ prompt no other user line follows) starts a Turn, keyed by the file's checksum t
 `turn_ended` settles it; tool results, model names and exact times are not recorded there. The ledger
 records the Turn Cohub is running, as for CodeBuddy.
 
+A Turn that Claude Code, WorkBuddy or Codex refuse for the account's usage or rate limit reports it, with
+the time the limit resets when the harness says (`rate_limit_event`, `account/rateLimits/updated`), and the
+Chat shows "Usage limit reached" with that time. Discovery probes (`--help`, `--version`, model lists) run
+with `MISE_OFFLINE=1`, so a mise shim never installs a tool to answer them, and are killed at their timeout.
+
 Antigravity runs one headless `agy --input-format stream-json --output-format stream-json` process per
 Turn, the CLI's own scripting interface. Discovery checks `--help` for the flags a Turn uses and lists
 `agy models`; effort variants (`gemini-4-neon-high`) become one model whose thinking levels are passed as
@@ -142,7 +153,15 @@ and protobuf, so Turns stage no archive. Terminal and desktop chats sync read-on
 with the project and sub-agents read from `conversation_summaries.db`; Cohub's own Turn is named by the step
 index its run reported.
 
-Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`（提供审批模式的 Claude Code 未选择模式时沿用本机设置，见下）；只读映射为 `plan`，
+History Cursor and Antigravity receive this way is fitted to a budget (Cursor 160K characters, Antigravity
+80K of the text it renders, labels and shortened tool results included). Turns stay whole, so tool calls keep their
+results: the opening Turn (after the latest compaction, its summary) and the newest Turns that fit, the newest
+always. Embedded images count; URL images, which are not handed over, do not. Where Turns are left out, the
+next kept Turn opens with a note saying how many and how to page back to them with `cohub spaces turns ls`.
+A newest Turn that alone exceeds Antigravity's budget keeps its start, with that note, and its end. Only the
+handover is fitted; the Session keeps every Turn.
+
+Claude Code 与 WorkBuddy 以 stream-json 进程运行 Turn（Claude Code 的进程在干净结束的 Turn 后保留给同一 Session 的下一个 Turn，续写同一原生文件且模型、思考等级、权限参数不变时直接复用，省去冷启动；停止、出错或启动了后台任务时照常结束，空闲两分钟、自行开始输出、保留超过四个或 Runtime 停止时关闭）：完整权限映射为 `acceptEdits`（提供审批模式的 Claude Code 未选择模式时沿用本机设置，见下）；只读映射为 `plan`，
 且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则；WorkBuddy 的权限请求一律拒绝，
 Claude Code 的权限请求转为审批卡（见下）。云端历史投影到原生会话文件并通过 `--resume` 续接。
 启动时检查 CLI 是否提供 Turn 所需的全部参数，旧版或无关的同名程序会被跳过。`default` 模型不传 `--model`，沿用用户自己的配置；思考等级映射为 `--effort`。
@@ -164,6 +183,10 @@ Windows 上 Cohub 不经 `cursor-agent.cmd`（会经 cmd.exe 与 PowerShell 转�
 `turn_ended` 结算；该文件不记录工具结果、模型和精确时间。Cohub 正在执行的 Turn 由账本记录。
 
 Antigravity 每个 Turn 启动一个 headless 进程 `agy --input-format stream-json --output-format stream-json`（CLI 自带的脚本接口）。启动检查确认 `--help` 含 Turn 所需参数并读取 `agy models`；同一模型的各档 effort（如 `gemini-4-neon-high`）合并为一个模型，思考等级经 `--effort` 传入。CLI 在读取 prompt 前就报告对话 id，Turn 直接对应真实的会话记录；后续 Turn 用 `--conversation` 续接。新会话、跨 Harness 接续，以及 Antigravity 已不存在的对话，都把云端历史放在首条 prompt 的 `<cohub_session_history>` 块中。图片作为临时文件传入，由 Agent 用 `read_file` 打开。headless 模式无法询问，需要审批的操作一律拒绝，因拒绝而结束的 Turn 会报告被拒绝的工具。审批模式：沿用本机设置、完全访问（`--dangerously-skip-permissions`）、只读；只读经 `--settings` 增加文件写入、命令、MCP 与网页的拒绝规则（该参数会替换拒绝列表，因此保留用户自己的拒绝规则），拒绝规则在任何模式下都优先。停止 Turn 发送 SIGINT。原生状态由 SQLite 与 protobuf 组成，因此不生成归档。终端与桌面端对话从 `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`（及 `~/.gemini/antigravity`）只读同步，项目目录与子 Agent 从 `conversation_summaries.db` 读取；Cohub 自己的 Turn 按其运行报告的步骤序号识别。
+
+Cursor 与 Antigravity 以上述方式带入的历史按预算挑选（Cursor 16 万字符，Antigravity 按渲染后的文本计 8 万字符，含角色标签与截短后的工具结果）。Turn 整体保留，工具调用不与结果分离：保留开头的 Turn（有压缩时为最近一次压缩的摘要）和放得下的最新 Turn，最新一个始终保留。内嵌图片计入预算，不会带入的 URL 图片不计。被略去的位置，下一个保留的 Turn 开头会注明略去几个，以及如何用 `cohub spaces turns ls` 从该处往前翻页读取。单个最新 Turn 本身超出 Antigravity 预算时，保留其开头（含上述说明）与结尾。只影响带入的内容，Session 本身保留全部 Turn。
+
+Claude Code、WorkBuddy 与 Codex 因账号用量或速率上限拒绝 Turn 时会如实上报，并在 Harness 给出时附上恢复时间，对话中显示“已达用量上限”及恢复时间。发现阶段的探测（`--help`、`--version`、模型列表）带 `MISE_OFFLINE=1` 运行，mise shim 不会为此安装工具，超时即强制结束。
 
 ## Native clients / 原生客户端
 
@@ -329,7 +352,8 @@ silence it asks for attention, since a killed client writes no end record, and t
 stop. It is never guessed finished.
 
 **Tool environment.** Tools find their Space, Session and Turn in `COHUB_SPACE_ID`,
-`COHUB_SESSION_ID` and `COHUB_TURN_ID`. A process Cohub starts gets all three. A connected Pi runs
+`COHUB_SESSION_ID` and `COHUB_TURN_ID`. A process Cohub starts for one Turn gets all three; a Claude Code
+process kept across Turns gets Space and Session. A connected Pi runs
 many Turns, so the extension updates its process environment per Turn, for web and terminal Turns
 alike. A shared Codex thread carries Space and Session in its thread config; per-Turn ids are not
 possible there. When a request names a Session but no Turn, the API fills in the Session's running
@@ -650,8 +674,8 @@ it does not collect new queued inputs or replay models/tools.
 - The first head response includes a ready archive reference when available, avoiding an extra cold-resume round trip.
 - A missing or outdated projection requests history over the same WS connection.
 - Same-Harness native files are validated and reused. A matching archive can
-  restore a missing native file. Pi handoff writes durable messages into its native session file, while
-  Codex handoff has no native history channel yet and starts without history (durable history stays in the platform).
+  restore a missing native file. Pi and Codex handoffs write durable messages into a native session file
+  (for Codex a legacy-history rollout that `thread/resume` loads), and both compact long history themselves.
 - Codex paginated threads depend on a private SQLite index. Archive import creates
   a separate legacy-history projection and uses native `thread/fork(path)`;
   the original archive and thread are preserved. The private database is never uploaded.
@@ -692,6 +716,16 @@ A receipt never blocks a Harness permanently: once the server reports its Turn a
 receipt is released. A receipt whose result was lost is rebuilt from the native file, found by the
 Turn's Cohub marker; an unfinished or interrupted Turn is never guessed complete. Only Turns the
 server still considers active require explicit confirmation. Native files are never deleted.
+
+A dispatched Turn is marked before preparation, and its receipt replaces the mark right before its prompt is
+sent. The mark lives beside the receipts, where an earlier Runtime version never reads it. A Runtime lost in
+between has proof that nothing ran: recovery answers `notStarted`, and
+the Turn simply fails without asking for a stop confirmation, so its message can be sent again, and
+`runtime down` is not held by it. A Turn that fails before it starts drops its mark once the failure is sent. Without the mark the outcome stays unknown, as before. The receipt also records the process group of a
+harness Cohub started (not on Windows). A harness a lost Runtime left running finishes on its own; once a
+manager confirms the stop, the next Turn of that Session stops the group first, but only while its leader is
+provably the recorded process: still running and started no later than the record, in the same boot. A group
+whose leader has exited, or whose id may have been reused, is left alone.
 
 Transport uncertainty is surfaced immediately on the active Session. Reconnect and
 bounded queue retries can still recover a saved result; an explicit missing-result response
@@ -758,6 +792,16 @@ No production-bucket writes are performed by the automated tests.
 Deploy Worker, API, Gateway and every Agent instance
 before enabling the updated Web/CLI. Worker must understand local usage before local
 results arrive, so they cannot be charged as cloud executions.
+
+Claude Code's stream-json output is replayed from frames a real CLI printed against a deterministic
+loopback model (`tests/fixtures/replay/claude.ndjson`), so a change in what the CLI prints fails a test.
+Re-record after upgrading the CLI, passing the Claude Code binary itself (for a native install,
+`~/.local/share/claude/versions/<version>`). The recorder refuses a script, since a wrapper may route
+requests to a real account, and fails when the loopback model receives nothing:
+
+```bash
+pnpm --filter @neta-art/cohub-cli record:claude-replay ~/.local/share/claude/versions/<version>
+```
 
 The Android smoke test runs host builds of sandboxd the way the app starts them (managed, control
 events on stderr), two folders side by side behind the real gateway relay, with no bash, rg or fd on

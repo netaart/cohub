@@ -13,7 +13,7 @@ import {
 import { codexTranslator } from "../native/translate.js";
 import { atLeast, harnessVersion } from "../native/version.js";
 import { codexApprovalMode, codexApprovalModes, codexApprovalRequest, codexDecision, resolveCodexApproval } from "./codex-approval.js";
-import { array, closeHost, harnessCommand, inlineImage, text, turnEnvironment, watchHost } from "./process.js";
+import { array, closeHost, harnessCommand, inlineImage, text, turnEnvironment } from "./process.js";
 import type { HarnessRun, HarnessTurn, LocalHarnessAdapter, ThreadKind } from "./types.js";
 
 /** A stop request that the harness does not honour within this long ends its private process. */
@@ -38,7 +38,7 @@ export function codexThreadKind(payload: Record<string, unknown>): ThreadKind {
 }
 
 async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessRun> {
-  const { input, signal, context } = turn;
+  const { input, signal } = turn;
   const shared = await executor.codex.get();
   const prepared = await executor.sessions.prepare({
     sessionId: input.sessionId, turnId: input.turnId, harness: "codex", cwd: executor.cwd,
@@ -55,7 +55,7 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
   try {
     if (!channel) {
       host = new JsonRpcProcess(...harnessCommand(executor.executables.codex || "codex", ["app-server", "--listen", "stdio://"], executor.cwd), executor.cwd, "jsonrpc", turnEnvironment(input));
-      watchHost(host, executor.diagnostics, context);
+      turn.spawned(host);
       channel = await openPrivateServer(host);
     }
     const codex = channel;
@@ -114,6 +114,7 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
           void executor.approvals.request(input.sessionId, input.turnId, request, signal).then((decision) => codex.respond(requestId, codexDecision(decision)));
           return;
         }
+        if (event.method === "account/rateLimits/updated") { translator.push(event); return; }
         if (params.threadId !== threadId) return;
         const item = record(params.item);
         if (item.type === "fileChange" && Array.isArray(item.changes)) changedPaths.set(text(item.id), item.changes.map((change) => text(record(change).path)).filter(Boolean));

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Claude Code / CodeBuddy-compatible stream-json fixture: one Turn per process. CODEBUDDY_CONFIG_DIR selects CodeBuddy's layout.
+// Claude Code / CodeBuddy-compatible stream-json fixture: Turns one after another on its input. CODEBUDDY_CONFIG_DIR selects
+// CodeBuddy's layout; STREAM_JSON_FIXTURE_SPAWNS names a file each Turn process appends its pid to.
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -31,6 +32,7 @@ if (!args.includes("--session-id") && !args.includes("--resume")) {
   }
   process.exit(0);
 }
+if (process.env.STREAM_JSON_FIXTURE_SPAWNS) appendFileSync(process.env.STREAM_JSON_FIXTURE_SPAWNS, `${process.pid}\n`);
 const codebuddy = process.env.CODEBUDDY_CONFIG_DIR;
 const flag = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : null; };
 const id = flag("--session-id") ?? flag("--resume");

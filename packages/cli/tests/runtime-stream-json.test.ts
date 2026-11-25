@@ -133,6 +133,30 @@ async function streamJsonTurns(harness: Extract<LocalHarness, "claude" | "workbu
     assert.deepEqual(cards.map((card) => [card.kind, card.command, card.reason, card.decisions]), Array(2).fill(["command", "make clean", "Clean the build", ["accept", "accept_for_session", "decline"]]));
     assert.deepEqual(await reply("continue", { approvalMode: "full_access" }), [{ type: "text", text: "no history bypassPermissions" }]);
     assert.deepEqual(await reply("continue", { approvalMode: "inherit" }), [{ type: "text", text: "no history null" }]);
+
+    const spawns = join(root, "spawns");
+    process.env.STREAM_JSON_FIXTURE_SPAWNS = spawns;
+    const warmSession = randomUUID();
+    let through: string | null = null;
+    const next = async (options: TurnOptions = {}) => {
+      const input = turn(through as string, { session: warmSession, ...options });
+      const stop = new AbortController();
+      const run = await executeTurn(cold.executor, input, (event) => { if (options.prompt === "wait" && event.type === "text.delta") stop.abort(); }, stop.signal, null);
+      await cold.executor.results.record(run.session, input, null, [run.event]);
+      await cold.executor.results.acknowledge(warmSession, input.turnId);
+      through = input.turnId;
+      return run;
+    };
+    const spawned = async () => (await readFile(spawns, "utf8")).trim().split("\n").length;
+    assert.equal((await next()).event.resume, "new");
+    assert.equal((await next()).event.resume, "native");
+    assert.equal(await spawned(), 1, "the second Turn ran in the kept process");
+    await next({ model: "opus" });
+    assert.equal(await spawned(), 2, "another model starts a process of its own");
+    await next({ model: "opus", prompt: "wait" });
+    await next({ model: "opus" });
+    assert.equal(await spawned(), 3, "a stopped Turn's process is not kept");
+    delete process.env.STREAM_JSON_FIXTURE_SPAWNS;
   } finally {
     for (const { native, diagnostics } of runtimes) { await native.close(AbortSignal.timeout(2_000)); await diagnostics.close(); }
     for (const key of ENV) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }

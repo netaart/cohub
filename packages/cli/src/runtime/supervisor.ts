@@ -161,9 +161,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   };
   try {
     instance = await ownRuntimeInstance(runtimeInstanceDirectory(config.identity, config.spaceId), summary, async (force) => {
-      if (!force) for await (const batch of native.executor.results.pendingBatches()) {
-        if (batch.length) throw new Error(`${UNCONFIRMED_WORK}. Use down --yes to stop; results and files are retained`);
-      }
+      if (!force && await native.executor.results.unconfirmed()) throw new Error(`${UNCONFIRMED_WORK}. Use down --yes to stop; results and files are retained`);
       update({ state: "stopping" });
       setTimeout(stop, 30);
     }, (action, message) => {

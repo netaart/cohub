@@ -50,6 +50,7 @@ import {
 	getUsageCostTotal,
 } from "#lib/format-usage.ts";
 import { getGenerationCostPresentation } from "#lib/generation-cost.ts";
+import { formatDateTime } from "#lib/i18n/format.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { provideMarkdownWorkspaceAsset } from "#lib/markdown-asset-context.ts";
 import { extractSpaceMentionsFromText } from "#lib/mentions/space.ts";
@@ -148,6 +149,16 @@ const assistantErrorMessage = $derived(
 		? (message.meta?.errorMessage ?? m.chat_unknown_error({}, { locale }))
 		: "",
 );
+
+const usageLimit = $derived.by(() => {
+	const value = message.meta?.turn?.meta?.usageLimit as
+		| { resetAt?: string | null }
+		| null
+		| undefined;
+	return assistantErrorMessage && value && typeof value === "object"
+		? value
+		: null;
+});
 
 const isCancelledBeforeDispatch = $derived(
 	message.role === "user" &&
@@ -689,7 +700,10 @@ function handleCopy() {
 
       {#if assistantErrorMessage}
         <div class="mt-3 rounded-lg border border-status-error/30 bg-status-error/8 px-3 py-2 text-[12px] text-status-error whitespace-pre-wrap break-words">
-          <div class="font-medium">{m.chat_error_header({}, { locale })}</div>
+          <div class="font-medium">{usageLimit ? m.chat_usage_limit_header({}, { locale }) : m.chat_error_header({}, { locale })}</div>
+          {#if usageLimit?.resetAt}
+            <div class="mt-1">{m.chat_usage_limit_resets({ time: formatDateTime(usageLimit.resetAt, locale) }, { locale })}</div>
+          {/if}
           <div class="mt-1">{assistantErrorMessage}</div>
         </div>
       {/if}

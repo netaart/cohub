@@ -25,6 +25,8 @@ export type HarnessTurn = {
   /** A native file the server resolved as stopped; it is never continued. */
   diverged: string | null;
   started: (session: NativeSession) => Promise<void>;
+  /** Synchronous, so no output passes before the adapter listens. */
+  spawned: (host: JsonRpcProcess) => void;
   context?: RuntimeDiagnosticContext;
 };
 

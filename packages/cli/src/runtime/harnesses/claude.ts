@@ -64,6 +64,7 @@ const profile: StreamJsonProfile = {
   projectDirectory: claudeProjectDirectory,
   effortLevels: ["low", "medium", "high", "xhigh", "max"],
   promptUuid: true,
+  warm: true,
   async approvals(executor, input) {
     const executable = executor.executables.claude || profile.binary;
     const modes = await (supportedModes.get(executable) ?? probeApprovalModes(executable, executor.cwd)).catch((): ApprovalMode[] => []);

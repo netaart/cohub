@@ -6,7 +6,7 @@ import { readRuntimeRecovery } from "@cohub/core/sessions";
 import type { AgentRuntimeRecoveryJobData } from "@cohub/infra/agent-queue";
 import type { RuntimeRecoveryState } from "@cohub/protocol";
 import type { ClaimedTurnBatch } from "../batch.js";
-import { RuntimeResultUnavailableError } from "../runtime/exchange.js";
+import { RuntimeNotStartedError, RuntimeResultUnavailableError } from "../runtime/exchange.js";
 
 const spaceId = crypto.randomUUID();
 const dialect = new PgDialect();
@@ -15,8 +15,9 @@ const locked = new Set<string>();
 const drained: string[] = [];
 const recoveredBatches: ClaimedTurnBatch[] = [];
 const persistedBatches: ClaimedTurnBatch[] = [];
+const failures: string[] = [];
 
-function makeTurn(outcome: "saved" | "unknown" | "offline" = "unknown") {
+function makeTurn(outcome: "saved" | "unknown" | "offline" | "not_started" = "unknown") {
   return {
     id: crypto.randomUUID(), sessionId: crypto.randomUUID(), userUuid: "owner", sequence: 1,
     status: "running", intent: "followup", userContent: [{ type: "text", text: "original" }],
@@ -67,6 +68,7 @@ mock.module("../persistence.js", { exports: {
   persistBatchUserMessages: async ({ batch }: { batch: ClaimedTurnBatch }) => { persistedBatches.push(batch); },
   publishSessionTurnsUpdated: async () => {},
   persistAssistantMessage: async ({ turnId }: { turnId: string }) => { const turn = rows.get(turnId); assert(turn); turn.status = "interrupted"; },
+  failSessionTurn: async ({ turnId, errorMessage }: { turnId: string; errorMessage: string }) => { const turn = rows.get(turnId); assert(turn); turn.status = "failed"; failures.push(errorMessage); },
 } });
 mock.module("../queue.js", { exports: { enqueueAgentTurnJob: async ({ sessionId }: { sessionId: string }) => { drained.push(sessionId); } } });
 mock.module("../logger.js", { exports: { logger: { warn: () => {}, debug: () => {} } } });
@@ -78,6 +80,7 @@ mock.module("../runtime/remote-runtime.js", { exports: {
     const row = rows.get(input.batch.ownerTurn.id); assert(row);
     if (row.outcome === "offline") throw new Error("offline");
     if (row.outcome === "unknown") throw new RuntimeResultUnavailableError("no result");
+    if (row.outcome === "not_started") throw new RuntimeNotStartedError("never received");
     row.status = "completed";
   },
 } });
@@ -97,6 +100,14 @@ test("Session recovery restores a saved result and marks an unavailable result f
   const unknown = makeTurn("unknown"); rows.set(unknown.id, unknown);
   assert.deepEqual(await recoverRuntime(job(unknown)), { recovered: 0, attention: 1 });
   assert.equal(readRuntimeRecovery(unknown.meta)?.state, "attention");
+});
+
+test("Session recovery fails a Turn the Runtime never started, without asking for a stop, and drains the queue", async () => {
+  rows.clear(); drained.length = 0; failures.length = 0;
+  const turn = makeTurn("not_started"); rows.set(turn.id, turn);
+  assert.deepEqual(await recoverRuntime(job(turn)), { recovered: 1, attention: 0 });
+  assert.equal(turn.status, "failed");
+  assert.deepEqual([failures, drained], [["never received"], [turn.sessionId]]);
 });
 
 test("Session recovery asks BullMQ to retry transient transport failures", async () => {

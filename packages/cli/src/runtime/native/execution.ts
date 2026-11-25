@@ -2,14 +2,15 @@ import { assertHarnessAccess, type RuntimeTurnInput } from "@neta-art/cohub";
 import type { RuntimeArchiveStore } from "../archive-store.js";
 import { serializeDiagnosticError, type RuntimeDiagnosticContext, type RuntimeDiagnostics } from "../diagnostics.js";
 import { harnessAdapter } from "../harnesses/index.js";
-import { closeHost } from "../harnesses/process.js";
+import { closeHost, watchHost } from "../harnesses/process.js";
 import type { HarnessExecutables, HarnessResult, HarnessRun, HarnessTurn } from "../harnesses/types.js";
+import type { WarmHosts } from "../harnesses/warm-hosts.js";
 import type { ApprovalBroker } from "./approvals.js";
 import type { CodexShared } from "./codex-link.js";
 import type { NativeIngest } from "./ingest.js";
 import type { PiLink } from "./pi-link.js";
 import type { ExecutionResults } from "./results.js";
-import type { NativeSessions } from "./sessions.js";
+import type { NativeSession, NativeSessions } from "./sessions.js";
 
 export type { HarnessResult } from "../harnesses/types.js";
 
@@ -23,6 +24,7 @@ export type Executor = {
   pi: PiLink;
   codex: CodexShared;
   approvals: ApprovalBroker;
+  warm: WarmHosts;
   piExtension: string;
   diagnostics?: RuntimeDiagnostics;
 };
@@ -32,14 +34,29 @@ export async function executeTurn(executor: Executor, input: RuntimeTurnInput, e
   signal.throwIfAborted();
   assertHarnessAccess(input.harness, input.accessMode);
   const diverged = await executor.results.admit(input);
+  await executor.results.dispatch(input, requestId);
+  let processGroup: number | null = null;
+  const unwatch: Array<() => void> = [];
+  let begun: NativeSession | null = null;
   const started: HarnessTurn["started"] = async (session) => {
-    await executor.results.start(session, input, requestId);
+    begun = session;
+    await executor.results.start(session, input, requestId, processGroup);
     executor.ingest.begin(session, input.sessionId, input.turnId);
   };
-  const turn: HarnessTurn = { input, emit, signal, diverged, started, context };
+  // Cursor spawns after `started`; a failed record only loses the leftover stop.
+  let joined: Promise<void> = Promise.resolve();
+  const spawned: HarnessTurn["spawned"] = (host) => {
+    unwatch.push(watchHost(host, executor.diagnostics, context));
+    processGroup = host.processGroupId;
+    if (begun) joined = executor.results.start(begun, input, requestId, processGroup).catch((error: unknown) => {
+      executor.diagnostics?.log("warn", "runtime.receipt_process_group_failed", { error: serializeDiagnosticError(error) }, { ...context, component: "harness" });
+    });
+  };
+  const turn: HarnessTurn = { input, emit, signal, diverged, started, spawned, context };
   let run: HarnessRun;
   try { run = await harnessAdapter(input.harness).run(executor, turn); }
   catch (error) { executor.ingest.end(input.turnId); throw error; }
+  finally { for (const off of unwatch) off(); await joined; }
   let uncertainCleanup: HarnessResult["uncertainCleanup"];
   if (run.host) uncertainCleanup = await closeHost(run.host, run.message.errorMessage);
   const message = signal.aborted ? { ...run.message, stopReason: "aborted" } : run.message;

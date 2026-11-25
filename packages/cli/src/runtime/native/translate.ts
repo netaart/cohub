@@ -1,6 +1,6 @@
 import type { ContentBlock, NativeTurnProgress, RuntimeExecutionEvent, RuntimeMessage } from "@neta-art/cohub";
 import { codexContext, codexTokenTotals, codexUsage, subtractCodexTokens, type CodexTokenTotals } from "../codex-usage.js";
-import { identifiable } from "../harnesses/process.js";
+import { epochSecondsIso, identifiable } from "../harnesses/process.js";
 import { record, type JsonRecord } from "../json-rpc.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
@@ -102,6 +102,7 @@ export function codexTranslator(emit: (event: RuntimeExecutionEvent) => void, id
   let final: RuntimeMessage = { ordinal: 0, content: [] };
   let usage: RuntimeMessage["usage"];
   let baseline: CodexTokenTotals | undefined;
+  let exhaustedUntil: string | null = null;
   const { provider, model } = identity;
   const latest = (): RuntimeMessage => {
     if (pending && pending.ordinal >= ordinal) return pending;
@@ -172,9 +173,20 @@ export function codexTranslator(emit: (event: RuntimeExecutionEvent) => void, id
           pending = message;
         }
       }
+      if (method === "account/rateLimits/updated") {
+        const limits = record(params.rateLimits);
+        const resets = [limits.primary, limits.secondary].map(record).filter((window) => Number(window.usedPercent) >= 100).map((window) => epochSecondsIso(window.resetsAt)).filter((value) => value !== null);
+        exhaustedUntil = resets.sort().at(-1) ?? null;
+      }
       if (method === "turn/completed") {
         const turn = record(params.turn);
-        final = { ...latest(), provider, model, stopReason: turn.status === "interrupted" ? "aborted" : turn.status === "failed" ? "error" : "stop", errorMessage: text(record(turn.error).message) || null };
+        const error = record(turn.error);
+        const code = typeof error.codexErrorInfo === "string" ? error.codexErrorInfo : Object.keys(record(error.codexErrorInfo))[0];
+        const limited = turn.status === "failed" && (code === "usageLimitExceeded" || code === "rateLimitExceeded");
+        final = {
+          ...latest(), provider, model, stopReason: turn.status === "interrupted" ? "aborted" : turn.status === "failed" ? "error" : "stop", errorMessage: text(error.message) || null,
+          ...(limited ? { usageLimit: { resetAt: exhaustedUntil } } : {}),
+        };
         return true;
       }
       return false;

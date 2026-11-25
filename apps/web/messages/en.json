@@ -1527,6 +1527,8 @@
 	"chat_bg_bash_task": "Background bash task",
 	"chat_bg_bash_task_id": "Background bash task {id}",
 	"chat_bg_task_label": "Background task",
+	"chat_usage_limit_header": "Usage limit reached",
+	"chat_usage_limit_resets": "Available again {time}",
 	"chat_error_header": "Error",
 	"chat_copy_message": "Copy message",
 	"chat_fork_here": "Fork from here",

@@ -29,7 +29,7 @@ mock.module("../persistence.js", { exports: {
   persistAssistantMessage: async (input: typeof assistants[number]) => { assistants.push(input); status = "completed"; },
 } });
 mock.module("../runtime/exchange.js", { exports: {
-  RuntimeExecutionUncertainError: class extends Error {}, RuntimeResultUnavailableError: class extends Error {},
+  RuntimeExecutionUncertainError: class extends Error {}, RuntimeResultUnavailableError: class extends Error {}, RuntimeNotStartedError: class extends Error {},
   exchangeRuntimeTurn: async (options: { input: RuntimeTurnInput; recovery?: boolean; event: (event: unknown, send: (command: unknown) => void, id: string) => Promise<void> }) => {
     commands.push(options.input);
     assert(runtimeCommandSchema.safeParse({ type: "turn.start", requestId: options.input.turnId, input: options.input }).success);

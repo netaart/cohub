@@ -13,7 +13,7 @@ import { createRuntimeStream } from "../stream/runtime-stream.js";
 import { loadRuntimeContext } from "./context-store.js";
 import { buildUserMessagesForBatch, type ClaimedTurnBatch } from "../batch.js";
 import type { PromptAccessMode } from "@cohub/core/sessions";
-import { exchangeRuntimeTurn, RuntimeExecutionUncertainError, RuntimeResultUnavailableError } from "./exchange.js";
+import { exchangeRuntimeTurn, RuntimeExecutionUncertainError, RuntimeNotStartedError, RuntimeResultUnavailableError } from "./exchange.js";
 export { RuntimeExecutionUncertainError } from "./exchange.js";
 
 function nativeAssistant(event: Extract<RuntimeExecutionEvent, { type: "message.commit" | "turn.end" }>, turnId: string, harness: string, final: boolean) {
@@ -23,7 +23,11 @@ function nativeAssistant(event: Extract<RuntimeExecutionEvent, { type: "message.
     provider: event.message.provider ?? null, model: event.message.model ?? null,
     stopReason: event.message.stopReason ?? (final ? "stop" : "tool_use"),
     errorMessage: event.message.errorMessage ?? null, usage: event.message.usage ?? null,
-    meta: { turnId, harness, runtime: "local", messageKind: final ? "assistant_final" : "assistant_intermediate", ...(final ? { runtimeArchiveStatus: "archive" in event && event.archive ? "pending" : "failed" } : {}) },
+    meta: {
+      turnId, harness, runtime: "local", messageKind: final ? "assistant_final" : "assistant_intermediate",
+      ...(final ? { runtimeArchiveStatus: "archive" in event && event.archive ? "pending" : "failed" } : {}),
+      ...(event.message.usageLimit ? { usageLimit: event.message.usageLimit } : {}),
+    },
   };
 }
 
@@ -162,6 +166,7 @@ export async function executeRemoteHarnessTurn(input: {
       },
     });
   } catch (error) {
+    if (error instanceof RuntimeNotStartedError) throw error;
     // Once dispatched, local effects may exist even if persistence or transport failed.
     const [current] = await db.select({ status: sessionTurns.status }).from(sessionTurns).where(eq(sessionTurns.id, user.turnId)).limit(1).catch(() => []);
     if (current && ["running", "abort_requested"].includes(current.status) && (input.recovery || error instanceof RuntimeExecutionUncertainError)) {

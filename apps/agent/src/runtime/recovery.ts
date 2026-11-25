@@ -5,11 +5,11 @@ import { resolveHarness, type LocalHarness, type RuntimeRecoveryState } from "@c
 import type { AgentRuntimeRecoveryJobData } from "@cohub/infra/agent-queue";
 import { db } from "../db.js";
 import { acquireSessionLock, type SessionLock } from "../session-lock.js";
-import { persistAssistantMessage, persistBatchUserMessages, publishSessionTurnsUpdated } from "../persistence.js";
+import { failSessionTurn, persistAssistantMessage, persistBatchUserMessages, publishSessionTurnsUpdated } from "../persistence.js";
 import { enqueueAgentTurnJob } from "../queue.js";
 import { loadClaimedTurnBatch } from "../batch.js";
 import { logger } from "../logger.js";
-import { RuntimeResultUnavailableError } from "./exchange.js";
+import { RuntimeNotStartedError, RuntimeResultUnavailableError } from "./exchange.js";
 import { executeRemoteHarnessTurn, markRuntimeRecovery } from "./remote-runtime.js";
 
 const turnMeta = (turn: { meta: unknown }) => turn.meta as Record<string, unknown> | null;
@@ -52,6 +52,11 @@ async function recoverOrphanTurn(input: { spaceId: string; turn: typeof sessionT
     await executeRemoteHarnessTurn({ spaceId: input.spaceId, sessionId: turn.sessionId, batch, actorUserId: turn.userUuid, harness: input.harness, accessMode: "read_only", recovery: true, requestId, abortSignal: lock.signal, leaseSignal: lock.signal });
     return "recovered";
   } catch (error) {
+    if (error instanceof RuntimeNotStartedError) {
+      lock.signal.throwIfAborted();
+      await failSessionTurn({ spaceId: input.spaceId, sessionId: turn.sessionId, turnId: turn.id, errorMessage: error.message });
+      return "recovered";
+    }
     if (!(error instanceof RuntimeResultUnavailableError)) {
       logger.debug("[Runtime] automatic reconciliation will retry", { spaceId: input.spaceId, turnId: turn.id, error });
       return "retry";

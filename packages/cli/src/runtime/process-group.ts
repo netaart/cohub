@@ -144,3 +144,22 @@ export async function stopProcessGroup(pid: number) {
     throw new ProcessCleanupUncertainError(`Tool process cleanup could not be confirmed; execution remains unresolved (${cause instanceof Error ? cause.message : String(cause)})`, { cause });
   }
 }
+
+/** Tells a process apart from a later one with its PID; `null` when gone, `undefined` when unknown. */
+export async function processStart(pid: number): Promise<string | null | undefined> {
+  if (process.platform === "linux") {
+    try {
+      const [boot, stat] = await Promise.all([readFile("/proc/sys/kernel/random/boot_id", "utf8"), readFile(`/proc/${pid}/stat`, "utf8")]);
+      // After `pid (comm)`, the start time is the 20th field.
+      const ticks = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+      return ticks ? `${boot.trim()}:${ticks}` : undefined;
+    } catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? null : undefined; }
+  }
+  return await new Promise((resolve) => {
+    const task = spawn("ps", ["-p", String(pid), "-o", "lstart="], { stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, LC_ALL: "C", TZ: "UTC" } });
+    let output = "";
+    task.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    task.once("error", () => resolve(undefined));
+    task.once("close", (code) => resolve(code === 0 && output.trim() ? output.trim() : code === 1 && !output.trim() ? null : undefined));
+  });
+}

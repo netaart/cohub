@@ -866,6 +866,7 @@ export async function persistAssistantMessage(input: { spaceId: string; spaceSes
       assistantContent: row.content, assistantText: row.text, provider: row.provider, model: row.model, stopReason: row.stopReason, errorMessage: row.errorMessage, usage: row.usage as Usage | null,
       metaPatch: { ...(message.meta?.runtimeResolution === true ? { runtimeResolution: true } : {}), runtimeArchiveStatus: message.meta?.runtimeArchiveStatus ?? "failed", finalMessageDurationMs: row.durationMs,
         ...(input.thinkingLevel ? { effectiveThinkingLevel: input.thinkingLevel } : {}),
+        ...(message.meta?.usageLimit ? { usageLimit: message.meta.usageLimit } : {}),
       },
     }, tx, prepared);
     if (!result.turn) throw new Error("Runtime finalization lost its turn");

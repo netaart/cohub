@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { spawn } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import type { RuntimeExecutionEvent, RuntimeTurnInput } from "@neta-art/cohub";
+import type { LocalHarness, RuntimeExecutionEvent, RuntimeTurnInput } from "@neta-art/cohub";
 import { Command } from "commander";
+import { atomicRuntimeJson } from "../src/runtime/archive-store.js";
 import { JsonLineDecoder } from "../src/runtime/json-rpc.js";
 import { discoverHarnesses } from "../src/runtime/harnesses/index.js";
 import { nativeSyncSatisfied } from "../src/runtime/native/attach.js";
@@ -12,7 +14,7 @@ import type { NativeConfig } from "../src/runtime/native/config.js";
 import type { NativeStatus } from "../src/runtime/native/daemon.js";
 import { executeTurn } from "../src/runtime/native/execution.js";
 import { LiveProgress } from "../src/runtime/native/translate.js";
-import { ContextRequiredError, ExecutionResults } from "../src/runtime/native/results.js";
+import { ContextRequiredError, ExecutionResults, NOT_STARTED } from "../src/runtime/native/results.js";
 import { formatImportProgress, formatNativeSync } from "../src/runtime/presentation.js";
 import { parseRuntimeHarnesses, registerRuntime } from "../src/commands/runtime.js";
 import { codexTokenTotals, codexUsage, subtractCodexTokens } from "../src/runtime/codex-usage.js";
@@ -24,13 +26,13 @@ const spaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";
 const turnId = "33333333-3333-4333-8333-333333333333";
 const previousTurn = "44444444-4444-4444-8444-444444444444";
-const input = (harness: "pi" | "codex"): RuntimeTurnInput => ({
+const input = (harness: LocalHarness): RuntimeTurnInput => ({
   spaceId, sessionId, turnId, userMessageId: turnId, harness, messages: [{ turnId, userMessageId: turnId, userId: "author", content: [{ type: "text", text: "continue" }] }], accessMode: "full_access",
   context: { revision: "one", throughTurnId: previousTurn, messages: [{ id: "history", turnId: previousTurn, role: "user", content: [{ type: "text", text: "historical fact" }] }] },
 });
 const config = (harnesses: NativeConfig["harnesses"]): NativeConfig => ({ version: 2, identity: "i", spaceId: "s", root: "/a", harnesses, enabledAt: "2026-01-01T00:00:00.000Z", codexShared: false });
 const collect = async <T>(values: AsyncIterable<T>) => { const items: T[] = []; for await (const value of values) items.push(value); return items; };
-const session = (root: string, harness: "pi" | "codex" = "codex") => ({ harness, nativeSessionId: crypto.randomUUID(), path: join(root, `${harness}.jsonl`), cwd: root });
+const session = (root: string, harness: LocalHarness = "codex") => ({ harness, nativeSessionId: crypto.randomUUID(), path: join(root, `${harness}.jsonl`), cwd: root });
 
 test("Runtime CLI exposes the complete lifecycle without legacy sandbox commands", () => {
   const program = new Command();
@@ -110,6 +112,43 @@ test("execution receipts stream in bounded batches and replay only the same exec
     await results.acknowledge(sessionId, turnId);
     assert.equal(await results.recover(turn), null);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a dispatched Turn is not started until it starts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cohub-runtime-dispatch-"));
+  try {
+    const results = new ExecutionResults(root);
+    const turn = input("claude");
+    await results.dispatch(turn, "request");
+    assert.deepEqual(await collect(results.pendingBatches()), [[{ sessionId, turnId, harness: "claude" }]]);
+    assert.equal(await results.recover(turn, "request"), NOT_STARTED);
+    assert.equal(await results.unconfirmed(), false);
+    await results.start(session(root, "claude"), turn, "request");
+    assert.equal(await results.recover(turn, "request"), null);
+    assert.equal(await results.unconfirmed(), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a confirmed stop ends only the recorded leftover process group", { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "cohub-runtime-leftover-"));
+  const leftover = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  try {
+    const results = new ExecutionResults(root);
+    const first = input("claude");
+    const next = { ...first, turnId: previousTurn, context: { ...first.context, throughTurnId: turnId } };
+    await results.start(session(root, "claude"), first, null, leftover.pid ?? null);
+    const exited = new Promise((resolve) => leftover.once("exit", resolve));
+    await results.admit({ ...next, context: { ...next.context, resolvedTurnIds: [turnId] } });
+    assert.equal(await exited, null);
+
+    const unrelated = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    try {
+      await atomicRuntimeJson(join(root, "executions", `${sessionId}.json`), { version: 2, requestId: null, sessionId, turnId, session: session(root, "claude"), processGroup: { id: unrelated.pid, start: "an earlier process" } });
+      await results.admit({ ...next, context: { ...next.context, resolvedTurnIds: [turnId] } });
+      assert.equal(unrelated.exitCode, null);
+      assert.doesNotThrow(() => process.kill(unrelated.pid ?? 0, 0));
+    } finally { unrelated.kill("SIGKILL"); }
+  } finally { leftover.kill("SIGKILL"); await rm(root, { recursive: true, force: true }); }
 });
 
 test("an unacknowledged Turn blocks the next one until the server settles or resolves it", async () => {
@@ -195,8 +234,7 @@ for (const harness of ["pi", "codex"] as const) {
       const events: RuntimeExecutionEvent[] = [];
       const first = await executeTurn(executor, turn, (event) => events.push(event), new AbortController().signal, "first");
       assert(events.some((event) => event.type === "text.delta"));
-      // Pi carries durable history in its native session file. Codex has no native history channel for a
-      // handoff yet, so it starts without history instead of receiving a fabricated transcript.
+      // The fixtures answer with how they started: Pi from its history file, Codex by resuming its rollout.
       const expectedAnswer = harness === "pi" ? "history retained" : "native resumed";
       assert(first.event.message.content.some((block) => block.type === "text" && block.text.includes(expectedAnswer)));
       assert.equal(first.event.archive?.turnId, turnId);

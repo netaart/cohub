@@ -1,15 +1,13 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { access, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { isModelThinkingLevel, thinkingLevelMapFor, type ContentBlock, type RuntimeExecutionEvent, type RuntimeMessage, type RuntimeTurnInput } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { describeError } from "../../network-error.js";
 import type { Executor } from "../native/execution.js";
 import type { TranscriptState } from "../native/ingest.js";
-import { array, closeHost, harnessCommand, identifiable, inlineImage, missing, text, turnEnvironment, watchHost } from "./process.js";
+import { array, closeHost, epochSecondsIso, harnessCommand, identifiable, inlineImage, missing, probe, text, turnEnvironment } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn } from "./types.js";
 
 /** A stop request that the harness does not honour within this long ends its process. */
@@ -39,6 +37,8 @@ export type StreamJsonProfile = {
   effortLevels: readonly string[];
   /** The CLI keeps a stream-json prompt's `uuid` as its record id, so the file names the Cohub Turn. */
   promptUuid: boolean;
+  /** A clean Turn's process is kept for the Session's next Turn. */
+  warm?: boolean;
   /** Without it, a Turn with full access runs `acceptEdits` and every permission prompt is denied. */
   approvals?(executor: Executor, input: RuntimeTurnInput): Promise<StreamJsonApprovals | null>;
 };
@@ -52,7 +52,7 @@ export type StreamJsonApprovals = {
 
 /** The CLI's help, after checking it offers every flag a Turn uses. */
 export async function streamJsonHelp(profile: StreamJsonProfile, executable: string, cwd: string) {
-  const { stdout } = await promisify(execFile)(...harnessCommand(executable, ["--help"], cwd), { cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+  const { stdout } = await probe(harnessCommand(executable, ["--help"], cwd), cwd, 30_000);
   const missingFlags = REQUIRED_FLAGS.filter((flag) => !new RegExp(`(^|[\\s,])${flag}(?=[\\s,=<]|$)`, "m").test(stdout));
   if (missingFlags.length) throw new Error(`${executable} is not a supported ${profile.label} CLI (missing ${missingFlags.join(", ")}); update ${profile.label}`);
   return stdout;
@@ -130,13 +130,15 @@ async function holdsPrompt(path: string, turnId: string, signal: AbortSignal): P
 type Message = { ordinal: number; content: ContentBlock[]; partial: Map<number, Extract<ContentBlock, { type: "text" | "thinking" }>>; model: string | null; usage?: JsonRecord };
 
 /** Maps stream-json output onto Cohub's streaming protocol; sub-agent traffic stays in the native transcript. */
-export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; model: string | null }) {
+/** `spent`: the cumulative `total_cost_usd` a kept process already reported. */
+export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; model: string | null }, spent = 0) {
   const messages = new Map<string, Message>();
   const owners = new Map<string, Message>();
   let current: Message | null = null;
   let streaming: Message | null = null;
   let model = identity.model;
   let final: RuntimeMessage | null = null;
+  let rejected: RuntimeMessage["usageLimit"] = null;
   const counts = (value: unknown) => Object.fromEntries(Object.entries(record(value)).filter(([, count]) => typeof count === "number"));
   const snapshot = (message: Message): RuntimeMessage => ({
     ordinal: message.ordinal, content: [...message.content, ...message.partial.values()], provider: identity.provider, model: message.model ?? model,
@@ -207,27 +209,47 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
         }
         return false;
       }
+      if (event.type === "rate_limit_event") {
+        const info = record(event.rate_limit_info);
+        rejected = info.status === "rejected" ? { resetAt: epochSecondsIso(info.resetsAt) } : null;
+        return false;
+      }
       if (event.type !== "result") return false;
       const failed = event.is_error === true || event.subtype !== "success";
+      const usageLimit = failed ? rejected ?? (event.api_error_status === 429 ? { resetAt: null } : null) : null;
       const reply = last();
       if (reply.usage) reply.usage.contextTokens = (reply.usage.input ?? 0) + (reply.usage.cacheRead ?? 0) + (reply.usage.cacheWrite ?? 0);
-      if (typeof event.total_cost_usd === "number" && event.total_cost_usd > 0) reply.usage = { ...reply.usage, cost: { total: event.total_cost_usd } };
+      const cost = typeof event.total_cost_usd === "number" ? event.total_cost_usd - spent : 0;
+      if (cost > 0) reply.usage = { ...reply.usage, cost: { total: cost } };
       final = {
         ...reply,
         stopReason: failed ? "error" : "stop",
         errorMessage: failed ? text(event.result) || array(event.errors).map(text).join("\n") || text(event.subtype) || "Turn failed" : null,
+        ...(usageLimit ? { usageLimit } : {}),
       };
       return true;
     },
   };
 }
 
+const WAKING_TOOLS = new Set(["ScheduleWakeup", "CronCreate", "Monitor"]);
+
+const startsBackgroundWork = (event: JsonRecord) =>
+  (event.type === "system" && text(event.subtype).startsWith("task_"))
+  || (event.type === "assistant" && array(record(event.message).content).map(record).some((block) =>
+    block.type === "tool_use" && (WAKING_TOOLS.has(text(block.name)) || record(block.input).run_in_background === true)));
+
+const spentBy = new WeakMap<JsonRpcProcess, number>();
+
+const startsTurn = (event: JsonRecord) => ["assistant", "user", "stream_event", "control_request", "result"].includes(text(event.type)) || (event.type === "system" && event.subtype === "init");
+
 /**
- * One Turn per process. Cohub grants a permission prompt only through the profile's approvals;
- * otherwise workspace edits follow `acceptEdits` and every other tool the user's own rules.
+ * One process per Turn, or kept for the next one with a warm profile. Cohub grants a permission prompt only
+ * through the profile's approvals; otherwise workspace edits follow `acceptEdits` and every other tool the
+ * user's own rules.
  */
 export async function runStreamJson(profile: StreamJsonProfile, executor: Executor, turn: HarnessTurn): Promise<HarnessRun> {
-  const { input, signal, context } = turn;
+  const { input, signal } = turn;
   const prepare = (resumable: (transcript: TranscriptState) => boolean) => executor.sessions.prepare({
     sessionId: input.sessionId, turnId: input.turnId, harness: profile.harness, cwd: executor.cwd,
     provider: input.provider, context: input.context, signal, resumable,
@@ -240,23 +262,32 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
   const approvals = await profile.approvals?.(executor, input) ?? null;
   // Cohub has already fitted the level to the levels the model declares; these CLIs have no `off` effort.
   const effort = isModelThinkingLevel(input.thinkingLevel) && input.thinkingLevel !== "off" ? input.thinkingLevel : null;
-  const args = [
-    "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-    ...(prepared.resume === "new" ? ["--session-id", session.nativeSessionId] : ["--resume", session.nativeSessionId]),
+  const executable = executor.executables[profile.harness] || profile.binary;
+  const settings = [
     ...(input.accessMode === "read_only" ? READ_ONLY_ARGS : approvals?.args ?? ["--permission-mode", "acceptEdits"]),
     ...(input.model && input.model !== DEFAULT_MODEL ? ["--model", input.model] : []),
     ...(effort ? ["--effort", effort] : []),
   ];
+  const launch = JSON.stringify([executable, settings]);
+  const args = [
+    "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+    ...(prepared.resume === "new" ? ["--session-id", session.nativeSessionId] : ["--resume", session.nativeSessionId]),
+    ...settings,
+  ];
   const content = await prompt(profile, input);
   signal.throwIfAborted();
-  const host = new JsonRpcProcess(...harnessCommand(executor.executables[profile.harness] || profile.binary, args, executor.cwd), executor.cwd, "stream", turnEnvironment(input));
-  watchHost(host, executor.diagnostics, context);
-  const translator = streamJsonTranslator(turn.emit, { provider: input.provider || profile.provider, model: input.model && input.model !== DEFAULT_MODEL ? input.model : null });
+  const kept = profile.warm ? await executor.warm.take(input.sessionId, prepared.resume === "native" ? session.nativeSessionId : "", launch) : null;
+  const { COHUB_TURN_ID: _turnId, ...sessionEnvironment } = turnEnvironment(input);
+  const host = kept ?? new JsonRpcProcess(...harnessCommand(executable, args, executor.cwd), executor.cwd, "stream", profile.warm ? sessionEnvironment : turnEnvironment(input));
+  turn.spawned(host);
+  let background = false;
+  const translator = streamJsonTranslator(turn.emit, { provider: input.provider || profile.provider, model: input.model && input.model !== DEFAULT_MODEL ? input.model : null }, spentBy.get(host));
   let message: RuntimeMessage = { ordinal: 0, content: [] };
   let begun = false;
   // Open approvals close with the process, not only when the Turn is stopped.
   const approvalScope = new AbortController();
   try {
+    signal.throwIfAborted();
     await turn.started(session);
     begun = true;
     await new Promise<void>((resolve, reject) => {
@@ -287,6 +318,8 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
           catch (error) { finish(error); }
           return;
         }
+        if (startsBackgroundWork(event)) background = true;
+        if (event.type === "result" && typeof event.total_cost_usd === "number") spentBy.set(host, event.total_cost_usd);
         try { if (translator.push(event)) finish(); } catch (error) { finish(error); }
       });
       const abort = () => {
@@ -294,8 +327,8 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
         escalation = setTimeout(() => void host.close().catch(() => undefined), ABORT_ESCALATION_MS);
       };
       signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) { finish(); return; }
       try { host.write(content); } catch (error) { finish(error); }
-      if (signal.aborted) abort();
     });
     message = translator.result() ?? translator.last();
     // A stopped Turn ends with an error result; the stop is not a failure to report.
@@ -307,13 +340,18 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
     }
     message = { ...translator.last(), stopReason: signal.aborted ? "aborted" : "error", errorMessage: signal.aborted ? null : describeError(error) };
   }
-  // Closing input lets the CLI flush its transcript before the executor reaps the process.
-  host.endInput();
-  await host.exited(FLUSH_TIMEOUT_MS);
+  const keep = profile.warm && !signal.aborted && message.stopReason === "stop" && !background;
+  if (!keep) {
+    // Closing input lets the CLI flush its transcript before the executor reaps the process.
+    host.endInput();
+    await host.exited(FLUSH_TIMEOUT_MS);
+  }
   const path = await findSession(profile, session.nativeSessionId, executor.cwd);
   if (path && (path !== session.path || prepared.resume === "new")) {
     session = { ...session, path };
     executor.ingest.adopt(session, input.sessionId);
   }
-  return { session, resume: prepared.resume, message, host };
+  if (!keep) return { session, resume: prepared.resume, message, host };
+  executor.warm.keep(input.sessionId, session.nativeSessionId, launch, host, startsTurn);
+  return { session, resume: prepared.resume, message, host: null };
 }
