@@ -5,20 +5,18 @@
 //
 // Catalog validation (ensuring the model is still online) is performed by the
 // caller when reading, since this helper has no knowledge of the catalog.
+import { isModelThinkingLevel, type ModelThinkingLevel } from "@cohub/protocol";
 import { encodeKeyPart, getCacheUserKey } from "#lib/cache/keys.ts";
 
 const STORAGE_PREFIX = "cohub:draft-session-model:v1";
 
-type DraftSessionModelRecord = {
-	provider: string;
-	id: string;
-	updatedAt: number;
-};
-
 export type DraftSessionModel = {
 	provider: string;
 	id: string;
+	thinkingLevel?: ModelThinkingLevel;
 };
+
+type DraftSessionModelRecord = DraftSessionModel & { updatedAt: number };
 
 function canUseLocalStorage() {
 	return typeof window !== "undefined" && typeof localStorage !== "undefined";
@@ -42,6 +40,7 @@ export function saveDraftSessionModel(model: DraftSessionModel) {
 		const record: DraftSessionModelRecord = {
 			provider: model.provider,
 			id: model.id,
+			...(model.thinkingLevel ? { thinkingLevel: model.thinkingLevel } : {}),
 			updatedAt: Date.now(),
 		};
 		localStorage.setItem(storageKey(), JSON.stringify(record));
@@ -65,7 +64,13 @@ export function readDraftSessionModel(): DraftSessionModel | null {
 			safeRemoveItem(storageKey());
 			return null;
 		}
-		return { provider: record.provider, id: record.id };
+		return {
+			provider: record.provider,
+			id: record.id,
+			...(isModelThinkingLevel(record.thinkingLevel)
+				? { thinkingLevel: record.thinkingLevel }
+				: {}),
+		};
 	} catch {
 		safeRemoveItem(storageKey());
 		return null;

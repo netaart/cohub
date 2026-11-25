@@ -57,8 +57,10 @@ import { formatGenerationPolicyLabel } from "#lib/generation-policy-label.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { extractSpaceMentionsFromText } from "#lib/mentions/space.ts";
 import {
+	clampThinkingLevel,
 	formatThinkingLevelShort,
 	getRequestedThinkingLevel,
+	getSupportedThinkingLevels,
 	type LocalModelSelection,
 	type ModelThinkingLevel,
 	resolveLocalModel,
@@ -101,6 +103,12 @@ import {
 	isBillingAccessBlockedCode,
 } from "#lib/stores/billing-conversion.svelte.ts";
 import { billingQuotasStore } from "#lib/stores/billing-quotas.svelte.ts";
+import {
+	type ComposerRuntimePreference,
+	composerRuntimeKey,
+	readComposerRuntime,
+	rememberComposerRuntime,
+} from "#lib/stores/composer-runtime-preference.ts";
 import {
 	readCreateModelPreference,
 	saveCreateModelPreference,
@@ -396,11 +404,26 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			activeTurnIndex,
 		).filter(isAgentTurn),
 	);
+	const runtimeCatalog = $derived(cachedRuntimeStatus(spaceId));
+	// Never falls back to Cohub on its own, so a draft cannot silently move to the cloud.
+	let rememberedRuntimes = $state<Record<string, ComposerRuntimePreference>>(
+		{},
+	);
+	const rememberedRuntimeKey = $derived(
+		spaceId ? composerRuntimeKey(spaceId) : null,
+	);
+	const rememberedRuntime = $derived(
+		rememberedRuntimeKey
+			? (rememberedRuntimes[rememberedRuntimeKey] ??
+					readComposerRuntime(rememberedRuntimeKey))
+			: null,
+	);
 	const composerHarness = $derived(
 		harnessBySession[harnessSelectionKey] ??
-			resolveTurnHarness(composerAgentTurns.at(-1)),
+			(activeSessionId
+				? resolveTurnHarness(composerAgentTurns.at(-1))
+				: (rememberedRuntime?.harness ?? "cohub")),
 	);
-	const runtimeCatalog = $derived(cachedRuntimeStatus(spaceId));
 	// Local Turns always name a model and, when the model has a choice, a level:
 	// a Harness keeps a requested level for later Turns, so leaving it out would
 	// not mean its default.
@@ -408,7 +431,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		if (composerHarness === "cohub") return null;
 		const requested =
 			localModelsBySession[`${harnessSelectionKey}:${composerHarness}`] ??
-			resolveLocalModelFromTurns(composerAgentTurns, composerHarness);
+			(activeSessionId
+				? resolveLocalModelFromTurns(composerAgentTurns, composerHarness)
+				: (rememberedRuntime?.models[composerHarness] ?? null));
 		const models = runtimeCatalog?.capabilities?.models.filter(
 			(model) => model.harness === composerHarness,
 		);
@@ -749,7 +774,11 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	// never promoted into a request, and a pending null explicitly resets to default.
 	const activeSessionThinkingLevel = $derived.by<ModelThinkingLevel | null>(
 		() => {
-			if (!activeSessionId) return draftThinkingLevel;
+			if (!activeSessionId)
+				return activeSessionModel?.provider === draftSessionModel?.provider &&
+					activeSessionModel?.id === draftSessionModel?.id
+					? draftThinkingLevel
+					: null;
 			return Object.hasOwn(sessionThinkingLevelById, activeSessionId)
 				? (sessionThinkingLevelById[activeSessionId] ?? null)
 				: activeSessionLastRequestedThinkingLevel;
@@ -1070,6 +1099,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			id: catalogItem.id,
 			name: catalogItem.model.name as string | undefined,
 		};
+		draftThinkingLevel =
+			stored.thinkingLevel && getSupportedThinkingLevels(catalogItem).length > 1
+				? clampThinkingLevel(catalogItem, stored.thinkingLevel)
+				: null;
 	});
 
 	// ── Timeline lifecycle (scroll, restore, markers, generation) ──
@@ -2940,7 +2973,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				[session.id]: model,
 			};
 			if (draftSessionModelManuallySelected) {
-				saveDraftSessionModel(model);
+				saveDraftSessionModel({
+					...model,
+					...(draftThinkingLevel ? { thinkingLevel: draftThinkingLevel } : {}),
+				});
 			}
 		}
 		workspace.activeSessionId = session.id;
@@ -3477,6 +3513,13 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			) {
 				delete localModelsBySession[sentModelKey];
 			}
+			if (isNewChat && !isNote) {
+				const key = composerRuntimeKey(opSpaceId);
+				rememberedRuntimes = {
+					...rememberedRuntimes,
+					[key]: rememberComposerRuntime(key, harness, sentModelChoice),
+				};
+			}
 			if (
 				sentApprovalMode &&
 				(approvalChoices[sentApprovalKey] ??
@@ -3513,7 +3556,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				targetSessionState = adoptPromptSession({
 					session: acceptedSession,
 					turn: acceptedTurnWithProfile,
-					model,
+					model: local ? null : model,
 				});
 				sessionId = acceptedSession.id;
 				if (!isNote)
@@ -3566,7 +3609,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				delete nextThinkingLevels[sessionId];
 				sessionThinkingLevelById = nextThinkingLevels;
 			}
-			draftThinkingLevel = null;
 			if (!isNote && sessionId && options.getConnectionState() !== "open") {
 				schedulePostSendRecoveryCheck(sessionId);
 			}
@@ -4084,6 +4126,11 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					id: catalogItem.id,
 					name: catalogItem.model.name as string | undefined,
 				} satisfies SelectedModel;
+				if (
+					draftSessionModel?.provider !== selected.provider ||
+					draftSessionModel.id !== selected.id
+				)
+					draftThinkingLevel = null;
 				draftSessionModel = selected;
 				if (activeSessionId) {
 					sessionModelById = {
@@ -4414,6 +4461,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			tasks.reset();
 			sessionModelById = {};
 			draftSessionModel = null;
+			draftThinkingLevel = null;
 			draftSessionModelManuallySelected = false;
 			route = { kind: "none" };
 			composer.sending = false;
@@ -4454,6 +4502,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		tasks.reset();
 		sessionModelById = {};
 		draftSessionModel = null;
+		draftThinkingLevel = null;
 		draftSessionModelManuallySelected = false;
 		promptTemplatesCtrl.restore(nextSpaceId);
 		skillsCtrl.restore(nextSpaceId);
