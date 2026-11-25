@@ -74,17 +74,19 @@ export async function serveAppBrowserSession(input: {
 		return Response.json({ challenge }, { headers });
 	}
 
-	const call = (method: string, body: Record<string, string>) =>
-		input.fetcher(
+	const call = async (method: string, body: Record<string, string>) => {
+		const result = await input.fetcher(
 			`${input.apiOrigin}/api/apps/${appId}/browser-session/${method}`,
 			{
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				cache: "no-store",
-				redirect: "error",
+				redirect: "manual",
 				body: JSON.stringify({ ...body, origin: url.origin }),
 			},
 		);
+		return result.status >= 300 && result.status < 400 ? respond(502) : result;
+	};
 
 	if (action === "callback") {
 		const challenge = url.searchParams.get("challenge") ?? "";

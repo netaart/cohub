@@ -1,3 +1,5 @@
+import { APP_BROWSER_SESSION_PATH } from "@cohub/protocol";
+import { serveAppBrowserSession } from "../../lib/server/app-browser-session.ts";
 import { proxyPortApp } from "../../lib/server/port-app-proxy.ts";
 
 type WorkerSocket = WebSocket & { accept(): void };
@@ -34,9 +36,22 @@ function sandbox(request: Request): Response {
 
 export default {
 	fetch(request: Request) {
+		const url = new URL(request.url);
+		if (url.pathname.startsWith(`${APP_BROWSER_SESSION_PATH}/`)) {
+			return serveAppBrowserSession({
+				request,
+				url,
+				apiOrigin: "https://api.example.com",
+				fetcher: async (input, init) => {
+					// Let workerd validate the subrequest before stubbing the API response.
+					new Request(input, init);
+					return new Response(null, { status: 401 });
+				},
+			});
+		}
 		return proxyPortApp({
 			request,
-			url: new URL(request.url),
+			url,
 			upstream: UPSTREAM,
 			fetcher: async (input, init) => sandbox(new Request(input, init)),
 		});
