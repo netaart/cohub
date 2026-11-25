@@ -16,12 +16,47 @@ describe("port App proxy in workerd", () => {
 			),
 			compatibilityDate: "2025-03-05",
 			compatibilityFlags: ["nodejs_compat"],
-			dev: { server: { port: 0 }, inspector: false, logLevel: "none" },
+			dev: {
+				server: { port: 0 },
+				origin: { hostname: "app.example.com", secure: true },
+				inspector: false,
+				logLevel: "none",
+			},
 		});
 	});
 
 	after(async () => {
 		await worker?.dispose();
+	});
+
+	it("handles a rejected browser-session exchange with and without a return path", async () => {
+		const origin = "https://app.example.com";
+		const base = `${origin}/.well-known/cohub/app-session`;
+		const app = crypto.randomUUID();
+		const start = await worker.fetch(`${base}/start?app=${app}`, {
+			method: "POST",
+			headers: { Origin: origin },
+		});
+		assert.equal(start.status, 200);
+		const { challenge } = (await start.json()) as { challenge: string };
+		const cookie = start.headers.get("set-cookie")?.split(";")[0];
+		assert.ok(cookie);
+		const callback = new URL(`${base}/callback`);
+		callback.search = new URLSearchParams({
+			app,
+			challenge,
+			code: "x".repeat(43),
+		}).toString();
+		const exchange = () =>
+			worker.fetch(callback.href, {
+				headers: { Cookie: cookie },
+				redirect: "manual",
+			});
+		assert.equal((await exchange()).status, 401);
+		callback.searchParams.set("returnTo", "/shop");
+		const retry = await exchange();
+		assert.equal(retry.status, 303);
+		assert.equal(retry.headers.get("location"), `${origin}/shop`);
 	});
 
 	it("accepts the uncached, streamed subrequest", async () => {
