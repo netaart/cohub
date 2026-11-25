@@ -53,15 +53,16 @@ test("a replaced control connection routes and closes only its own peers", async
     sockets.add(peer);
     const request = { headers: { "x-worker-secret": "secret" }, url: `/?connection=${connection}` };
     relay.peer(peer as unknown as WebSocket, request as unknown as IncomingMessage, spaceId);
-    await peer.receive({ type: "turn.recover", requestId, execution: { spaceId, sessionId: spaceId, turnId: requestId, harness: "pi" } });
-    assert.equal(control.sent.at(-1)?.type, "turn.recover");
+    const recovery = { type: "turn.recover", requestId, watch: true, execution: { spaceId, sessionId: spaceId, turnId: requestId, harness: "pi" } };
+    await peer.receive(recovery);
+    assert.deepEqual(control.sent.at(-1), recovery);
     return peer;
   }
   const old = await connect(relay);
   const oldPeer = await attach(old);
   const replacement = await connect(relay);
   const newPeer = await attach(replacement);
-  const event = { type: "runtime.event", requestId, event: { type: "message.start", ordinal: 0 } };
+  const event = { type: "runtime.event", requestId, event: { type: "turn.running" } };
   await old.receive(event);
   old.terminate();
   assert.equal(oldPeer.closeCode, 1011);

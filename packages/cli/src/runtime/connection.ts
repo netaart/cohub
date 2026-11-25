@@ -44,6 +44,7 @@ export type Execution = {
   detached?: boolean;
   /** Only replays a saved result for its connection; it does no local work and ends with that connection. */
   recovery?: boolean;
+  source?: [requestId: string, execution: Execution];
 };
 
 export type RuntimeConnectionOptions = {
@@ -590,6 +591,8 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
           return;
         }
         log("info", "runtime.turn_acknowledged", { revision: frame.revision }, context);
+        const source = execution.source;
+        if (source && active.get(source[0]) === source[1]) active.delete(source[0]);
         active.delete(frame.requestId);
         send({ type: "runtime.event", requestId: frame.requestId, event: { type: "turn.acknowledged" } });
         return;
@@ -610,7 +613,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
           await replaySaved(frame.requestId, identity, context);
           return;
         }
-        const running = [...active].find(([, entry]) => entry.turnId === identity.turnId && entry.sessionId === identity.sessionId && entry.harness === identity.harness);
+        const running = [...active].find(([, entry]) => !entry.recovery && entry.turnId === identity.turnId && entry.sessionId === identity.sessionId && entry.harness === identity.harness);
         const recovery: Execution = {
           ...identity,
           requestId: frame.traceContext?.requestId,
@@ -618,23 +621,22 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
           controller: new AbortController(),
           promise: Promise.resolve(),
           recovery: true,
+          source: running,
         };
         active.set(frame.requestId, recovery);
         recovery.promise = (async () => {
           try {
             if (running) {
-              // A detached execution was not superseded by this host; wait for its result instead of discarding it.
-              if (running[1].detached) {
-                log("info", "runtime.recovery_waiting_detached", { runningRequestId: running[0] }, context);
-                // A recovery the server gave up on must not hold an execution slot until the Turn ends.
-                const stopped = recovery.controller.signal;
-                await Promise.race([running[1].promise, new Promise<void>((resolve) => stopped.addEventListener("abort", () => resolve(), { once: true }))]);
+              if (frame.watch) send({ type: "runtime.event", requestId: frame.requestId, event: { type: "turn.running" } });
+              const stopped = recovery.controller.signal;
+              let onAbort = () => {};
+              const aborted = new Promise<void>((resolve) => { onAbort = resolve; });
+              stopped.addEventListener("abort", onAbort, { once: true });
+              try {
                 stopped.throwIfAborted();
-              } else {
-                running[1].controller.abort();
-                await running[1].promise;
-              }
-              if (active.get(running[0]) === running[1]) active.delete(running[0]);
+                await Promise.race([running[1].promise, aborted]);
+                stopped.throwIfAborted();
+              } finally { stopped.removeEventListener("abort", onAbort); }
             }
             const saved = await options.executor.results.recover(identity);
             recovery.controller.signal.throwIfAborted();

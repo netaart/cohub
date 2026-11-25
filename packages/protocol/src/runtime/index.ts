@@ -285,6 +285,7 @@ export type RuntimeExecutionEvent =
   | { type: "message.commit"; message: RuntimeMessage }
   | { type: "turn.end"; message: RuntimeMessage; archive?: HarnessArchive | null; resume: "native" | "restored" | "handoff" | "new" }
   | { type: "context.required"; pendingTurnIds?: string[] }
+  | { type: "turn.running" }
   | { type: "turn.acknowledged" }
   | { type: "turn.error"; message: string; uncertain?: boolean };
 
@@ -311,6 +312,7 @@ export const runtimeEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("message.commit"), message: runtimeMessageSchema }),
   z.object({ type: z.literal("turn.end"), message: runtimeMessageSchema, archive: harnessArchiveSchema.nullable().optional(), resume: z.enum(["native", "restored", "handoff", "new"]) }),
   z.object({ type: z.literal("context.required"), pendingTurnIds: z.array(id).max(LOCAL_HARNESSES.length).optional() }),
+  z.object({ type: z.literal("turn.running") }),
   z.object({ type: z.literal("turn.acknowledged") }),
   z.object({ type: z.literal("turn.error"), message: z.string().max(16_384), uncertain: z.boolean().optional() }),
 ]);
@@ -334,7 +336,7 @@ const runtimeContextSchema = z.object({ complete: z.boolean().optional(), revisi
 })), archive: harnessArchiveSchema.nullable().optional(), resolvedTurnIds: z.array(id).max(LOCAL_HARNESSES.length).optional(), settledTurnIds: z.array(id).max(LOCAL_HARNESSES.length).optional() });
 
 export const runtimeCommandSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("turn.recover"), requestId: id, execution: z.object({ spaceId: id, sessionId: id, turnId: id, harness: localHarnessSchema }), traceContext: runtimeTraceContextSchema.optional() }),
+  z.object({ type: z.literal("turn.recover"), requestId: id, watch: z.literal(true).optional(), execution: z.object({ spaceId: id, sessionId: id, turnId: id, harness: localHarnessSchema }), traceContext: runtimeTraceContextSchema.optional() }),
   z.object({ type: z.literal("turn.start"), requestId: id, resumeOnly: z.boolean().optional(), input: z.object({
     spaceId: id, sessionId: id, turnId: id, userMessageId: id, harness: localHarnessSchema,
     messages: z.array(z.object({ turnId: id, userMessageId: id, userId: z.string().nullable(), content })).min(1).max(RUNTIME_MAX_BATCH_MESSAGES),

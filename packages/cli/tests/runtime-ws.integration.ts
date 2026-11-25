@@ -63,6 +63,7 @@ for (const mode of ["resume", "recover"] as const) test(`Runtime reconnects duri
   let connections = 0;
   let detachedAt = 0;
   let reconnectedAt = 0;
+  let confirmedRunning = false;
   let rejectFailure: (error: unknown) => void = () => {};
   const completed = new Promise<void>((resolve, reject) => {
     rejectFailure = reject;
@@ -93,12 +94,14 @@ for (const mode of ["resume", "recover"] as const) test(`Runtime reconnects duri
           }
           if (mode === "recover" && connection > 1 && frame.type === "runtime.recovery") {
             assert.deepEqual(frame.executions, [{ sessionId, turnId, harness: "pi" }]);
-            send({ type: "turn.recover", requestId: recoverRequestId, execution: { spaceId, sessionId, turnId, harness: "pi" } });
+            send({ type: "turn.recover", requestId: recoverRequestId, watch: true, execution: { spaceId, sessionId, turnId, harness: "pi" } });
             return;
           }
           if (connection > 1 && frame.type === "runtime.event" && frame.requestId === (mode === "recover" ? recoverRequestId : turnId)) {
             if (frame.event.type === "turn.error") throw new Error(frame.event.message);
+            if (frame.event.type === "turn.running") confirmedRunning = true;
             if (frame.event.type === "turn.end") {
+              if (mode === "recover") assert(confirmedRunning, "the Runtime confirms live work before returning the final result");
               assert.equal(frame.event.message.stopReason, "stop", "transport loss must not abort local execution");
               assert(frame.event.message.content.some((block: { type: string; text?: string }) => block.type === "text" && block.text?.includes("new session")));
               send({ type: "turn.ack", requestId: frame.requestId, revision: "completed", turnId });

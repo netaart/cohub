@@ -88,6 +88,42 @@ for (const retryPersistence of [false, true]) test(`terminal events are serializ
   } finally { await close(server); }
 });
 
+test("a confirmed live recovery can outlast the initial reply deadline", { timeout: 5000 }, async () => {
+  const { server, url } = await listen();
+  const connectionId = crypto.randomUUID();
+  const turn = input();
+  let requests = 0;
+  let results = 0;
+  server.on("connection", (socket) => {
+    const send = (frame: unknown) => socket.send(JSON.stringify(frame));
+    send({ type: "runtime.ready", connectionId });
+    socket.on("message", (raw) => {
+      const frame = JSON.parse(raw.toString());
+      const event = (value: unknown) => send({ type: "runtime.event", requestId: frame.requestId, event: value });
+      if (frame.type === "turn.recover") {
+        requests++;
+        if (!frame.watch) return;
+        event({ type: "turn.running" });
+        void delay(350).then(() => {
+          if (socket.readyState === socket.OPEN) event({ type: "turn.end", resume: "new", message: { ordinal: 0, content: [] } });
+        });
+      } else if (frame.type === "turn.ack") event({ type: "turn.acknowledged" });
+    });
+  });
+  try {
+    await exchangeRuntimeTurn({ input: turn, recovery: true, signal: AbortSignal.timeout(3000), endpoint: async () => `${url}?connection=${connectionId}`,
+      ackMs: 120, reconnectMs: 240,
+      event: async (event, send, requestId) => {
+        assert.equal(event.type, "turn.end");
+        results++;
+        send({ type: "turn.ack", requestId, turnId: turn.turnId, revision: "persisted" });
+      },
+    });
+    assert.equal(requests, 1);
+    assert.equal(results, 1);
+  } finally { await close(server); }
+});
+
 test("Agent refuses a ready frame for a different registered connection before dispatch", { timeout: 5000 }, async () => {
   const { server, url } = await listen();
   let dispatched = 0;

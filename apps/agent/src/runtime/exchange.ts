@@ -91,7 +91,7 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
               clearTimeout(phaseTimer);
               if (options.recovery) {
                 const { spaceId, sessionId, turnId, harness } = options.input;
-                send({ type: "turn.recover", requestId, execution: { spaceId, sessionId, turnId, harness }, traceContext: options.input.traceContext });
+                send({ type: "turn.recover", requestId, watch: true, execution: { spaceId, sessionId, turnId, harness }, traceContext: options.input.traceContext });
                 phaseTimer = setTimeout(() => finish(new RuntimeExecutionUncertainError("Runtime result is not available yet")), ackMs);
               } else send({ type: "turn.start", requestId, resumeOnly: started, input: options.input });
               started = true;
@@ -101,6 +101,13 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
             if (!ready) throw new Error("Runtime handshake is incomplete");
             if (frame.type !== "runtime.event" || frame.requestId !== requestId) throw new Error("Runtime event identity mismatch");
             const event = runtimeEventSchema.parse(frame.event);
+            if (event.type === "turn.running") {
+              if (!options.recovery || completed) throw new Error("Unexpected Runtime recovery status");
+              // No completion deadline for a known live execution; the connection and lease still have timeouts.
+              clearTimeout(phaseTimer);
+              disconnectedAt = null;
+              return;
+            }
             if (event.type === "turn.error") {
               finalError = event.uncertain ? new RuntimeResultUnavailableError(event.message) : new Error(event.message);
               finish(finalError);
