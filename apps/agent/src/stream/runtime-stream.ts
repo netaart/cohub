@@ -51,6 +51,7 @@ export function createRuntimeStream(
     if (!message) throw new Error("Runtime stream message was not started");
     if (event.type === "text.delta") {
       const previous = message.blocks.get(event.index);
+      if (!event.delta && previous?.type === (event.kind === "text" ? "text" : "thinking")) return;
       const text = previous?.type === "text" ? previous.text : previous?.type === "thinking" ? previous.thinking : "";
       const block: ContentBlock = event.kind === "text"
         ? { type: "text", text: text + event.delta, _meta: { streamIndex: event.index } }

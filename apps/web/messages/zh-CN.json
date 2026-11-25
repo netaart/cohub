@@ -1494,6 +1494,7 @@
 	"chat_loading_turns": "正在加载对话…",
 	"chat_waiting_model": "等待模型…",
 	"chat_waiting_model_name": "等待 {model}…",
+	"chat_thinking": "思考中…",
 	"chat_starting_generation": "正在启动生成…",
 	"chat_starting_agent": "正在启动 Agent…",
 	"chat_loading_space": "正在加载 Space…",

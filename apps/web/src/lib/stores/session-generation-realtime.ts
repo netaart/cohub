@@ -75,6 +75,22 @@ function isContentTextuallySame(a: ContentBlock[], b: ContentBlock[]): boolean {
 	return getVisibleTextContent(a) === getVisibleTextContent(b);
 }
 
+function isSnapshotUnchanged(current: ContentBlock[], next: ContentBlock[]) {
+	return (
+		current.length === next.length &&
+		current.every((block, index) => {
+			const other = next[index];
+			if (block.type !== other?.type) return false;
+			return (
+				block.type === "text" ||
+				block.type === "thinking" ||
+				JSON.stringify(block) === JSON.stringify(other)
+			);
+		}) &&
+		isContentTextuallySame(current, next)
+	);
+}
+
 function resolveStreamMessageId(input: {
 	sessionId: string;
 	turnId?: string | null;
@@ -449,7 +465,7 @@ export function applyGenerationStreamSnapshot(
 	const snapshotBlocks = input.current.content;
 	const skipContentUpdate =
 		snapshotBlocks.length > 0 &&
-		isContentTextuallySame(currentBlocks, snapshotBlocks);
+		isSnapshotUnchanged(currentBlocks, snapshotBlocks);
 	const currentIntermediateMessages = current?.intermediateMessages ?? [];
 	const incomingIntermediateMessages = normalizeIntermediateMessages(
 		input.intermediateMessages,

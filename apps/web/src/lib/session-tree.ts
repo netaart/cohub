@@ -51,7 +51,8 @@ export type ToolState = {
 export type TurnFooterPhase =
 	| "starting"
 	| "starting_generation"
-	| "waiting_model";
+	| "waiting_model"
+	| "thinking";
 
 export type TimelineItem =
 	| {
@@ -86,6 +87,7 @@ export type TimelineItem =
 			phase: TurnFooterPhase;
 			runtimeProvider?: string | null;
 			runtimeModel?: string | null;
+			since?: number | null;
 	  }
 	| {
 			id: string;

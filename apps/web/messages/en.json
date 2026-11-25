@@ -1494,6 +1494,7 @@
 	"chat_loading_turns": "Loading turns…",
 	"chat_waiting_model": "waiting model…",
 	"chat_waiting_model_name": "waiting {model}…",
+	"chat_thinking": "thinking…",
 	"chat_starting_generation": "starting generation…",
 	"chat_starting_agent": "starting agent…",
 	"chat_loading_space": "Loading space…",

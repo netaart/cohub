@@ -233,6 +233,14 @@ function resolveTurnFooterPhase(streaming: {
 		return "waiting_model";
 	}
 
+	if (
+		streaming.status === "streaming" &&
+		streaming.contentBlocks.length > 0 &&
+		streaming.contentBlocks.every((block) => block.type === "thinking")
+	) {
+		return "thinking";
+	}
+
 	return null;
 }
 
@@ -286,6 +294,7 @@ type TurnTimelineInput = {
 		runtimeProvider?: string | null;
 		runtimeModel?: string | null;
 		lastPatchAt?: number | null;
+		lastEventAt?: number | null;
 		startedAt?: number | null;
 	} | null;
 };
@@ -569,10 +578,9 @@ function renderTurnTimelineItems(
 	if (hasStreamingState && input.streaming) {
 		const footerPhase = resolveTurnFooterPhase(input.streaming);
 		if (footerPhase) {
-			const footerTurn =
-				input.turns.find((turn) => turn.id === streamingTurnId) ??
-				input.turns.at(-1) ??
-				null;
+			const streamingTurn =
+				input.turns.find((turn) => turn.id === streamingTurnId) ?? null;
+			const footerTurn = streamingTurn ?? input.turns.at(-1) ?? null;
 			const footerKey = footerTurn
 				? getTurnRenderKey(footerTurn)
 				: `streaming:${input.streaming.sessionId ?? input.sessionId ?? "active"}`;
@@ -580,8 +588,12 @@ function renderTurnTimelineItems(
 				id: `${footerKey}:footer`,
 				kind: "turn_footer",
 				phase: footerPhase,
-				runtimeProvider: input.streaming.runtimeProvider ?? null,
-				runtimeModel: input.streaming.runtimeModel ?? null,
+				runtimeProvider: input.streaming.runtimeModel
+					? (input.streaming.runtimeProvider ?? null)
+					: (streamingTurn?.provider ?? null),
+				runtimeModel:
+					input.streaming.runtimeModel ?? streamingTurn?.model ?? null,
+				since: input.streaming.lastEventAt ?? input.streaming.startedAt ?? null,
 			});
 		}
 	}

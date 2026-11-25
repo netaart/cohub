@@ -925,6 +925,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						runtimeProvider: activeGenerationState.runtimeProvider,
 						runtimeModel: activeGenerationState.runtimeModel,
 						lastPatchAt: activeGenerationState.lastPatchAt ?? null,
+						lastEventAt: activeGenerationState.lastEventAt ?? null,
 						startedAt: activeGenerationState.startedAt ?? null,
 					}
 				: null;

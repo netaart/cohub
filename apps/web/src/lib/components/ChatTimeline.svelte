@@ -289,11 +289,13 @@ $effect(() => {
 							? modelName
 								? m.chat_waiting_model_name({ model: modelName }, { locale })
 								: m.chat_waiting_model({}, { locale })
+						: item.phase === 'thinking'
+							? m.chat_thinking({}, { locale })
 						: item.phase === 'starting_generation'
 							? m.chat_starting_generation({}, { locale })
 							: m.chat_starting_agent({}, { locale })}
 					<div class="py-1">
-						<GenerationRuntimeStatusRow label={footerLabel} compact />
+						<GenerationRuntimeStatusRow label={footerLabel} since={item.since} compact />
 					</div>
 				{:else if item.kind === 'tool'}
 					<div class="px-[var(--chat-msg-inset)]">
