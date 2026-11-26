@@ -19,7 +19,6 @@ import { COHUB_SYSTEM_QUEUE, createBullmqQueue, defaultJobRetention } from "@coh
 import { createLogger } from "@cohub/infra/logging";
 import {
   APP_DOMAIN_CHECK_JOB,
-  APP_DOMAIN_EXCLUSIVE_STATUSES,
   isHostnameWithin,
   type AppDomainCheckJobData,
   type AppDomainRemovedReason,
@@ -27,6 +26,7 @@ import {
 import { and, eq, inArray } from "drizzle-orm";
 import { config } from "./config.js";
 import { db } from "./db/index.js";
+import { readCustomDomainBinding, type CustomDomainBinding } from "./lib/app-domain-binding.js";
 import { redisCommandClient } from "./redis.js";
 import { dispatchSpaceDomainEvent } from "./space-events.js";
 import { spaceWalletBilling } from "./space-wallet-billing.js";
@@ -80,18 +80,7 @@ export function parseHttpsOriginHostname(origin: string | null | undefined): str
   }
 }
 
-export type CustomDomainBinding = { appId: string; active: boolean };
-
 const FILL_IF_GENERATION_SCRIPT = `if (redis.call("get", KEYS[2]) or "0") == ARGV[1] then return redis.call("set", KEYS[1], ARGV[2], "EX", ARGV[3]) end return 0`;
-
-async function readCustomDomainBinding(hostname: string): Promise<CustomDomainBinding | null> {
-  const [row] = await db
-    .select({ appId: appDomains.appId, status: appDomains.status })
-    .from(appDomains)
-    .where(and(eq(appDomains.hostname, hostname), inArray(appDomains.status, [...APP_DOMAIN_EXCLUSIVE_STATUSES])))
-    .limit(1);
-  return row ? { appId: row.appId, active: row.status === "active" } : null;
-}
 
 /**
  * The App holding a custom domain (provisioning, active or being removed), or

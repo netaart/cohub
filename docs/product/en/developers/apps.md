@@ -873,6 +873,12 @@ Key rules:
 - `purchase()` redirects to checkout; call it from the user's purchase action,
   never during initialization. Checkout return is not proof of payment —
   re-query `getCheckoutState()` / `getOrder()`.
+- To return to the cart after success, failure, or cancellation, call
+  `purchase({ productKey: "credit_pack", returnUrl: "https://shop.neta.art/cart#/done" })`.
+  Use an absolute HTTPS URL: the App’s exact public page on Cohub (any query or hash),
+  or any path on its managed standalone domain or an active custom domain bound to it.
+  Omit `returnUrl` to return to the public page. Checkout sets `cohub_checkout`
+  and preserves the hash; `getCheckoutState().orderId` can be `null` on another origin.
 - Space credits meter actions inside the Space's Apps; Cohub Balance is a
   separate global platform-managed product component (`cohubBalanceUsd`,
   whole dollars, immutable).

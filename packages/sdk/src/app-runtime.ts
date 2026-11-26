@@ -1,3 +1,5 @@
+import type { AppCommercePurchaseInput } from "./apis/app-commerce.js";
+import { readAppCheckoutState, readPendingOrderId } from "./app-checkout.js";
 import { browserSessionHint, endAppBrowserSession, restoreAppBrowserSession, startAppBrowserSignIn } from "./app-browser-sign-in.js";
 import { APP_RUNTIME_HAPTIC_VIBRATION, buildAppRuntimeCloseRequest, buildAppRuntimeHaptic, buildAppRuntimeReady, type AppRuntimeHaptic, parseAppRuntimeAnnounce, buildAppRuntimeConfigureRequest, buildAppRuntimePointer, type AppAppearance, type AppRuntimeConfigureRequest, type AppRuntimeAnchor, type AppRuntimeRect } from "@cohub/protocol/app-runtime";
 
@@ -377,8 +379,7 @@ export class ParentBridgeTransport implements AppRuntimeTransport {
  * after a single request is fulfilled (one-shot, per §7.2 of the plan).
  *
  * Non-interactive messages (`context`, `checkout-state`) are answered locally
- * without opening a popup — the app already knows its own appId, and
- * checkout state is not available on the app's own origin in broker mode.
+ * without opening a popup.
  */
 export type AppRuntimeResolvedApp = {
   id: string;
@@ -389,6 +390,15 @@ export type AppRuntimeResolvedApp = {
 };
 
 export type AppRuntimeAppResolver = () => Promise<AppRuntimeResolvedApp | null>;
+
+async function standaloneCheckoutState(resolveAppId: () => Promise<string | null>) {
+  const state = readAppCheckoutState({ searchParams: new URLSearchParams(globalThis.window?.location.search) });
+  if (!state.orderId) {
+    const appId = await resolveAppId().catch(() => null);
+    if (appId) state.orderId = readPendingOrderId(appId);
+  }
+  return { type: "cohub.app.checkout-state.result", ...state };
+}
 
 export class PopupBrokerTransport implements AppRuntimeTransport {
   readonly supportsNavigation = false;
@@ -532,11 +542,7 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
       } as T;
     }
     if (message.type === "cohub.app.checkout-state") {
-      return {
-        type: "cohub.app.checkout-state.result",
-        status: null,
-        orderId: null,
-      } as T;
+      return await standaloneCheckoutState(() => this.resolveAppId()) as T;
     }
 
     const timeoutMs = options?.timeoutMs ?? 120_000;
@@ -573,13 +579,13 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
       let timer: ReturnType<typeof setTimeout> | null = null;
       let closeChecker: ReturnType<typeof setInterval> | null = null;
 
-      const finish = (fn: () => void) => {
+      const finish = (fn: () => void, keepPopup = false) => {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
         if (closeChecker) clearInterval(closeChecker);
         window.removeEventListener("message", onMessage);
-        try { popup.close(); } catch { /* ignore */ }
+        if (!keepPopup) { try { popup.close(); } catch { /* ignore */ } }
         fn();
       };
 
@@ -638,6 +644,8 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
 
         // Response to our request.
         if (data.requestId !== requestId) return;
+        const checkout = data.type === "cohub.app.purchase.result" ? (data as Extract<RuntimeResponse, { type: "cohub.app.purchase.result" }>).checkout : null;
+        const keepCheckoutOpen = message.returnUrl !== undefined && checkout?.checkoutUsable === true && !!checkout.checkoutUrl;
         finish(() => {
           if (data.type === "cohub.app.error") {
             reject(new AppRuntimeError((data as { code?: string }).code ?? "request_failed", (data as { message: string }).message, requestId));
@@ -667,7 +675,7 @@ export class PopupBrokerTransport implements AppRuntimeTransport {
             }
           }
           resolve(data as T);
-        });
+        }, keepCheckoutOpen);
       };
 
       window.addEventListener("message", onMessage);
@@ -1345,12 +1353,13 @@ export class AppRuntimeApi {
     return result;
   }
 
-  async purchase(input: { productKey: string; purchaseAttemptId?: string }) {
+  async purchase(input: AppCommercePurchaseInput) {
     const purchaseAttemptId = input.purchaseAttemptId?.trim() || generateRequestId();
     const response = await this.transport.request<{ checkout: { providerKey: string | null; checkoutUrl: string | null; checkoutUsable: boolean; status: string | null; message: string | null; orderId: string; productKey: string } | null }>(
       {
         type: "cohub.app.purchase",
         productKey: input.productKey,
+        returnUrl: input.returnUrl,
         purchaseAttemptId,
       },
       { timeoutMs: 120_000 },
@@ -1488,6 +1497,9 @@ export class OriginBrokerTransport implements AppRuntimeTransport {
   }
 
   async request<T>(message: Record<string, unknown>, options?: AppRuntimeRequestOptions) {
+    if (message.type === "cohub.app.checkout-state") {
+      return await standaloneCheckoutState(async () => (await this.resolveApp())?.id ?? null) as T;
+    }
     const transport = await this.resolveTransport();
     return transport?.request<T>(message, options) ?? null;
   }

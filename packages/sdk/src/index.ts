@@ -153,6 +153,7 @@ export { APP_APPEARANCE_TOKENS, appAppearanceVar } from "@cohub/protocol/app-run
 export type { AppAppearance, AppAppearanceToken, AppRuntimeHaptic, AppWindowStatus } from "@cohub/protocol/app-runtime";
 export type { AppEmbedAttachOptions, AppEmbedHandle, AppEmbedShell } from "./app-embed.js";
 export type { AppNavigationCall, AppNavigationLaunch, AppNavigationOpenMessage, AppNavigationOpenResponse, AppNavigationTarget } from "@cohub/protocol/app-navigation";
+export { readAppCheckoutState } from "./app-checkout.js";
 export { createAppBridgeCore } from "./app-bridge-core.js";
 export type { AppBridgeAuthorizationContext, AppBridgeCore, AppBridgeCoreConfig, AppBridgeCoreApp, AppBridgeDialogState, AppBridgeDiagnostic, AppAuthorizeRequest, AppAuthorizeSpaceOption, AppCheckoutStarted, AppPurchaseRequest, AppBridgeGetAccessToken, AppBridgeGetViewerUuid, AppBridgeRequestSignIn, AppPromotionAttributionContext } from "./app-bridge-core.js";
 export { normalizeSpacePickerQuery, orderSpacePickerItems, filterSpacePickerItems, selectSpacePickerItems } from "./space-picker.js";

@@ -32,6 +32,8 @@ export type AppCommerceCreditConsumeResponse = {
   businessKey: string;
 };
 
+export type AppCommercePurchaseInput = { productKey: string; purchaseAttemptId?: string; returnUrl?: string };
+
 export type AppCommercePurchaseResponse = {
   checkout: {
     providerKey: string | null;
@@ -89,7 +91,7 @@ export class AppCommerceApi {
     );
   }
 
-  purchase(appId: string, input: { productKey: string }) {
+  purchase(appId: string, input: AppCommercePurchaseInput) {
     return this.transport.request<AppCommercePurchaseResponse>(
       `/api/apps/${encodeURIComponent(appId)}/commerce/purchase`,
       {

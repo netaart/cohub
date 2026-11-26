@@ -52,7 +52,7 @@ import {
 } from "./app-runtime.js";
 import type { AppRuntimeHaptic } from "@cohub/protocol/app-runtime";
 import type { CreateSpaceInput, Permission } from "./types.js";
-import type { AppCommerceCheckoutStatus } from "./apis/app-commerce.js";
+import type { AppCommerceCheckoutStatus, AppCommercePurchaseInput } from "./apis/app-commerce.js";
 
 export class CohubClient {
   readonly spaces: SpacesApi;
@@ -316,7 +316,7 @@ export class CohubClient {
         if (!appId) throw new Error("App context is unavailable — not running inside a published app runtime or App Action.");
         return this.appCommerce.consumeCredits(appId, input);
       },
-      purchase: async (input: { productKey: string; purchaseAttemptId?: string }) =>
+      purchase: async (input: AppCommercePurchaseInput) =>
         this.appRuntime.purchase(input),
       getCheckoutState: async (): Promise<{ status: AppCommerceCheckoutStatus; orderId: string | null }> => {
         const result = await this.appRuntime.checkoutState();

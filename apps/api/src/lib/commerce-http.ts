@@ -5,6 +5,7 @@ import { featureGateResponse } from "./feature-gate.js";
 import { jsonError } from "./json-error.js";
 import { SpaceCommerceNotInitializedError, resolveSpaceCommerceEntitlement } from "./space-commerce.js";
 
+export const APP_COMMERCE_INVALID_RETURN_URL_CODE = "app_commerce_invalid_return_url";
 export const SPACE_COMMERCE_NOT_INITIALIZED_CODE = "space_commerce_not_initialized";
 export const SPACE_COMMERCE_ENTITLEMENT_REQUIRED_CODE = FEATURE_NOT_ENTITLED_ERROR_CODE;
 export const SPACE_COMMERCE_ENTITLEMENT_UNAVAILABLE_CODE = "space_commerce_unavailable";

@@ -30,12 +30,13 @@ import {
 	parseAppRuntimeWindowState,
 } from "@cohub/protocol/app-runtime";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
-import type {
-	AppContent,
-	AppRecord,
-	AppRuntimeInvocationContext,
-	AppRuntimeShellContext,
-	SpaceRole,
+import {
+	type AppContent,
+	type AppRecord,
+	type AppRuntimeInvocationContext,
+	type AppRuntimeShellContext,
+	readAppCheckoutState,
+	type SpaceRole,
 } from "@neta-art/cohub";
 import { elementClientToLocal, parseBoardLaunch } from "@neta-art/cohub/board";
 import { onMount, type Snippet, untrack } from "svelte";
@@ -43,7 +44,6 @@ import { appDisplayTitle } from "#lib/app-page-meta.ts";
 import { type AppLaunchState, resolveAppFrame } from "#lib/app-url.ts";
 import WorkBoardSurface from "#lib/components/app/AppBoardSurface.svelte";
 import WorkFileSurface from "#lib/components/app/AppFileSurface.svelte";
-import { readAppCheckoutState } from "#lib/components/app/app-checkout-state.ts";
 import CohubBar, {
 	type CohubBarOwner,
 	type CohubBarSpace,

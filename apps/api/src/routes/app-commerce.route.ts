@@ -3,7 +3,8 @@ import { Hono } from "hono";
 import { isBillingApiError } from "../lib/billing-api-error.js";
 import { mapWithConcurrency } from "../lib/concurrency.js";
 import { authzDenied, getExecutionPrincipal, getOptionalAuth, requireValidId, useAuth } from "../lib/middleware.js";
-import { handleAppCommerceRouteError } from "../lib/commerce-http.js";
+import { APP_COMMERCE_INVALID_RETURN_URL_CODE, handleAppCommerceRouteError } from "../lib/commerce-http.js";
+import { jsonError } from "../lib/json-error.js";
 import { hasPermission } from "../permissions.js";
 import {
   buildAppCheckoutReturnUrls,
@@ -26,6 +27,7 @@ import {
 import {
   createAppPurchaseIdempotencyKey,
   normalizePurchaseAttemptId,
+  resolvePurchaseReturnUrl,
   toPromotionMoney,
 } from "../lib/app-commerce-purchase.js";
 import {
@@ -266,6 +268,7 @@ router.post(`/${resource}/:id/commerce/purchase`, async (c) => {
   const body = await c.req.json().catch(() => null) as {
     productKey?: unknown;
     purchaseAttemptId?: unknown;
+    returnUrl?: unknown;
     promotionAttribution?: unknown;
   } | null;
   const productKey = typeof body?.productKey === "string" ? body.productKey.trim() : "";
@@ -284,6 +287,18 @@ router.post(`/${resource}/:id/commerce/purchase`, async (c) => {
     ? await resolvePublishedAppPromotion(resolved.app.appId, promotionAttribution.promotionId)
     : null;
   try {
+    const publicUrl = () => resolvePublicAppUrl({ spaceId: resolved.app.spaceId, appSlug: resolved.app.appSlug });
+    let returnUrl: string | null = null;
+    if (body?.returnUrl !== undefined) {
+      returnUrl = await resolvePurchaseReturnUrl(body.returnUrl, {
+        appId: resolved.app.appId,
+        publicAppUrl: await publicUrl(),
+        hostTemplate: config.appStandaloneHostTemplate,
+      });
+      if (!returnUrl) return jsonError(c, {
+        status: 400, code: APP_COMMERCE_INVALID_RETURN_URL_CODE, message: "returnUrl must be an HTTPS URL for this app",
+      });
+    }
     const businessKey = await requireSpaceCommerceBusinessKey(resolved.app.spaceId);
     const sdk = await createSpaceCommerceSdk();
     const product = await sdk.admin.products.get({ business_key: businessKey, product_key: productKey });
@@ -319,10 +334,7 @@ router.post(`/${resource}/:id/commerce/purchase`, async (c) => {
         return c.json({ message: "Cohub Balance configuration is invalid" }, 409);
       }
     }
-    const appUrl = await resolvePublicAppUrl({
-      spaceId: resolved.app.spaceId,
-      appSlug: resolved.app.appSlug,
-    });
+    const appUrl = returnUrl ?? await publicUrl();
     if (!appUrl) return c.json({ message: "app public url is unavailable" }, 409);
     const provisionalRedirects = buildAppCheckoutReturnUrls({ appUrl });
     const result = await sdk.admin.orders.create(
