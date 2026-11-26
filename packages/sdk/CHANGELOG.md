@@ -1,5 +1,17 @@
 # @neta-art/cohub
 
+## 13.31.0
+
+### Minor Changes
+
+- fa6755e: App purchases accept an optional `returnUrl` so buyers can return directly to a cart or another page on the App after checkout. Use `--return-url` with `cohub apps commerce purchase` for the same behavior.
+- 6f4b90f: Board scripts run in one engine everywhere: `cohub boards export`, `simulate` and `profile` run them in a headless Chrome, as the Cohub app does, instead of Node. Without an installed Chrome, Chromium or Edge, Chrome's headless shell downloads once, the first time a Board with scripts, shaders or 3D needs it. Exports with scripts draw several times faster: frames without shaders or 3D draw with Canvas 2D, and videos stream raw frames to ffmpeg instead of writing a PNG per frame. `script.time` lets a timeline drive a script's clock (`boards place` adds the track for a scripted item), modules import fonts, images and `.bin` files as bytes with `with { type: "bytes" }`, script workers can draw Canvas text in Geist and Geist Mono on every screen, `fetch()` in an export or simulation says there is no network, and `profile` reports what each script's updates and draws cost. `--at 33:35s` now fails instead of reading 33 as milliseconds. The SDK's Node script host is gone, and `board/testing` takes `scripts: { files, element }` and runs them in the page.
+
+### Patch Changes
+
+- f29bc6e: The Runtime stops re-uploading the archive of a Turn that was resolved on the server. The archive stays on the machine; it no longer retries every 10 seconds.
+- c16d1bb: A background Runtime now moves to a newer CLI without disconnecting. Once idle, it hands the same Runtime to the newer version, and the Space and desktop never see it go offline. If the new version fails to start, the old one picks the Runtime back up. `cohub runtime up` from a newer CLI updates a running Runtime in place.
+
 ## 13.30.1
 
 ### Patch Changes
