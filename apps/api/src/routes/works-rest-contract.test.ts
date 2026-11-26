@@ -103,6 +103,10 @@ function mountedRoutes(): string[] {
       if (resource) path = path.replaceAll(`\${resource}`, resource);
       mounted.push(path && path !== "/" ? normalizePath(`${prefix}${path}`) : normalizePath(prefix));
     }
+    for (const sub of routeSource.matchAll(/\.route\(\s*"(\/[^"]*)"\s*,\s*(create\w+Router)\((?:wire)?\)\s*\)/g)) {
+      const from = routeSource.match(new RegExp(`import\\s*\\{[^}]*\\b${sub[2]}\\b[^}]*\\}\\s*from\\s*"\\./([^"]+)\\.js"`));
+      if (from) registerFile(`${prefix}${sub[1] === "/" ? "" : sub[1]}`, join(dirname(file), `${from[1]}.ts`), resource);
+    }
   };
 
   for (const match of indexSource.matchAll(

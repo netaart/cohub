@@ -1,6 +1,14 @@
 import { Hono } from "hono";
 import { maybeEnqueueCrossSpaceReference } from "../../lib/cross-space-reference.js";
 import spacesRouter, { meSpacesRouter } from "./spaces.route.js";
+import checkpointsRouter from "./checkpoints.route.js";
+import envRouter from "./env.route.js";
+import configRouter from "./config.route.js";
+import sandboxRouter from "./sandbox.route.js";
+import runtimeRouter from "./runtime.route.js";
+import promptRouter from "./prompt.route.js";
+import sessionsRouter from "./sessions.route.js";
+import channelsRouter from "./channels.route.js";
 import fsRouter from "./fs.route.js";
 import membersRouter from "./members.route.js";
 import accessRouter from "./access.route.js";
@@ -38,6 +46,14 @@ router.use("/:id/*", afterSpaceRequest);
 router.use("/:id", afterSpaceRequest);
 
 router.route("/", spacesRouter);
+router.route("/", checkpointsRouter);
+router.route("/", envRouter);
+router.route("/", configRouter);
+router.route("/", sandboxRouter);
+router.route("/", runtimeRouter);
+router.route("/", promptRouter);
+router.route("/", sessionsRouter);
+router.route("/", channelsRouter);
 // In production, /:id/fs/* is routed to fs-api by the gateway (same codebase).
 // This remains a local/non-split fallback.
 router.route("/:id/fs", fsRouter);
