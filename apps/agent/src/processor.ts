@@ -1,80 +1,46 @@
-import { randomUUID } from "node:crypto";
 import { UnrecoverableError, type Job } from "bullmq";
-import { imageBlockToPi, type ContentBlock, type PiImageContent } from "@cohub/protocol/core";
-import { ModelUnavailableError } from "@cohub/core/sessions";
-import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import { ModelUnavailableError, getPromptAuthScopes, readRuntimeRecovery, type PromptAccessMode } from "@cohub/core/sessions";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { context, trace } from "@opentelemetry/api";
 import { getActiveTraceIdentifiers, getOrCreateRequestId, setRequestContextAttributes } from "@cohub/infra/tracing";
-import { wrapAgentTurn } from "@cohub/infra/tracing/agent";
+import { wrapAgentTurn, getAgentTracer } from "@cohub/infra/tracing/agent";
 import { runInActiveSpan, extractTrace } from "@cohub/infra/tracing/propagator";
-import { getAgentTracer } from "@cohub/infra/tracing/agent";
 import { getSpace } from "./api.js";
-import { abortSessionTurn, failSessionTurn, interruptSessionTurn, persistAssistantMessage, persistUserMessage, publishSessionTurnsUpdated } from "./persistence.js";
+import { abortSessionTurn, failSessionTurn, interruptSessionTurn, publishSessionTurnsUpdated } from "./persistence.js";
 import { ensureSandboxConnection } from "./sandbox-pool.js";
 import { createSandboxCodingTools } from "./sandbox/tools.js";
-import { CohubModelRegistry, type CohubModel } from "./runtime/model-registry.js";
+import { CohubModelRegistry } from "./runtime/model-registry.js";
 import { resolveBatchContextWindow } from "./runtime/batch-limit.js";
 import { loadRuntimeModelsConfigs } from "./runtime/models-loader.js";
 import { loadImageToTextConfig } from "./runtime/model-tasks-config.js";
 import { loadSpaceEnvSnapshot } from "./runtime/env-cache.js";
 import { CompactionStateRecoveryError, maybeAutoCompact, OverflowRecoveryError, type CompactionOutcome } from "./runtime/compaction.js";
-import { clearCurrentSessionExecutionAuth, setCurrentSessionExecutionAuth } from "./runtime/session-execution-auth.js";
+import { clearCurrentSessionExecutionAuth } from "./runtime/session-execution-auth.js";
 import { resolveSpaceFileVisibility } from "./runtime/cross-space-query-access.js";
 import { normalizeGenerationPolicy } from "@cohub/protocol/generation";
 import { runWithToolExecutionContext } from "./tool-context.js";
 import { createImageInputCache } from "@cohub/model-runtime/image-content";
-import { loadOrCreateSessionHandle, ensurePendingUserMessage, hasSessionUserMessage, removePendingUserMessage, resetStreamState, drainStreamStateBeforeReset, persistInterruptedAssistantSnapshot, refreshSessionHandleFileSignature, getSessionKey, type SessionHandle } from "./session.js";
+import { loadOrCreateSessionHandle } from "./session.js";
+import { ensurePendingUserMessage, hasSessionUserMessage, removePendingUserMessage, refreshSessionHandleFileSignature, getSessionKey, type SessionHandle } from "./session-handle.js";
+import { resetStreamState, drainStreamStateBeforeReset, persistInterruptedAssistantSnapshot } from "./session-stream.js";
 import { claimNextTurnBatch, buildUserMessagesForBatch, enqueueNextRunnableTurn, resolveBatchAccessMode, type ClaimedTurnBatch } from "./batch.js";
 import { acquireSessionLock } from "./session-lock.js";
-import { defaultJobRetention } from "@cohub/infra/bullmq";
 import { enqueueRuntimeRecovery } from "@cohub/infra/agent-queue";
 import { agentTurnQueue, enqueueAgentTurnJob, type AgentTurnJobData } from "./queue.js";
 import { getAbortEvent } from "./abort.js";
 import { setActiveAbortController, clearActiveAbortController, getActiveAbortEvent, setActiveAbortEvent } from "./active-turns.js";
-import { sendOutput } from "./redis.js";
-import { env } from "./env.js";
 import { logger } from "./logger.js";
-import { getPromptAuthScopes, parsePromptEnv, readRuntimeRecovery, type PromptAccessMode } from "@cohub/core/sessions";
-import { createAgentExecutionToken } from "./execution-grants.js";
 import { isApprovalMode, isLocalHarness, resolveHarness } from "@cohub/protocol";
 import { executeRemoteHarnessTurn, markRuntimeRecovery, RuntimeExecutionUncertainError } from "./runtime/remote-runtime.js";
 import { loadRuntimeContext } from "./runtime/context-store.js";
-
+import { createTurnExecutionToken, getQueueWaitMs, logSpaceBootstrapWarning, resolveActorUserId, resolvePromptEnv, resolveRequestedModel, resolveRequestedThinkingLevel, resolveSourceClientId } from "./turn-job-meta.js";
+import { BUSY_RETRY_MAX_DELAY_MS, clearRetryState, requeueTurnJob } from "./turn-retry.js";
+import { type TurnUserMessage, clearActiveTurnContext, contentToAgentMessage, normalizeTurnUserMeta, setActiveTurnContext } from "./turn-context.js";
+import { getShellCommandBlock, runDirectShellCommandTurn } from "./shell-command-turn.js";
 
 const sessionHandles = new Map<string, SessionHandle>();
 const tools = createSandboxCodingTools();
 const agentTracer = getAgentTracer();
-type RetryReason = "session_busy";
-
-const retryAttemptsByKey = new Map<string, number>();
-const BUSY_RETRY_BASE_DELAY_MS = env.AGENT_BUSY_RETRY_BASE_DELAY_MS;
-const BUSY_RETRY_MAX_DELAY_MS = env.AGENT_BUSY_RETRY_MAX_DELAY_MS;
-
-function getRetryKey(data: AgentTurnJobData, reason: RetryReason) {
-  return `${reason}:${data.sessionId}`;
-}
-
-function nextRetryDelayMs(key: string) {
-  const attempt = (retryAttemptsByKey.get(key) ?? 0) + 1;
-  retryAttemptsByKey.set(key, attempt);
-  return Math.min(BUSY_RETRY_MAX_DELAY_MS, BUSY_RETRY_BASE_DELAY_MS * 2 ** Math.min(attempt - 1, 12));
-}
-
-function clearRetryState(data: AgentTurnJobData) {
-  retryAttemptsByKey.delete(getRetryKey(data, "session_busy"));
-}
-
-async function requeueTurnJob(data: AgentTurnJobData, reason: RetryReason, job?: Job<AgentTurnJobData>, meta?: Record<string, unknown>) {
-  const retryKey = getRetryKey(data, reason);
-  const delay = nextRetryDelayMs(retryKey);
-  await enqueueAgentTurnJob({ ...data, reason: "retry" }, {
-    jobId: `agent-session-retry-${reason}-${data.sessionId}-${Math.max(1, Math.ceil(Date.now() / delay))}`,
-    delay,
-    removeOnComplete: true,
-    removeOnFail: defaultJobRetention.removeOnFail,
-  });
-  return { skipped: reason, retryInMs: delay, jobId: job?.id ?? null, ...meta };
-}
 
 type DrainNextQueuedResult = { enqueued: boolean; turnId: string | null };
 
@@ -134,115 +100,6 @@ async function getModelRegistryForUser(userId: string | null | undefined, spaceI
     logger.warn(`[Agent] Model registry warning for ${userId?.trim() || "__platform__"}:`, registry.getError());
   }
   return registry;
-}
-
-type AgentUserContent = { type: "text"; text: string } | PiImageContent;
-
-function contentToAgentMessage(content: ContentBlock[], meta: Record<string, unknown> | null): AgentMessage {
-  const agentContent = content.flatMap((block): AgentUserContent[] => {
-    if (block.type === "text") return [{ type: "text", text: block.text }];
-    const image = block.type === "image" ? imageBlockToPi(block) : null;
-    return image ? [image] : [];
-  });
-  return {
-    role: "user",
-    content: agentContent.length > 0 ? agentContent : [{ type: "text", text: "" }],
-    timestamp: Date.now(),
-    meta: meta ?? null,
-  } as unknown as AgentMessage;
-}
-
-function getShellCommandBlock(content: ContentBlock[]): Extract<ContentBlock, { type: "shell_command" }> | null {
-  if (content.length !== 1) return null;
-  const block = content[0];
-  return block?.type === "shell_command" ? block : null;
-}
-
-function extractToolResultText(result: unknown): string {
-  if (!result || typeof result !== "object") return "";
-  const record = result as Record<string, unknown>;
-  const details = record.details && typeof record.details === "object" && !Array.isArray(record.details)
-    ? record.details as Record<string, unknown>
-    : null;
-  if (typeof details?.rawOutput === "string") return details.rawOutput;
-  if (Array.isArray(record.content)) {
-    return record.content
-      .map((item) => item && typeof item === "object" && (item as Record<string, unknown>).type === "text"
-        ? String((item as Record<string, unknown>).text ?? "")
-        : "")
-      .join("");
-  }
-  return typeof record.content === "string" ? record.content : "";
-}
-
-function formatShellCommandResultForLlm(input: {
-  command: string;
-  output: string;
-  exitCode?: number | null;
-  cancelled?: boolean;
-  timedOut?: boolean;
-  timeoutSecs?: number | null;
-}) {
-  let text = `Ran \`${input.command}\``;
-  text += input.output ? `\n\`\`\`\n${input.output}\n\`\`\`` : "\n(no output)";
-  if (input.timedOut) {
-    text += `\n\n(command timed out${input.timeoutSecs ? ` after ${input.timeoutSecs}s` : ""})`;
-  } else if (input.cancelled) {
-    text += "\n\n(command cancelled)";
-  } else if (input.exitCode != null && input.exitCode !== 0) {
-    text += `\n\nCommand exited with code ${input.exitCode}`;
-  }
-  return text;
-}
-
-type TurnUserMessage = {
-  turnId: string;
-  turnSeq: number;
-  userMessageId: string;
-  content: ContentBlock[];
-  meta: Record<string, unknown>;
-};
-
-function normalizeTurnUserMeta(input: TurnUserMessage, patch?: Record<string, unknown>) {
-  return {
-    ...input.meta,
-    ...(patch ?? {}),
-    userMessageId: input.userMessageId,
-    messageId: input.userMessageId,
-    turnId: input.turnId,
-    anchorUserMessageId: input.userMessageId,
-  };
-}
-
-function setActiveTurnContext(handle: SessionHandle, input: {
-  turnId: string;
-  turnSeq: number;
-  userMessageId: string | null;
-  userMeta: Record<string, unknown> | null;
-  llmRound?: number | null;
-}) {
-  handle.currentTurnId = input.turnId;
-  handle.currentTurnSeq = input.turnSeq;
-  handle.currentTurnPatchSeq = 0;
-  handle.currentAssistantMessageOrdinal = null;
-  handle.currentStreamMessageId = null;
-  handle.currentUserMessageId = input.userMessageId;
-  handle.currentUserMessageMeta = input.userMeta;
-  handle.currentLlmRound = input.llmRound ?? 0;
-}
-
-function clearActiveTurnContext(handle: SessionHandle, sessionId: string) {
-  clearCurrentSessionExecutionAuth(sessionId);
-  handle.currentLlmRound = null;
-  handle.currentTurnId = null;
-  handle.currentTurnSeq = null;
-  handle.currentExecutionTurnIds.clear();
-  handle.currentTurnPatchSeq = null;
-  handle.currentAssistantMessageOrdinal = null;
-  handle.currentStreamMessageId = null;
-  handle.currentUserMessageId = null;
-  handle.currentUserMessageMeta = null;
-  handle.lastActiveAt = Date.now();
 }
 
 async function runWithRoundAutoCompaction<T>(
@@ -306,296 +163,6 @@ async function runWithRoundAutoCompaction<T>(
   }
 }
 
-async function appendAndPersistUserMessage(input: {
-  handle: SessionHandle;
-  spaceId: string;
-  sessionId: string;
-  user: TurnUserMessage;
-  meta: Record<string, unknown>;
-}) {
-  const content = input.user.content;
-  const message = contentToAgentMessage(content, input.meta);
-  const startedAt = new Date().toISOString();
-  input.handle.session.agent.state.messages.push(message);
-  const entryId = input.handle.sessionManager.appendMessage(message);
-  (message as unknown as Record<string, unknown>).sessionEntryId = entryId;
-
-  await persistUserMessage({
-    spaceId: input.spaceId,
-    sessionId: input.sessionId,
-    userMessageId: input.user.userMessageId,
-    turnId: input.user.turnId,
-    agentSessionEntryId: entryId,
-    content,
-    meta: input.meta,
-    startedAt,
-  });
-
-  return message;
-}
-
-async function runDirectShellCommandTurn(input: {
-  handle: SessionHandle;
-  tools: ReturnType<typeof createSandboxCodingTools>;
-  spaceId: string;
-  sessionId: string;
-  user: TurnUserMessage;
-  command: string;
-  rawText: string;
-  actorUserId: string | null;
-  executionToken: string | null;
-  executionScopes?: ReturnType<typeof getPromptAuthScopes>;
-  turnMetrics: { llmRoundCount: number; toolCallCount: number };
-  abortSignal?: AbortSignal;
-}) {
-  const { user } = input;
-  const userMessageId = user.userMessageId;
-
-  const bashTool = input.tools.find((tool) => tool.name === "bash");
-  if (!bashTool) throw new Error("bash tool is not available");
-
-  const handle = input.handle;
-  setActiveTurnContext(handle, {
-    turnId: user.turnId,
-    turnSeq: user.turnSeq,
-    userMessageId,
-    userMeta: user.meta,
-    llmRound: 0,
-  });
-  handle.currentAssistantMessageOrdinal = 0;
-  handle.currentStreamMessageId = `turn:${user.turnId}:assistant:0`;
-
-  setCurrentSessionExecutionAuth({
-    sessionId: input.sessionId,
-    turnId: user.turnId,
-    actorUserId: input.actorUserId,
-    executionToken: input.executionToken,
-    executionScopes: input.executionScopes ?? [],
-  });
-
-  let cleanupParentAbort: (() => void) | null = null;
-
-  try {
-    const userMeta = normalizeTurnUserMeta(user, {
-      intent: "shell_command",
-      llm: false,
-      rawText: input.rawText,
-      command: input.command,
-    });
-    handle.currentUserMessageMeta = userMeta;
-    await appendAndPersistUserMessage({
-      handle,
-      spaceId: input.spaceId,
-      sessionId: input.sessionId,
-      user,
-      meta: userMeta,
-    });
-
-    const toolUseId = `direct_shell_${randomUUID()}`;
-    const toolStartedAt = new Date().toISOString();
-    const abortController = new AbortController();
-    const abortFromParent = () => abortController.abort();
-    if (input.abortSignal?.aborted) {
-      abortFromParent();
-    } else {
-      input.abortSignal?.addEventListener("abort", abortFromParent, { once: true });
-      cleanupParentAbort = () => input.abortSignal?.removeEventListener("abort", abortFromParent);
-    }
-    handle.activeDirectShellCommand = { turnId: user.turnId, abortController };
-
-    const toolUseBlock: ContentBlock = {
-      type: "tool_use",
-      id: toolUseId,
-      name: "bash",
-      input: { command: input.command },
-      _meta: { direct: true, source: "shell_command", toolStatus: "running", timing: { startedAt: toolStartedAt } },
-    };
-    let patchSeq = 0;
-    let latestOutput = "";
-    let publishChain = Promise.resolve();
-
-    const publish = async (blocks: ContentBlock[], final = false) => {
-      patchSeq += 1;
-      handle.currentTurnPatchSeq = patchSeq;
-      await sendOutput({
-        type: "stream_update",
-        spaceId: input.spaceId,
-        sessionId: input.sessionId,
-        turnId: user.turnId,
-        seq: patchSeq,
-        baseSeq: Math.max(0, patchSeq - 1),
-        content: blocks,
-        snapshotContent: blocks,
-        messageId: handle.currentStreamMessageId,
-        messageOrdinal: 0,
-        sourceMessageId: userMessageId,
-        anchorUserMessageId: userMessageId,
-        timestamp: Date.now(),
-        ...(final ? { turnEnd: true } : {}),
-      });
-    };
-
-    await publish([toolUseBlock]);
-
-    let exitCode: number | null | undefined;
-    let cancelled = false;
-    let timedOut = false;
-    let termination: Record<string, unknown> | null = null;
-    let truncated = false;
-    let outputTruncated = false;
-    let executionFailed = false;
-    let errorMessage: string | null = null;
-    try {
-      const result = await bashTool.execute(
-        toolUseId,
-        { command: input.command } as never,
-        abortController.signal,
-        (partialResult: unknown) => {
-          const partialText = extractToolResultText(partialResult);
-          if (partialText) latestOutput = partialText;
-          const partialBlocks: ContentBlock[] = [
-            toolUseBlock,
-            {
-              type: "tool_result",
-              tool_use_id: toolUseId,
-              content: latestOutput,
-              is_error: false,
-              _meta: { direct: true, source: "shell_command", partial: true, toolStatus: "running" },
-            },
-          ];
-          publishChain = publishChain
-            .then(() => publish(partialBlocks))
-            .catch((error) => {
-              logger.error(`[Agent] Failed to publish shell command update for session ${input.sessionId}:`, error);
-            });
-        },
-      );
-      latestOutput = extractToolResultText(result);
-      const details = result && typeof result === "object" ? (result as unknown as Record<string, unknown>).details as Record<string, unknown> | undefined : undefined;
-      exitCode = typeof details?.exitCode === "number" ? details.exitCode : null;
-      termination = details?.termination && typeof details.termination === "object" && !Array.isArray(details.termination)
-        ? details.termination as Record<string, unknown>
-        : null;
-      timedOut = termination?.reason === "timed_out";
-      cancelled = termination?.reason === "aborted" || abortController.signal.aborted;
-      outputTruncated = details?.outputTruncated === true || termination?.outputTruncated === true;
-      truncated = Boolean(details?.truncation) || outputTruncated;
-    } catch (error) {
-      executionFailed = true;
-      cancelled = abortController.signal.aborted;
-      errorMessage = error instanceof Error ? error.message : String(error);
-      latestOutput = latestOutput ? `${latestOutput}\n\n${errorMessage}` : errorMessage;
-      exitCode = null;
-      if (!cancelled) {
-        logger.error(`[Agent] Direct shell command failed sessionId=${input.sessionId}:`, error);
-      }
-    }
-
-    const isError = executionFailed || cancelled || timedOut || outputTruncated || (exitCode != null && exitCode !== 0);
-    const toolCompletedAt = new Date().toISOString();
-    const toolDurationMs = Math.max(0, new Date(toolCompletedAt).getTime() - new Date(toolStartedAt).getTime());
-    const toolTiming = { startedAt: toolStartedAt, completedAt: toolCompletedAt, durationMs: toolDurationMs };
-    const finalToolUseBlock: ContentBlock = {
-      ...toolUseBlock,
-      _meta: { direct: true, source: "shell_command", toolStatus: isError ? "failed" : "done", timing: toolTiming },
-    };
-    const finalToolResultBlock: ContentBlock = {
-      type: "tool_result",
-      tool_use_id: toolUseId,
-      content: latestOutput,
-      is_error: isError,
-      _meta: {
-        direct: true,
-        source: "shell_command",
-        partial: false,
-        toolStatus: isError ? "failed" : "done",
-        exitCode: exitCode ?? null,
-        termination,
-        timedOut,
-        cancelled,
-        truncated,
-        outputTruncated,
-        executionFailed,
-        timing: toolTiming,
-        ...(errorMessage ? { errorMessage } : {}),
-      },
-    };
-    const assistantContent: ContentBlock[] = [finalToolUseBlock, finalToolResultBlock];
-    await publishChain;
-    await publish(assistantContent, true);
-
-    const model = handle.session.agent.state.model;
-    const assistantMessage = {
-      role: "assistant",
-      content: assistantContent,
-      timestamp: Date.now(),
-      stopReason: cancelled ? "aborted" : "end",
-      provider: model.provider,
-      model: model.id,
-      meta: {
-        messageKind: "shell_command_result",
-        executionKind: "shell_command_result",
-        llm: false,
-        command: input.command,
-        rawText: input.rawText,
-        exitCode: exitCode ?? null,
-        termination,
-        timedOut,
-        cancelled,
-        truncated,
-        outputTruncated,
-        executionFailed,
-        ...(errorMessage ? { errorMessage } : {}),
-        llmContextText: formatShellCommandResultForLlm({
-          command: input.command,
-          output: latestOutput,
-          exitCode,
-          cancelled,
-          timedOut,
-          timeoutSecs: typeof termination?.timeoutSecs === "number" ? termination.timeoutSecs : null,
-        }),
-      },
-    } as never;
-    handle.session.agent.state.messages.push(assistantMessage);
-    const entryId = handle.sessionManager.appendMessage(assistantMessage);
-    (assistantMessage as unknown as Record<string, unknown>).sessionEntryId = entryId;
-
-    const completedAt = new Date().toISOString();
-
-    await persistAssistantMessage({
-      spaceId: input.spaceId,
-      spaceSessionId: input.sessionId,
-      userMessageId,
-      event: {
-        type: "turn_end",
-        message: assistantMessage as Record<string, unknown>,
-        toolResults: [{
-          toolCallId: toolUseId,
-          toolName: "bash",
-          input: { command: input.command },
-          content: latestOutput,
-          isError,
-          _meta: finalToolResultBlock._meta,
-        }],
-      },
-      userId: input.actorUserId,
-      turnId: user.turnId,
-      startedAt: toolStartedAt,
-      completedAt,
-      thinkingLevel: handle.session.agent.state.thinkingLevel,
-      contextWindow: handle.session.agent.state.model.contextWindow,
-      contextWindowSource: (handle.session.agent.state.model as CohubModel).contextWindowSource,
-    });
-
-    input.turnMetrics.toolCallCount += 1;
-    removePendingUserMessage(handle, userMessageId);
-  } finally {
-    cleanupParentAbort?.();
-    handle.activeDirectShellCommand = null;
-    clearActiveTurnContext(handle, input.sessionId);
-  }
-}
-
 async function prepareHandle(input: {
   spaceId: string;
   sessionId: string;
@@ -637,76 +204,6 @@ async function prepareHandle(input: {
   return handle;
 }
 
-function resolveRequestedModel(ownerMeta: Record<string, unknown>) {
-  const provider = typeof ownerMeta.provider === "string" && ownerMeta.provider.trim() ? ownerMeta.provider.trim() : null;
-  const model = typeof ownerMeta.model === "string" && ownerMeta.model.trim() ? ownerMeta.model.trim() : null;
-  return provider && model ? { provider, id: model } : undefined;
-}
-
-function resolveRequestedThinkingLevel(ownerMeta: Record<string, unknown>): string | null | undefined {
-  if (typeof ownerMeta.requestedThinkingLevel !== "string") return undefined;
-  const trimmed = ownerMeta.requestedThinkingLevel.trim();
-  return trimmed || null;
-}
-
-function resolveActorUserId(ownerMeta: Record<string, unknown>) {
-  return typeof ownerMeta.userId === "string" && ownerMeta.userId.trim() ? ownerMeta.userId.trim() : null;
-}
-
-function resolveSourceClientId(ownerMeta: Record<string, unknown>) {
-  const sourceClientId = ownerMeta.sourceClientId;
-  return typeof sourceClientId === "string" && sourceClientId.trim() ? sourceClientId.trim() : null;
-}
-
-function resolveContextHookEnv(ownerMeta: Record<string, unknown>) {
-  const context = ownerMeta.context && typeof ownerMeta.context === "object" && !Array.isArray(ownerMeta.context)
-    ? ownerMeta.context as Record<string, unknown>
-    : null;
-  if (context?.kind !== "space_hook") return null;
-  const env = context.env;
-  if (!env || typeof env !== "object" || Array.isArray(env)) return null;
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (!key.startsWith("COHUB_HOOK_")) continue;
-    if (typeof value !== "string" || !value.trim()) continue;
-    out[key] = value;
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-
-function resolvePromptEnv(ownerMeta: Record<string, unknown>) {
-  let userEnv: Record<string, string> | null = null;
-  try {
-    userEnv = parsePromptEnv(ownerMeta.env);
-  } catch (error) {
-    logger.warn(`[Agent] ignoring invalid prompt env: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const hookEnv = resolveContextHookEnv(ownerMeta);
-  if (!userEnv && !hookEnv) return null;
-  // System hook keys win over user prompt.env.
-  return { ...(userEnv ?? {}), ...(hookEnv ?? {}) };
-}
-
-async function createTurnExecutionToken(input: {
-  accessMode: PromptAccessMode;
-  actorUserId: string;
-  spaceId: string;
-  sessionId: string;
-  turnId: string;
-  source: unknown;
-  promptAuth?: unknown;
-}) {
-  if (input.accessMode !== "full_access") return null;
-  return createAgentExecutionToken({
-    actorUserId: input.actorUserId,
-    spaceId: input.spaceId,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    source: typeof input.source === "string" && input.source.trim() ? input.source.trim() : "agent_turn",
-    scopes: getPromptAuthScopes(input.promptAuth, input.spaceId),
-  });
-}
-
 function filterToolsForAccessMode(allTools: AgentTool[], accessMode: PromptAccessMode) {
   if (accessMode === "full_access") return allTools;
   const readOnlyTools = new Set(["read", "ls", "find", "grep"]);
@@ -745,27 +242,7 @@ async function failActiveTurn(input: {
   }
 }
 
-function getSpaceBootstrapMeta(meta: unknown) {
-  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
-  const bootstrap = (meta as Record<string, unknown>).bootstrap;
-  if (!bootstrap || typeof bootstrap !== "object" || Array.isArray(bootstrap)) return null;
-  return bootstrap as Record<string, unknown>;
-}
-
-function logSpaceBootstrapWarning(spaceId: string, meta: unknown) {
-  const bootstrap = getSpaceBootstrapMeta(meta);
-  const status = typeof bootstrap?.status === "string" ? bootstrap.status : null;
-  if (!status || status === "ready") return;
-  logger.warn(`[Agent] space bootstrap is not ready; continuing execution spaceId=${spaceId} status=${status} stage=${typeof bootstrap?.stage === "string" ? bootstrap.stage : ""} error=${typeof bootstrap?.errorMessage === "string" ? bootstrap.errorMessage : ""}`);
-}
-
 type PostReleaseDrain = { spaceId: string; sessionId: string; reason: string } | null;
-
-function getQueueWaitMs(job: Pick<Job<unknown>, "timestamp" | "processedOn">) {
-  if (!job.timestamp) return null;
-  const processedAt = job.processedOn && job.processedOn >= job.timestamp ? job.processedOn : Date.now();
-  return Math.max(0, processedAt - job.timestamp);
-}
 
 export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
   const data = job.data;
@@ -1294,11 +771,6 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
     }
   });
 }
-
-export const __test = {
-  getShellCommandBlock,
-  formatShellCommandResultForLlm,
-};
 
 export function getActiveSessionHandles() {
   return sessionHandles;

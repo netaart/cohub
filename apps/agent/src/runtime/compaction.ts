@@ -1,9 +1,9 @@
 import { DEFAULT_COMPACTION_SETTINGS, prepareCompaction, shouldCompact } from "./pi-compaction.js";
 import type { Usage } from "@earendil-works/pi-ai";
 import { logger } from "../logger.js";
-import type { SessionHandle } from "../session.js";
+import type { SessionHandle } from "../session-handle.js";
 import { persistCompactionEvent } from "../persistence.js";
-import { refreshSessionHandleFileSignature } from "../session.js";
+import { refreshSessionHandleFileSignature } from "../session-handle.js";
 import { getAgentTracer } from "@cohub/infra/tracing/agent";
 import { db } from "../db.js";
 import { sessionTurns } from "@cohub/db";

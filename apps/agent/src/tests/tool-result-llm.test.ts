@@ -6,7 +6,7 @@ process.env.DATABASE_URL ??= "postgres://localhost/cohub_test";
 process.env.APP_ENCRYPTION_KEY ??= "test-key";
 process.env.SESSIONS_NAMESPACE ??= "test";
 
-const { toLlmMessages } = await import("../runtime/session-runtime.js");
+const { toLlmMessages } = await import("../runtime/llm-messages.js");
 
 test("tool results never reach the provider with empty content", () => {
   const [message] = toLlmMessages([{
