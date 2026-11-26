@@ -4,7 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { and, eq, sql } from "drizzle-orm";
 import { sessionTurns, spaceSessions } from "@cohub/db";
-import { harnessArchiveIndexSchema, validateArchiveBoundary, type HarnessArchiveIndex, type RuntimeArchiveSegment, type RuntimeArchiveUpload } from "@cohub/protocol";
+import { RUNTIME_EXECUTION_RESOLVED_CODE, harnessArchiveIndexSchema, validateArchiveBoundary, type HarnessArchiveIndex, type RuntimeArchiveSegment, type RuntimeArchiveUpload } from "@cohub/protocol";
 import { readRuntimeRecovery, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { db } from "../../db/index.js";
 import { useAuth, requireValidId, authzDenied } from "../../lib/middleware.js";
@@ -18,7 +18,10 @@ import { dispatchTurnUpdated } from "../../session-output.js";
 import { getSessionTurnById } from "../../session-turns.js";
 
 const router = new Hono();
-const fail = (status: 400 | 403 | 404 | 409, message: string): never => { throw new HTTPException(status, { message }); };
+const fail = (status: 400 | 403 | 404 | 409, message: string, code?: string): never => {
+  throw new HTTPException(status, { message, res: Response.json({ message, ...(code ? { code } : {}) }, { status }) });
+};
+const resolved = (): never => fail(409, "Execution was resolved", RUNTIME_EXECUTION_RESOLVED_CODE);
 const storage = () => ({ endpoint: config.turnObjectS3Endpoint, publicEndpoint: config.turnObjectS3PublicEndpoint,
   region: config.turnObjectS3Region, bucket: config.turnObjectS3Bucket,
   accessKeyId: config.turnObjectS3AccessKeyId, secretAccessKey: config.turnObjectS3SecretAccessKey });
@@ -54,7 +57,7 @@ async function validateOwner(spaceId: string, userId: string, index: HarnessArch
   const turn = await turnInSpace(spaceId, index.sessionId, index.turnId);
   const recovery = readRuntimeRecovery(turn.meta);
   if (recovery?.ownerUserId !== userId || (turn.meta as { harness?: unknown } | null)?.harness !== index.harness) fail(403, "Runtime owner mismatch");
-  if (recovery?.state === "confirmed_stopped") fail(409, "Execution was resolved");
+  if (recovery?.state === "confirmed_stopped") resolved();
   const parent = index.parentTurnId ? await turnInSpace(spaceId, index.sessionId, index.parentTurnId) : null;
   if (parent && (parent.sequence >= turn.sequence || readRuntimeRecovery(parent.meta)?.state === "confirmed_stopped" || !parent.harnessIndex)) fail(409, "Archive parent is not ready");
   const parentIndex = parent ? storedIndex(parent.harnessIndex, index.sessionId, parent.id) : null;
@@ -140,7 +143,7 @@ router.get("/:sessionId/:turnId", async (c) => {
   if (![spaceId, sessionId, turnId].every(requireValidId)) return c.json({ message: "Invalid identity" }, 400);
   if (!await hasPermission(user, "sandbox.manage", { spaceId }) || !await hasPermission(user, "session.view", { spaceId, sessionId })) return authzDenied(c);
   const turn = await turnInSpace(spaceId, sessionId, turnId);
-  if (readRuntimeRecovery(turn.meta)?.state === "confirmed_stopped") fail(409, "Execution was resolved");
+  if (readRuntimeRecovery(turn.meta)?.state === "confirmed_stopped") resolved();
   if ((turn.meta as { runtimeArchiveStatus?: unknown } | null)?.runtimeArchiveStatus !== "ready") fail(409, "Archive is not ready");
   const index = storedIndex(turn.harnessIndex, sessionId, turnId);
   return c.json({ index, segments: index.segments.map((segment) => ({ segment, ...createPresignedGetObjectUrl(storage(), key(spaceId, index, segment.sha256)) })) });

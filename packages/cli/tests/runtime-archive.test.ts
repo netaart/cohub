@@ -59,6 +59,33 @@ test("outbox retries after restart without another turn; corrupt downloads never
   } finally { await storage.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("a resolved Turn leaves the outbox with its descendants and is kept locally", async () => {
+  const root = await mkdtemp(join(tmpdir(), "archive-resolved-"));
+  const storage = await archiveStorageFixture();
+  try {
+    const archiveRoot = join(root, "state");
+    const reported: unknown[] = [];
+    const store = new RuntimeArchiveStore(archiveRoot, storage.transport);
+    store.setErrorReporter((error) => reported.push(error));
+    const state = { sessionId: randomUUID(), harness: "pi" as const, nativeSessionId: randomUUID(), path: join(root, "native") };
+    await writeFile(state.path, "first\n");
+    storage.setOffline(true);
+    const parent = await store.stage(state, randomUUID());
+    await writeFile(state.path, "first\nsecond\n");
+    const child = await store.stage(state, randomUUID());
+    storage.setOffline(false);
+    storage.resolved.add(parent.turnId);
+    await store.flush(new AbortController().signal);
+    assert.deepEqual(reported, []);
+    assert.equal(await store.pendingCount(), 0);
+    assert.deepEqual((await readdir(join(archiveRoot, "resolved"))).sort(), [`${parent.turnId}.json`, `${child.turnId}.json`].sort());
+    const prepares = storage.prepares;
+    await store.stage(state, parent.turnId);
+    await store.flush(new AbortController().signal);
+    assert.equal(storage.prepares, prepares);
+  } finally { await storage.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("interrupted restore reuses verified segments and refreshes expired URLs", async () => {
   const root = await mkdtemp(join(tmpdir(), "archive-download-retry-"));
   const storage = await archiveStorageFixture();

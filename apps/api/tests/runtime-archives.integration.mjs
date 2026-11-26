@@ -26,12 +26,13 @@ mock.module("../src/lib/middleware.js", { exports: {
 mock.module("../src/permissions.js", { exports: { hasPermission: async (user) => user.uuid !== "denied" } });
 mock.module("../src/redis.js", { exports: { redisCommandClient: { set: async (key, value) => tickets.set(key, value), get: async (key) => tickets.get(key) } } });
 mock.module("../src/space-upload-storage.js", { exports: {} });
-mock.module("../src/upload-quota.js", { exports: { consumeUploadQuota: async () => {}, UploadRateLimitError: class extends Error {} } });
+mock.module("../src/upload-quota.js", { exports: { consumeUploadQuota: async () => {}, UploadRateLimitError: class extends Error {}, uploadRateLimitedResponse: () => null } });
 mock.module("../src/turn-object-storage.js", { exports: { headTurnObject: async (key) => objects.get(key) ?? {} } });
 mock.module("../src/session-output.js", { exports: { dispatchTurnUpdated: async () => {} } });
 mock.module("../src/session-turns.js", { exports: { getSessionTurnById: async () => null } });
 const { default: route } = await import("../src/routes/spaces/runtime-archives.route.js");
-const app = new Hono().route("/:id/runtime/archives", route);
+const { handleApiError } = await import("../src/api-error.js");
+const app = new Hono().route("/:id/runtime/archives", route).onError(handleApiError);
 after(() => engine.close());
 async function setup(parentTurnId = null) {
   const spaceId = crypto.randomUUID(), sessionId = crypto.randomUUID(), turnId = crypto.randomUUID();
@@ -113,6 +114,9 @@ test("wrong owner, cross-space access, malformed chains and late confirmed-stop 
   assert.equal((await request(spaceId, "prepare", { ...index, segments: [{ ...index.segments[0], offset: 1 }] })).status, 400);
   assert.equal((await request(spaceId, "prepare", index)).status, 200);
   await database.update(sessionTurns).set({ meta: { harness: "pi", runtimeRecovery: { state: "confirmed_stopped", ownerUserId: "owner" } } }).where(eq(sessionTurns.id, index.turnId));
-  assert.equal((await request(spaceId, "commit", index)).status, 409);
+  for (const response of [await request(spaceId, "prepare", index), await request(spaceId, "commit", index)]) {
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { message: "Execution was resolved", code: "runtime_execution_resolved" });
+  }
   assert.equal((await app.request(`/${spaceId}/runtime/archives/${index.sessionId}/${index.turnId}`)).status, 409);
 });
