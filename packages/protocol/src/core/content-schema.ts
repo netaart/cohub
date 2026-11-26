@@ -4,7 +4,7 @@ import type { ContentBlock } from "./content.js";
 const meta = z.record(z.string(), z.unknown());
 export const contentBlockSchema: z.ZodType<ContentBlock> = z.lazy(() => z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string(), _meta: meta.optional() }),
-  z.object({ type: z.literal("thinking"), thinking: z.string(), signature: z.string().optional(), _meta: meta.optional() }),
+  z.object({ type: z.literal("thinking"), thinking: z.string(), signature: z.string().optional(), redacted: z.boolean().optional(), _meta: meta.optional() }),
   z.object({ type: z.literal("image"), source: z.union([
     z.object({ type: z.literal("url"), url: z.string().url() }),
     z.object({ type: z.literal("base64"), media_type: z.string(), data: z.string() }),

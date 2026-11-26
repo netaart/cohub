@@ -2,48 +2,11 @@ import { rename, rm, stat } from "node:fs/promises";
 import { recordJobFailure } from "@cohub/infra/bullmq";
 import { extractTrace, runInActiveSpan } from "@cohub/infra/tracing/propagator";
 import { getAgentTracer } from "@cohub/infra/tracing/agent";
-import { sessionMessages, sessionTurns, sessionTurnSegments } from "@cohub/db";
-import { and, asc, eq, gte, lte, or, sql } from "drizzle-orm";
-import { db } from "./db.js";
-import { appendTerminalGenerationMessages } from "./generation-session-sync.js";
 import { getAgentSessionFilePath, getAgentSpaceSessionsPath, getAgentWorkspacePath } from "./runtime/paths.js";
 import { SessionManager } from "./runtime/local-session-manager.js";
 import type { AgentSessionForkJobData } from "./queue.js";
 
 const tracer = getAgentTracer();
-
-async function appendVisibleGenerationMessages(input: {
-  sessionId: string;
-  anchorSequence: number;
-  sessionManager: SessionManager;
-}) {
-  const segments = await db.select().from(sessionTurnSegments)
-    .where(eq(sessionTurnSegments.sessionId, input.sessionId))
-    .orderBy(asc(sessionTurnSegments.ordinal));
-  const rangePredicates = segments.flatMap((segment) => {
-    const toSequence = Math.min(segment.toSequence ?? input.anchorSequence, input.anchorSequence);
-    if (toSequence < segment.fromSequence) return [];
-    return [and(
-      eq(sessionMessages.sessionId, segment.sourceSessionId),
-      eq(sessionTurns.sessionId, segment.sourceSessionId),
-      gte(sessionTurns.sequence, segment.fromSequence),
-      lte(sessionTurns.sequence, toSequence),
-    )];
-  });
-  const visibleRange = or(...rangePredicates);
-  if (!visibleRange) return;
-
-  const rows = await db.select({ message: sessionMessages }).from(sessionMessages)
-    .innerJoin(sessionTurns, eq(sessionMessages.turnId, sessionTurns.id))
-    .where(and(
-      eq(sessionTurns.executionKind, "direct_generation"),
-      sql`${sessionMessages.meta}->>'messageKind' in ('generation_request', 'generation_result')`,
-      visibleRange,
-    ))
-    .orderBy(asc(sessionTurns.sequence), asc(sessionMessages.sequence));
-
-  await appendTerminalGenerationMessages(rows.map((row) => row.message), input.sessionManager);
-}
 
 async function provisionForkFile(data: AgentSessionForkJobData) {
   const parentSessionFile = getAgentSessionFilePath(data.spaceId, data.parentSessionId);
@@ -76,11 +39,6 @@ async function provisionForkFile(data: AgentSessionForkJobData) {
       sessionManager.setSessionFile(workingSessionFile);
     }
 
-    await appendVisibleGenerationMessages({
-      sessionId: data.sessionId,
-      anchorSequence: data.anchorSequence,
-      sessionManager,
-    });
     result = { sessionId: data.sessionId, branchFile: childSessionFile };
   } catch (error) {
     errors.push(error);

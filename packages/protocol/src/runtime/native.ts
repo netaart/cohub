@@ -84,9 +84,6 @@ export const nativeIngestTurnSchema = z.object({
 }).strict();
 export type NativeIngestTurn = z.infer<typeof nativeIngestTurnSchema>;
 
-/** Turn states that end a Turn; a native Turn in one of them is settled on both sides. */
-export const SETTLED_TURN_STATUSES = ["completed", "failed", "interrupted", "cancelled", "merged"] as const;
-
 /** How many Turns one ingest may carry; a larger backlog is sent as consecutive batches. */
 export const NATIVE_INGEST_MAX_TURNS = 500;
 

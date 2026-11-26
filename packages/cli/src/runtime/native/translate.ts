@@ -11,7 +11,7 @@ export function piContent(value: unknown): ContentBlock[] {
   return list(value).flatMap((entry): ContentBlock[] => {
     const block = record(entry);
     if (block.type === "text") return [{ type: "text", text: text(block.text) }];
-    if (block.type === "thinking") return [{ type: "thinking", thinking: text(block.thinking), ...(typeof (block.thinkingSignature ?? block.signature) === "string" ? { signature: String(block.thinkingSignature ?? block.signature) } : {}) }];
+    if (block.type === "thinking") return [{ type: "thinking", thinking: text(block.thinking), ...(typeof (block.thinkingSignature ?? block.signature) === "string" ? { signature: String(block.thinkingSignature ?? block.signature) } : {}), ...(block.redacted === true ? { redacted: true } : {}) }];
     if (block.type === "toolCall") return identifiable(block.id) && identifiable(block.name) ? [{ type: "tool_use", id: block.id, name: block.name, input: record(block.arguments) }] : [];
     if (block.type === "image") return [{ type: "image", source: { type: "base64", data: text(block.data), media_type: text(block.mimeType) } }];
     return [{ type: "text", text: JSON.stringify(block) }];

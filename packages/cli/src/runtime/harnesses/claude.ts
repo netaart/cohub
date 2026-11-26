@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { ApprovalMode, ContentBlock, NativeProjection } from "@neta-art/cohub";
+import type { ApprovalMode, CanonicalProjectionMessage, ContentBlock, NativeProjection } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { copyNativeArchive } from "../native/archive.js";
 import { projectChainedSession, projectionMeta, projectionToolId, rebindSessionId } from "./chained-projection.js";
@@ -60,6 +60,7 @@ const profile: StreamJsonProfile = {
   label: "Claude Code",
   binary: "claude",
   provider: "anthropic",
+  endpoint: (named) => claudeEndpoint(named),
   dataRoot,
   projectDirectory: claudeProjectDirectory,
   effortLevels: ["low", "medium", "high", "xhigh", "max"],
@@ -80,6 +81,7 @@ const profile: StreamJsonProfile = {
 
 function anthropicBlock(block: ContentBlock): Record<string, unknown> | null {
   if (block.type === "text") return { type: "text", text: block.text };
+  if (block.type === "thinking") return !block.signature ? null : block.redacted ? { type: "redacted_thinking", data: block.signature } : { type: "thinking", thinking: block.thinking, signature: block.signature };
   if (block.type === "image" && block.source.type === "base64") return { type: "image", source: { type: "base64", media_type: block.source.media_type, data: block.source.data } };
   if (block.type === "tool_use") return { type: "tool_use", id: projectionToolId(block.id), name: block.name.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128) || "tool", input: block.input };
   if (block.type === "tool_result") {
@@ -88,6 +90,15 @@ function anthropicBlock(block: ContentBlock): Record<string, unknown> | null {
   }
   return null;
 }
+
+let gatewayDiscovered = false;
+const fromGateway = (model: unknown) => text(record(model).description).startsWith("From gateway");
+
+/** A Turn naming the generic gateway is believed: a detached Runtime's catalog was discovered by its launcher. */
+const claudeEndpoint = (named?: string | null) => claudeProvider(process.env.ANTHROPIC_BASE_URL, gatewayDiscovered || named === "gateway");
+
+/** Only the endpoint that signed thinking accepts it; an unnamed gateway replays nothing. */
+const replayableOn = (endpoint: string) => (message: CanonicalProjectionMessage) => endpoint !== "gateway" && message.provider === endpoint;
 
 /** Claude Code merges consecutive assistant records sharing a message id; each projected call gets its own. */
 function withAssistantIds(projection: NativeProjection): NativeProjection {
@@ -132,7 +143,7 @@ function claudeProvider(baseUrl: string | undefined, discovered = false): string
 }
 
 function claudeModelCatalog(entries: unknown[], baseUrl?: string): HarnessModel[] {
-  const provider = claudeProvider(baseUrl, entries.some((value) => text(record(value).description).startsWith("From gateway")));
+  const provider = claudeProvider(baseUrl, entries.some(fromGateway));
   const seen = new Set<string>();
   return entries.flatMap((value) => {
     const model = record(value);
@@ -152,7 +163,9 @@ export const claudeHarness: LocalHarnessAdapter = {
   async models(executable, cwd, options) {
     await streamJsonHelp(profile, executable, cwd);
     try {
-      const models = claudeModelCatalog(array((await claudeInitialize(executable, cwd)).models), process.env.ANTHROPIC_BASE_URL);
+      const entries = array((await claudeInitialize(executable, cwd)).models);
+      gatewayDiscovered = entries.some(fromGateway);
+      const models = claudeModelCatalog(entries, process.env.ANTHROPIC_BASE_URL);
       if (models.some((model) => model.isDefault)) return models;
       if (options?.strict) throw new Error("Claude Code initialize lists no default model");
     } catch (error) {
@@ -188,7 +201,7 @@ export const claudeHarness: LocalHarnessAdapter = {
           },
         cohub: projectionMeta(input, segment.message),
       }];
-    })),
+    }, replayableOn(claudeEndpoint(input.provider)))),
     rebind: rebindSessionId,
     archive: {
       // The copy takes a fresh id: the archived one may already exist here, and is never replaced.

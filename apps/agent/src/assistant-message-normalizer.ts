@@ -234,6 +234,7 @@ export function normalizeAssistantTurn(
         type: "thinking",
         thinking: block.thinking,
         ...(typeof (block.thinkingSignature ?? block.signature) === "string" ? { signature: String(block.thinkingSignature ?? block.signature) } : {}),
+        ...(block.redacted === true ? { redacted: true } : {}),
         ...(block._meta && typeof block._meta === "object" ? { _meta: block._meta as Record<string, unknown> } : {}),
       });
       continue;

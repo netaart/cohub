@@ -22,6 +22,13 @@ export type SessionTurnExecutionKind = "agent" | "direct_generation" | "note";
 export const isAgentTurn = (turn: { executionKind?: SessionTurnExecutionKind }) =>
   (turn.executionKind ?? "agent") === "agent";
 
+/** Turn states that end a Turn; a native Turn in one of them is settled on both sides. */
+export const SETTLED_TURN_STATUSES = ["completed", "failed", "interrupted", "cancelled", "merged"] as const;
+
+export const canForkTurn = (turn: { status: SessionTurnStatus; executionKind?: SessionTurnExecutionKind }) =>
+  (SETTLED_TURN_STATUSES as readonly string[]).includes(turn.status)
+  && !(turn.executionKind === "direct_generation" && turn.status === "merged");
+
 export type SessionTurnSummary = {
   text?: string | null;
   finishReason?: "completed" | "failed" | "interrupted" | "merged" | "cancelled";

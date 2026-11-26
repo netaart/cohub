@@ -2108,6 +2108,22 @@ function registerTurns(sessionsCmd: Command): void {
     });
 
   turnsCmd
+    .command("fork <sessionId> <turnId>")
+    .description("Fork a session from a settled turn into a new session")
+    .option("--title <title>", "Title of the new session")
+    .option("--json", "Output as JSON")
+    .action(async (sessionId: string, turnId: string, opts: { title?: string; json?: boolean }) => {
+      const spaceId = await resolveSpace(sessionsCmd);
+      try {
+        const result = await createClient().space(spaceId).session(sessionId).turn(turnId).fork({ title: opts.title });
+        if (jsonRequested(opts)) return outJson(result);
+        ok(`Session forked: ${result.session.id}`);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  turnsCmd
     .command("speak <sessionId> <turnId>")
     .description("Read a turn's reply aloud with the configured voice and print the audio URLs")
     .option("--no-wait", "Return without waiting for audio still being rendered")

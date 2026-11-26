@@ -200,7 +200,7 @@ export {
   requestSourceToHeaders,
   resolveRequestSourceChannel,
 } from "@cohub/protocol/provenance";
-export { isAgentTurn, normalizeSessionTurnOrigin, readReplyStatus, readSentTurns, readSessionTurnOrigin, readSessionTurnReply } from "@cohub/protocol/model";
+export { canForkTurn, isAgentTurn, normalizeSessionTurnOrigin, readReplyStatus, readSentTurns, readSessionTurnOrigin, readSessionTurnReply } from "@cohub/protocol/model";
 export type { SentTurnRef, SessionTurnOrigin, SessionTurnOriginKind, SessionTurnReply, SessionTurnReplyMode, SessionTurnReplyStatus } from "@cohub/protocol/model";
 export {
   APP_SESSION_SOURCES,

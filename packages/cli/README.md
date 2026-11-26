@@ -291,6 +291,14 @@ URL per segment; `--no-wait` returns at once:
 cohub -s <spaceId> spaces sessions turns speak <sessionId> <turnId>
 ```
 
+Fork a Chat from any settled turn, whichever runtime ran it. The new Chat keeps
+the history up to that turn. The web composer continues it on the same harness;
+from the CLI, pass that harness to `prompt --session <id> --harness <harness>`:
+
+```bash
+cohub -s <spaceId> spaces sessions turns fork <sessionId> <turnId> [--title <title>]
+```
+
 ## Space turns
 
 List recent turns across all visible Sessions in a Space:

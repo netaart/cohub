@@ -26,7 +26,7 @@ import { dispatchLabelAssignmentsUpdated } from "../realtime-events.js";
 import { buildSessionTurnResponse } from "../session-turn-response.js";
 import { parseSessionTitleInput } from "../session-title-input.js";
 import { changeSessionArchive } from "../session-archive.js";
-import { isNativeClientTurn, SESSION_TURN_SIGNED_URL_LIMIT, type SpeakTurnResponse } from "@cohub/protocol";
+import { canForkTurn, isNativeClientTurn, SESSION_TURN_SIGNED_URL_LIMIT, type SpeakTurnResponse } from "@cohub/protocol";
 import { BillingAccessBlockedError } from "@cohub/billing";
 import { billingBlockedResponse } from "../lib/billing-blocked.js";
 import { getRequestSource } from "../lib/request-source.js";
@@ -71,16 +71,11 @@ router.post("/:id/turns/:turnId/fork", async (c) => {
 
   const sourceTurn = await getSessionTurnById(session.id, turnId);
   if (!sourceTurn) return c.json({ message: "turn not found" }, 404);
-  if (sourceTurn.executionKind === "direct_generation" && !["completed", "failed", "interrupted", "cancelled"].includes(sourceTurn.status)) {
-    return c.json({ message: "cannot fork a running turn" }, 400);
-  }
+  if (!canForkTurn(sourceTurn)) return c.json({ message: "cannot fork an unfinished turn" }, 400);
   const sourceTurnId = sourceTurn.sourceTurnId ?? sourceTurn.id;
 
   const body = await c.req.json<{ title?: string | null }>().catch((): { title?: string | null } => ({}));
   const anchorEntryId = await findLatestVisibleAgentEntryId(session.id, sourceTurn.sequence);
-  if (!anchorEntryId && !["completed", "failed", "interrupted", "cancelled", "merged"].includes(sourceTurn.status)) {
-    return c.json({ message: "cannot fork an unfinished turn without a durable context boundary" }, 400);
-  }
 
   try {
     const { session: childSession, fork } = await createSessionFork({

@@ -124,6 +124,7 @@ export class NativeRuntime {
       sessions: new NativeSessions({
         root: options.stateRoot, spaceId: options.spaceId, projectionSource: options.projectionSource, archives: options.archives, ingest: this.ingest,
         onRestoreFailed: (error, context) => options.diagnostics.log("warn", "native.restore_failed", { error: serializeDiagnosticError(error), unrestorable: context.unrestorable }, { component: "archive", harness: context.harness, sessionId: context.sessionId }),
+        onProjectionLoss: ({ sessionId, harness, ...loss }) => options.diagnostics.log("info", "native.projection_loss", loss, { component: "native", harness, sessionId }),
       }),
       results,
       ingest: this.ingest,

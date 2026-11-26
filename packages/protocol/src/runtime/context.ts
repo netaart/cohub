@@ -11,6 +11,9 @@ export type ContextProjectionOptions = {
   resolveApi?: (input: { provider: string | null; model: string | null }) => string | null;
 };
 
+export const piThinkingBlock = (block: Extract<ContentBlock, { type: "thinking" }>): Record<string, unknown> =>
+  ({ type: "thinking", thinking: block.thinking, ...(block.signature ? { thinkingSignature: block.signature } : {}), ...(block.redacted ? { redacted: true } : {}) });
+
 /**
  * Project one block as itself, or drop it. Nothing is ever rewritten into prompt text.
  * Remote images stay URLs for the model runtime to resolve; system notes and unknown blocks
@@ -19,9 +22,7 @@ export type ContextProjectionOptions = {
 function projectBlock(block: ContentBlock, remoteImages = true): Record<string, unknown> | null {
   if (block.type === "text") return { type: "text", text: block.text };
   if (block.type === "image") return remoteImages || block.source.type === "base64" ? imageBlockToPi(block) : null;
-  if (block.type === "thinking") {
-    return { type: "thinking", thinking: block.thinking, ...(block.signature ? { thinkingSignature: block.signature } : {}) };
-  }
+  if (block.type === "thinking") return piThinkingBlock(block);
   return null;
 }
 

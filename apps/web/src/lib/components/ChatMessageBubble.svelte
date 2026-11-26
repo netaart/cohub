@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
 import {
+	canForkTurn,
 	collectToolMetrics,
 	readReplyBlockRole,
 	readReplyStatus,
@@ -298,29 +299,11 @@ const defaultExpandToolCalls = $derived(
 		(message.content ?? []).some((block) => block.type === "tool_use"),
 );
 
-const hasForkCheckpoint = $derived(
-	Boolean(
-		message.meta?.turn &&
-			(typeof message.meta.turn.meta?.agentSessionEntryId === "string" ||
-				(message.meta.turn.meta?.agent &&
-					typeof message.meta.turn.meta.agent === "object" &&
-					!Array.isArray(message.meta.turn.meta.agent) &&
-					typeof (message.meta.turn.meta.agent as Record<string, unknown>)
-						.leafEntryId === "string")),
-	),
-);
-
-const isTerminalDirectGeneration = $derived(
-	message.meta?.turn?.executionKind === "direct_generation" &&
-		["completed", "failed", "interrupted", "cancelled"].includes(
-			message.meta.turn.status,
-		),
-);
-
 const canFork = $derived(
 	Boolean(
 		onForkTurn &&
-			(hasForkCheckpoint || isTerminalDirectGeneration) &&
+			message.meta?.turn &&
+			canForkTurn(message.meta.turn) &&
 			message.role === "assistant" &&
 			message.meta?.messageKind &&
 			["assistant_final", "assistant_error", "assistant_interrupted"].includes(

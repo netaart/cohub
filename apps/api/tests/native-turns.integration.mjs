@@ -71,6 +71,7 @@ mock.module("../src/session-turns.js", { exports: {
 } });
 const { startNativeTurn, completeNativeTurn, getOwnedNativeTurn, ingestNativeTurns, knownNativeTurns, stageNativeMessages } = await import("../src/native-turns.js");
 const { publishNativeIngest } = await import("../src/native-ingest-events.js");
+const { createSessionFork } = await import("../src/session-forks.js");
 after(() => engine.close());
 const at = "2026-09-21T00:00:00.000Z";
 const content = (text) => [{ type: "text", text }];
@@ -167,6 +168,18 @@ test("completed remote advancement also forks at the local Turn, without inherit
   assert.equal(fork.anchorTurnId, binding.turnId);
   const [turn] = await database.select().from(sessionTurns).where(eq(sessionTurns.id, next.binding.turnId));
   assert.equal(turn.sequence, 2);
+});
+
+test("a Session forked in Cohub at a local Turn continues natively in the fork, without branching again", async () => {
+  const { spaceId, binding } = await root();
+  const later = await startNativeTurn(spaceId, "owner", start({ sessionId: binding.sessionId, parentTurnId: binding.turnId }));
+  await completeNativeTurn(spaceId, "owner", binding.sessionId, later.binding.turnId, result);
+  const { session } = await createSessionFork({ spaceId, parentSessionId: binding.sessionId, childSessionId: crypto.randomUUID(), turnId: binding.turnId, createdBy: "owner" });
+  const next = await startNativeTurn(spaceId, "owner", start({ sessionId: session.id, parentTurnId: binding.turnId }));
+  assert.deepEqual(next.binding, { sessionId: session.id, turnId: next.binding.turnId, forked: false });
+  const [turn] = await database.select().from(sessionTurns).where(eq(sessionTurns.id, next.binding.turnId));
+  assert.equal(turn.sequence, 2);
+  assert.equal((await database.select().from(sessionForks).where(eq(sessionForks.parentSessionId, session.id))).length, 0);
 });
 
 test("only visible settled Turn anchors are accepted; no message-level or cross-space fork", async () => {

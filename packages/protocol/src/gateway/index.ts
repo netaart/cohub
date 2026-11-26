@@ -70,6 +70,7 @@ const contentBlockSchema: z.ZodType<ContentBlock> = z.lazy(() => z.discriminated
     type: z.literal("thinking"),
     thinking: z.string(),
     signature: z.string().optional(),
+    redacted: z.boolean().optional(),
     _meta: contentBlockMetaSchema.optional(),
   }),
   z.object({

@@ -6,6 +6,7 @@ export const inheritSessionMetaForFork = (meta: unknown): Record<string, unknown
   // Creation provenance belongs to the parent; the child has its own session_forks record.
   delete inherited.origin;
   delete inherited.requestSource;
+  delete inherited.nativeSync;
   return inherited;
 };
 

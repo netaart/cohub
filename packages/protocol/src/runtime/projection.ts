@@ -1,5 +1,6 @@
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
+import { piThinkingBlock } from "./context.js";
 import type { LocalHarness } from "./harnesses.js";
 
 export type CanonicalProjectionMessage = {
@@ -124,7 +125,7 @@ export function projectNativeMessageMeta(message: CanonicalProjectionMessage) {
 
 function projectPiBlock(block: ContentBlock): Record<string, unknown> | null {
   if (block.type === "text") return { type: "text", text: block.text };
-  if (block.type === "thinking") return { type: "thinking", thinking: block.thinking, ...(block.signature ? { thinkingSignature: block.signature } : {}) };
+  if (block.type === "thinking") return piThinkingBlock(block);
   if (block.type === "image" && block.source.type === "base64") return { type: "image", data: block.source.data, mimeType: block.source.media_type };
   if (block.type === "tool_use") return { type: "toolCall", id: block.id, name: block.name, arguments: block.input };
   return null;
@@ -262,7 +263,7 @@ function codexMessageRecords(input: ProjectionInput, message: CanonicalProjectio
     else if (block.type === "image") {
       const content = codexInputContent(block);
       if (content.length) push(records.length, { type: "message", role: "user", content });
-    } else if (block.type === "thinking") push(records.length, { type: "reasoning", summary: [{ type: "summary_text", text: block.thinking }], content: null, encrypted_content: null });
+    } else if (block.type === "thinking" && !block.redacted) push(records.length, { type: "reasoning", summary: [{ type: "summary_text", text: block.thinking }], content: null, encrypted_content: null });
     else if (block.type === "tool_use") push(records.length, { type: "function_call", name: block.name, arguments: JSON.stringify(block.input), call_id: codexCallId(block.id) });
     else if (block.type === "tool_result") push(records.length, { type: "function_call_output", call_id: codexCallId(block.tool_use_id), output: typeof block.content === "string" ? block.content : block.content.flatMap((item) => item.type === "text" ? [item.text] : []).join("\n") });
   }

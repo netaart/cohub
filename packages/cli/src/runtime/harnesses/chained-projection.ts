@@ -20,11 +20,13 @@ export function projectionToolId(id: string) {
 
 const nonEmpty = (block: ContentBlock) => block.type !== "text" || block.text.length > 0;
 
+export type ThinkingReplay = (message: CanonicalProjectionMessage) => boolean;
+
 /**
  * Splits Cohub messages into alternating native records. A tool call is kept only with its result,
  * because provider APIs reject unpaired calls; dropped content is reported as a projection warning.
  */
-function segments(message: CanonicalProjectionMessage, warnings: ProjectionWarning[]): Segment[] {
+function segments(message: CanonicalProjectionMessage, warnings: ProjectionWarning[], replayThinking?: ThinkingReplay): Segment[] {
   const warn = (reason: string) => warnings.push({ sourceMessageId: message.id, sourceTurnId: message.turnId, reason });
   if (message.content.some((block) => block.type === "image" && block.source.type === "url")) warn("external image URL omitted from native projection");
   const visible = message.content.filter((block) => nonEmpty(block) && !(block.type === "image" && block.source.type === "url"));
@@ -32,10 +34,13 @@ function segments(message: CanonicalProjectionMessage, warnings: ProjectionWarni
     const blocks = visible.filter((block) => block.type === "text" || block.type === "image");
     return blocks.length ? [{ role: "user", blocks }] : [];
   }
+  const replay = Boolean(replayThinking?.(message));
+  const kept = (block: ContentBlock) => block.type === "text" || block.type === "tool_use" || block.type === "thinking" && replay && Boolean(block.signature);
+  let thinkingOmitted = visible.some((block) => block.type === "thinking" && !kept(block));
   const raw: Segment[] = [];
   for (const block of visible) {
     const role = block.type === "tool_result" ? "user" : "assistant";
-    if (role === "assistant" && !["text", "tool_use"].includes(block.type)) continue;
+    if (role === "assistant" && !kept(block)) continue;
     const last = raw.at(-1);
     if (last?.role === role) last.blocks.push(block);
     else raw.push({ role, blocks: [block] });
@@ -44,8 +49,13 @@ function segments(message: CanonicalProjectionMessage, warnings: ProjectionWarni
   raw.forEach((segment, index) => {
     if (segment.role === "assistant") {
       const results = new Set(raw[index + 1]?.role === "user" ? raw[index + 1]?.blocks.flatMap((block) => block.type === "tool_result" ? [block.tool_use_id] : []) : []);
-      const blocks = segment.blocks.filter((block) => block.type !== "tool_use" || results.has(block.id));
-      if (blocks.length !== segment.blocks.length) warn("tool call without a result omitted from native projection");
+      const answered = segment.blocks.filter((block) => block.type !== "tool_use" || results.has(block.id));
+      if (answered.length !== segment.blocks.length) warn("tool call without a result omitted from native projection");
+      // Thinking opens a reply and never stands alone: providers reject it anywhere else.
+      const opening = answered.findIndex((block) => block.type !== "thinking");
+      const misplaced = (block: ContentBlock, position: number) => block.type === "thinking" && (opening < 0 || position > opening);
+      if (answered.some(misplaced)) thinkingOmitted = true;
+      const blocks = answered.filter((block, position) => !misplaced(block, position));
       if (blocks.length) paired.push({ role: "assistant", blocks });
     } else {
       const calls = new Set(raw[index - 1]?.role === "assistant" ? raw[index - 1]?.blocks.flatMap((block) => block.type === "tool_use" ? [block.id] : []) : []);
@@ -54,6 +64,7 @@ function segments(message: CanonicalProjectionMessage, warnings: ProjectionWarni
       if (blocks.length) paired.push({ role: "user", blocks });
     }
   });
+  if (thinkingOmitted) warn("thinking omitted from native projection");
   return paired;
 }
 
@@ -75,6 +86,7 @@ export function projectChainedSession(
   target: LocalHarness,
   fields: { id: string; parent: string },
   write: (segment: ProjectedSegment) => Record<string, unknown>[],
+  replayThinking?: ThinkingReplay,
 ): NativeProjection {
   const warnings: ProjectionWarning[] = [];
   const records: ProjectionRecord[] = [];
@@ -84,7 +96,7 @@ export function projectChainedSession(
       if (isProjectionPendingGeneration(message)) continue;
       const parts: Array<Omit<ProjectedSegment, "message">> = isProjectionCompaction(message)
         ? compactionText(message) ? [{ role: "user", blocks: [{ type: "text", text: compactionText(message) }], compactSummary: true }] : []
-        : message.role === "system" ? [] : segments(message, warnings).map((segment) => ({ ...segment, compactSummary: false }));
+        : message.role === "system" ? [] : segments(message, warnings, replayThinking).map((segment) => ({ ...segment, compactSummary: false }));
       let ordinal = 0;
       for (const part of parts) {
         for (const native of write({ ...part, message })) {

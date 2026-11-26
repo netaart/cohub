@@ -10,6 +10,7 @@ import type { TranscriptState } from "../native/ingest.js";
 import { array, closeHost, epochSecondsIso, harnessCommand, identifiable, inlineImage, missing, probe, text, turnEnvironment } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn } from "./types.js";
 
+const REDACTED_THINKING = "[Reasoning redacted]";
 /** A stop request that the harness does not honour within this long ends its process. */
 const ABORT_ESCALATION_MS = 5_000;
 /** After input closes, the CLI flushes its transcript; it is reaped when it does not exit by then. */
@@ -30,6 +31,7 @@ export type StreamJsonProfile = {
   label: string;
   binary: string;
   provider: string;
+  endpoint?(named?: string | null): string;
   /** Root holding `projects/<project>/<session>.jsonl`. */
   dataRoot(): string;
   projectDirectory(cwd: string): string;
@@ -88,6 +90,7 @@ export function streamContent(value: unknown): ContentBlock[] {
     const block = record(entry);
     if (block.type === "text") return [{ type: "text", text: text(block.text) }];
     if (block.type === "thinking") return [{ type: "thinking", thinking: text(block.thinking), ...(text(block.signature) ? { signature: text(block.signature) } : {}) }];
+    if (block.type === "redacted_thinking") return text(block.data) ? [{ type: "thinking", thinking: REDACTED_THINKING, signature: text(block.data), redacted: true }] : [];
     if (block.type === "tool_use") return identifiable(block.id) && identifiable(block.name) ? [{ type: "tool_use", id: block.id, name: block.name, input: record(block.input) }] : [];
     const source = record(block.source);
     if (block.type === "image" && source.type === "base64") return [{ type: "image", source: { type: "base64", data: text(source.data), media_type: text(source.media_type) } }];
@@ -285,7 +288,7 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
   const host = kept ?? new JsonRpcProcess(...harnessCommand(executable, args, executor.cwd), executor.cwd, "stream", profile.warm ? sessionEnvironment : turnEnvironment(input));
   turn.spawned(host);
   let background = false;
-  const translator = streamJsonTranslator(turn.emit, { provider: input.provider || profile.provider, model: input.model && input.model !== DEFAULT_MODEL ? input.model : null }, spentBy.get(host));
+  const translator = streamJsonTranslator(turn.emit, { provider: profile.endpoint?.(input.provider) || input.provider || profile.provider, model: input.model && input.model !== DEFAULT_MODEL ? input.model : null }, spentBy.get(host));
   let message: RuntimeMessage = { ordinal: 0, content: [] };
   let begun = false;
   // Open approvals close with the process, not only when the Turn is stopped.

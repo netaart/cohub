@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { serializeProjectionRecords, type HarnessArchive, type LocalHarness, type RuntimeContext } from "@neta-art/cohub";
+import { serializeProjectionRecords, trimProjectionTurnsToCompaction, type HarnessArchive, type LocalHarness, type RuntimeContext } from "@neta-art/cohub";
 import { ArchiveNotRestorableError } from "./archive.js";
 import { readTranscript } from "./adapters.js";
 import { harnessAdapter } from "../harnesses/index.js";
-import { ProjectionStore, rebindProjectionNativeSession } from "../projection-store.js";
+import { ProjectionStore, rebindProjectionNativeSession, type ProjectionStoreResult } from "../projection-store.js";
 import type { SessionTurnProjectionClient } from "../turn-projection.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
 import type { NativeIngest, TranscriptState } from "./ingest.js";
@@ -22,6 +22,8 @@ export type NativeSession = {
 
 export type PreparedSession = { session: NativeSession; resume: ResumeKind };
 
+export type ProjectionLoss = { sessionId: string; harness: LocalHarness; turns: number; omittedTurns: number; dropped: Record<string, number> };
+
 /** Chooses the native file a Turn runs in. 1. */
 export class NativeSessions {
   private readonly projections: ProjectionStore;
@@ -33,6 +35,7 @@ export class NativeSessions {
     archives: RuntimeArchiveStore;
     ingest: NativeIngest;
     onRestoreFailed?: (error: unknown, context: { sessionId: string; harness: LocalHarness; unrestorable: boolean }) => void;
+    onProjectionLoss?: (loss: ProjectionLoss) => void;
   }) {
     this.projections = new ProjectionStore(options.projectionSource);
   }
@@ -103,6 +106,7 @@ export class NativeSessions {
       target: input.harness,
       throughTurnId: input.context.throughTurnId,
     }, input.signal), nativeSessionId);
+    this.reportLoss(input, projection);
     const session = { harness: input.harness, nativeSessionId, path, cwd: input.cwd };
     // Nothing to carry (no Turns, or none that project) starts natively where the harness creates its own file.
     if ((!projection.turns.length || !projection.projection.records.length) && format.startsWithoutFile) return { session, resume: "new" };
@@ -111,5 +115,14 @@ export class NativeSessions {
     await writeFile(temporary, serializeProjectionRecords(projection.projection.records), { mode: 0o600 });
     await rename(temporary, path);
     return { session, resume: projection.turns.length ? "handoff" : "new" };
+  }
+
+  private reportLoss(input: { sessionId: string; harness: LocalHarness }, { turns, projection }: ProjectionStoreResult) {
+    if (!this.options.onProjectionLoss || !turns.length) return;
+    const carried = new Set(projection.records.map((record) => record.sourceTurnId));
+    const omittedTurns = trimProjectionTurnsToCompaction(turns).filter((turn) => !carried.has(turn.id) && !carried.has(turn.sourceTurnId)).length;
+    const dropped: Record<string, number> = {};
+    for (const warning of projection.warnings) dropped[warning.reason] = (dropped[warning.reason] ?? 0) + 1;
+    if (omittedTurns || projection.warnings.length) this.options.onProjectionLoss({ sessionId: input.sessionId, harness: input.harness, turns: turns.length, omittedTurns, dropped });
   }
 }

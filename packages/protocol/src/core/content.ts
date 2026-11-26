@@ -8,7 +8,7 @@ export type Timing = {
 
 export type ContentBlock =
   | { type: "text"; text: string; _meta?: ContentBlockMeta }
-  | { type: "thinking"; thinking: string; signature?: string; _meta?: ContentBlockMeta }
+  | { type: "thinking"; thinking: string; signature?: string; redacted?: boolean; _meta?: ContentBlockMeta }
   | {
       type: "image";
       source:
