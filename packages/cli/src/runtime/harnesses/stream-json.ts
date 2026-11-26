@@ -152,7 +152,11 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
   let model = identity.model;
   let final: RuntimeMessage | null = null;
   let rejected: RuntimeMessage["usageLimit"] = null;
-  const counts = (value: unknown) => Object.fromEntries(Object.entries(record(value)).filter(([, count]) => typeof count === "number"));
+  const merge = (usage: JsonRecord | undefined, value: unknown): JsonRecord => {
+    const merged = { ...usage };
+    for (const [key, count] of Object.entries(record(value))) if (typeof count === "number") merged[key] = Math.max(count, Number(merged[key]) || 0);
+    return merged;
+  };
   const snapshot = (message: Message): RuntimeMessage => ({
     ordinal: message.ordinal, content: [...message.content, ...message.partial.values()], provider: identity.provider, model: message.model ?? model,
     usage: streamUsage(message.usage, undefined),
@@ -182,9 +186,9 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
         if (stream.type === "message_start") {
           const native = record(stream.message);
           streaming = begin(text(native.id) || randomUUID(), nativeModel(native.model));
-          streaming.usage = counts(native.usage);
+          streaming.usage = merge(streaming.usage, native.usage);
         }
-        if (streaming && stream.type === "message_delta") streaming.usage = { ...streaming.usage, ...counts(stream.usage) };
+        if (streaming && stream.type === "message_delta") streaming.usage = merge(streaming.usage, stream.usage);
         const delta = record(stream.delta);
         if (streaming && stream.type === "content_block_delta" && (delta.type === "text_delta" || delta.type === "thinking_delta")) {
           const index = Number(stream.index ?? 0), chunk = text(delta.text ?? delta.thinking);
@@ -199,7 +203,7 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
       if (event.type === "assistant") {
         const native = record(event.message);
         const message = begin(text(native.id) || randomUUID(), nativeModel(native.model));
-        message.usage = { ...message.usage, ...counts(native.usage) };
+        message.usage = merge(message.usage, native.usage);
         // Complete blocks supersede what streamed so far.
         message.partial.clear();
         for (const complete of streamContent(native.content)) {
