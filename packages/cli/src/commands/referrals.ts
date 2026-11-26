@@ -34,9 +34,6 @@ export function registerReferrals(program: Command): void {
         const output = { ...result, url: referralUrl(result.code) };
         if (jsonRequested(opts)) return outJson(output);
         console.log(`\nReferral link: ${output.url}`);
-        const { quota } = result;
-        const resets = quota.cycleEndsAt ? `, resets ${formatLocalDateTime(quota.cycleEndsAt)}` : "";
-        console.log(`Cycle: ${quota.used}/${quota.limit} used, ${quota.available} available${resets}`);
         console.log(`Awaiting first payment: ${result.summary.pending}`);
         console.log(`Rewarded: ${result.summary.rewarded}`);
         console.log(`Earned: $${result.summary.earnedUsd.toFixed(2)}\n`);

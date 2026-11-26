@@ -51,16 +51,14 @@ const stats = $derived(
 	dashboard
 		? [
 				{
-					label: m.referral_cycle_successful({}, { locale }),
-					value: `${dashboard.quota.used}/${dashboard.quota.limit}`,
+					label: m.referral_successful({}, { locale }),
+					value: String(
+						dashboard.summary.qualified + dashboard.summary.rewarded,
+					),
 				},
 				{
-					label: m.referral_cycle_pending({}, { locale }),
+					label: m.referral_awaiting_payment({}, { locale }),
 					value: String(dashboard.summary.pending),
-				},
-				{
-					label: m.referral_cycle_available({}, { locale }),
-					value: String(dashboard.quota.available),
 				},
 				{
 					label: m.referral_credits_earned({}, { locale }),
@@ -180,12 +178,11 @@ async function rotateLink() {
 				{#if copyError}<p class="mt-2 text-[11px] text-error-soft">{copyError}</p>{/if}
 
 				<div class="mt-6 border-y border-border-subtle py-4">
-					<div class="grid grid-cols-2 gap-x-8 gap-y-4 sm:flex">
+					<div class="grid grid-cols-3 gap-x-8 gap-y-4 sm:flex">
 						{#each stats as stat (stat.label)}
 							<div><div class="font-mono text-[17px] font-semibold text-text-primary">{stat.value}</div><div class="mt-0.5 text-[11px] text-text-tertiary">{stat.label}</div></div>
 						{/each}
 					</div>
-					{#if dashboard.quota.cycleEndsAt}<p class="mt-3 text-[11px] text-text-placeholder">{m.referral_cycle_resets({ date: formatDate(dashboard.quota.cycleEndsAt, locale) }, { locale })}</p>{/if}
 				</div>
 			</div>
 
@@ -211,7 +208,7 @@ async function rotateLink() {
 						{/each}
 					</div>
 				{/if}
-				<p class="mt-4 text-[10px] leading-4 text-text-placeholder">{m.referral_footnote({ limit: dashboard.quota.limit, days: dashboard.quota.cycleDays, windowDays: dashboard.quota.paymentWindowDays }, { locale })}</p>
+				<p class="mt-4 text-[10px] leading-4 text-text-placeholder">{m.referral_footnote({ windowDays: dashboard.reward.paymentWindowDays }, { locale })}</p>
 			</section>
 		{/if}
 	</section>

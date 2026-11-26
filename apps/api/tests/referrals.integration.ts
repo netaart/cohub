@@ -20,8 +20,7 @@ for (const entry of journal.entries) {
 mock.module("../src/db/index.js", { namedExports: { db: drizzle(client, { schema }) } });
 mock.module("../src/user-profiles.js", { namedExports: { ensureCurrentUserProfile: async () => null } });
 
-const { claimReferral, ensureReferralCode, getReferralDashboard, isReferralRewardAvailable, qualifyReferralPayment } =
-  await import("../src/referrals.js");
+const { claimReferral, ensureReferralCode, getReferralDashboard, qualifyReferralPayment } = await import("../src/referrals.js");
 
 const DAY_MS = 24 * 60 * 60_000;
 const user = (uuid: string) => ({ uuid }) as Parameters<typeof claimReferral>[1];
@@ -41,7 +40,7 @@ const invite = async (inviter: string, count: number) => {
 const statusOf = async (invitee: string) =>
   (await getReferralDashboard(invitee)).received?.status;
 
-test("claims hold no quota and stay open for the payment window", async () => {
+test("claims stay open for the payment window", async () => {
   const { code, invitees, results } = await invite("claims", 7);
 
   await addProfile("old", new Date(Date.now() - 2 * DAY_MS));
@@ -51,35 +50,26 @@ test("claims hold no quota and stay open for the payment window", async () => {
   assert.ok(results.every((result) => result?.status === "pending" && result.created));
   const [first] = invitees;
   assert.deepEqual(await claimReferral(code, user(first ?? "")), { referralId: results[0]?.referralId, status: "pending" });
-  assert.equal(await isReferralRewardAvailable("claims"), true);
 
   const dashboard = await getReferralDashboard("claims");
-  assert.deepEqual(
-    { used: dashboard.quota.used, available: dashboard.quota.available, pending: dashboard.summary.pending },
-    { used: 0, available: 5, pending: 7 },
-  );
+  assert.equal(dashboard.summary.pending, 7);
   for (const item of dashboard.items) {
     const windowMs = new Date(item.expiresAt ?? 0).getTime() - new Date(item.claimedAt).getTime();
     assert.equal(windowMs, 30 * DAY_MS);
   }
 });
 
-test("first payments consume at most five slots per cycle and redeliveries are no-ops", async () => {
+test("every first payment qualifies and redeliveries are no-ops", async () => {
   const { invitees } = await invite("payments", 7);
   const paidAt = new Date();
 
   await Promise.all(invitees.map((invitee) => qualifyReferralPayment({ userId: invitee, paidAt })));
-  const statuses = await Promise.all(invitees.map(statusOf));
-  assert.equal(statuses.filter((status) => status === "qualified").length, 5);
-  assert.equal(statuses.filter((status) => status === "capped").length, 2);
-
-  await Promise.all(invitees.map((invitee) => qualifyReferralPayment({ userId: invitee, paidAt })));
-  assert.deepEqual(await Promise.all(invitees.map(statusOf)), statuses);
+  const redeliveredAt = new Date(paidAt.getTime() + 1000);
+  await Promise.all(invitees.map((invitee) => qualifyReferralPayment({ userId: invitee, paidAt: redeliveredAt })));
 
   const dashboard = await getReferralDashboard("payments");
-  assert.deepEqual({ used: dashboard.quota.used, available: dashboard.quota.available }, { used: 5, available: 0 });
-  assert.equal(await isReferralRewardAvailable("payments"), false);
-  assert.equal(dashboard.items.filter((item) => item.inCurrentCycle).length, 5);
+  assert.deepEqual(dashboard.summary, { total: 7, pending: 0, qualified: 7, rewarded: 0, earnedUsd: 0 });
+  assert.deepEqual(new Set(dashboard.items.map((item) => item.qualifiedAt)), new Set([paidAt.toISOString()]));
 });
 
 test("only payments made between claiming and the deadline qualify", async () => {

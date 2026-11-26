@@ -3,7 +3,6 @@ import type { BillingOperations } from "@cohub/billing";
 import { referrals, type ReferralStatus } from "@cohub/db";
 import { and, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { loadReferralQuota } from "./quota.js";
 
 export const REFERRAL_REWARD_LEASE_MS = 5 * 60_000;
 export const REFERRAL_REWARD_RETRY_COOLDOWN_MS = 5 * 60_000;
@@ -262,42 +261,23 @@ export async function rewardQualifiedReferral(
 }
 
 /**
- * Qualify the invitee's referral on their first payment and return its current row.
- * Quota is consumed here, serialized per inviter; redelivered payment events are no-ops.
+ * Qualify the invitee's referral when their first payment falls inside the claim window, and return its current row.
+ * Redelivered payment events are no-ops.
  */
 export async function qualifyReferral(input: QualifyReferralInput): Promise<ReferralRow | null> {
   const { db, inviteeUserId, paidAt } = input;
-  const qualified = await db.transaction(async (tx) => {
-    const [candidate] = await tx
-      .select({ id: referrals.id, inviterUserId: referrals.inviterUserId })
-      .from(referrals)
-      .where(
-        and(
-          eq(referrals.inviteeUserId, inviteeUserId),
-          inArray(referrals.status, ["pending", "expired"]),
-          lte(referrals.claimedAt, paidAt),
-          gt(referrals.expiresAt, paidAt),
-        ),
-      )
-      .limit(1);
-    if (!candidate) return null;
-
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`referral-quota:${candidate.inviterUserId}`}))`);
-    const now = new Date();
-    const quota = await loadReferralQuota(tx, candidate.inviterUserId, now);
-    const rewarded = quota.available > 0;
-    const [row] = await tx
-      .update(referrals)
-      .set(
-        rewarded
-          ? { status: "qualified", quotaCycle: quota.cycle, qualifiedAt: now, updatedAt: now }
-          : { status: "capped", inviterRewardAmountUsd: "0", inviteeRewardAmountUsd: "0", updatedAt: now },
-      )
-      .where(and(eq(referrals.id, candidate.id), inArray(referrals.status, ["pending", "expired"])))
-      .returning();
-    return row ?? null;
-  });
-
+  const [qualified] = await db
+    .update(referrals)
+    .set({ status: "qualified", qualifiedAt: paidAt, updatedAt: new Date() })
+    .where(
+      and(
+        eq(referrals.inviteeUserId, inviteeUserId),
+        inArray(referrals.status, ["pending", "expired"]),
+        lte(referrals.claimedAt, paidAt),
+        gt(referrals.expiresAt, paidAt),
+      ),
+    )
+    .returning();
   return qualified ?? (await loadReferralByInvitee(db, inviteeUserId));
 }
 

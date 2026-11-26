@@ -1985,13 +1985,14 @@ export type ReferralStatus = "pending" | "qualified" | "rewarded" | "expired" | 
 export type ReferralReward = {
   inviterUsd: number;
   inviteeUsd: number;
+  /** Days after claiming within which the invitee's first payment qualifies the referral. */
+  paymentWindowDays: number;
 };
 
 export type PublicReferral = {
   code: string;
   inviter: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl">;
   reward: ReferralReward;
-  rewardAvailable: boolean;
 };
 
 export type ClaimReferralResponse = {
@@ -2002,23 +2003,11 @@ export type ClaimReferralResponse = {
 export type ReferralListItem = {
   id: string;
   status: ReferralStatus;
-  inCurrentCycle: boolean;
   claimedAt: string;
   qualifiedAt: string | null;
   rewardedAt: string | null;
   expiresAt: string | null;
   profile: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl"> | null;
-};
-
-export type ReferralQuota = {
-  limit: number;
-  cycleDays: number;
-  /** Days after claiming within which the invitee's first payment qualifies the referral. */
-  paymentWindowDays: number;
-  used: number;
-  available: number;
-  cycleStartsAt: string | null;
-  cycleEndsAt: string | null;
 };
 
 export type ReferralDashboard = {
@@ -2032,7 +2021,6 @@ export type ReferralDashboard = {
     qualifiedAt: string | null;
     inviteeRewardedAt: string | null;
   } | null;
-  quota: ReferralQuota;
   summary: {
     total: number;
     pending: number;
