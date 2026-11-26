@@ -4,6 +4,25 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.112 — 2026-11-26
+
+- **One browser engine for Board scripts**: `cohub boards export`, `simulate` and `profile` run scripts in headless Chrome, the same sandboxed workers the Cohub app uses, instead of a Node VM. Without an installed Chrome, Chromium or Edge, Chrome's headless shell downloads once, the first time a Board with scripts, shaders or 3D needs it, and the SDK's Node script host is gone while `board/testing` runs scripts in the page.
+- **Faster, richer Board exports**: frames without shaders or 3D draw with Canvas 2D, videos stream raw RGBA to ffmpeg instead of writing a PNG per frame, `script.time` lets a timeline drive a script's clock, modules import fonts, images and `.bin` files as bytes, workers get Geist and Geist Mono, `fetch()` reports there is no network, `profile` reports what each script's updates and draws cost, and `--at 33:35s` is rejected instead of reading 33 as milliseconds.
+- **Seamless Runtime updates**: once idle, a background Runtime hands the same Runtime id to a newer CLI while the Gateway keeps the lease and file bridge state, Turns dispatched in between retry, and a failed successor lets the old version resume, so the Space and desktop never see it offline. A foreground Runtime is never replaced.
+- **Statistics timelines**: the stats popover shows one row per model request — the request, then the tools it ran until the next one starts — and one row per Turn this client holds (latest 50) with end-to-end queue, model and tool time; both open by default and remember being collapsed, and Turn metrics keep merged tool intervals to place tool time.
+- **Faster checkpoint forks**: fork restores download checkpoint packs 16 at a time with each `.pack` and `.idx` fetched together, defer the cache repack until bootstrap is ready, record restore sub-stage timings, and poll the bootstrap gate every second for the first minute.
+- **App purchase return URLs**: `purchase({ returnUrl })` and `cohub apps commerce purchase --return-url` return buyers to a page on the App — such as a cart — after success, failure or cancellation, with checkout state read through shared SDK helpers.
+
+### Bug Fixes
+
+- **Steered follow-ups**: `--steer` lets the running Turn finish its tools, then runs before the next model request; Stop still interrupts at once, and local Harness Turns still stop on steer.
+- **Claude Code cache usage**: Turn totals keep the input, cache read and cache write tokens from `message_start` when a stream closes a tool call with zero deltas.
+- **Resolved Turn archives**: the API keeps client error statuses (409 `runtime_execution_resolved`), and the CLI stops re-uploading an archive the server resolved while keeping it locally.
+- **Runtime binding refresh**: a running Runtime watches the bindings file, so a subdirectory bound to its own Space stops mirroring into the parent immediately instead of duplicating native Chats until a restart.
+- **Queued follow-ups**: Cancel and Steer against a merged or finished Turn fetch the clicked Turn by id and reconcile cached Turns in later phases, so a stale queued follow-up no longer sticks in the cache.
+- **Recent Space chips**: chips on the Chats list follow the latest visits and activity, holding their order only while the reader is inside a Space chip.
+- **Public App URLs on mobile**: public App URLs now open in the browser instead of the app.
+
 ## v2.111 — 2026-11-26
 
 - **Per-harness tool call views**: Claude Code, WorkBuddy, Codex, Cursor and Antigravity calls now render as commands, file paths, diffs and todo lists through adapters in `@cohub/protocol/tools`, with running state, recorded durations and streamed Codex output instead of raw JSON.
