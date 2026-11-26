@@ -240,8 +240,9 @@ async function downloadPack(store: CheckpointObjectReader, repoDir: string, pack
   const packPath = join(packDir, `tmp_cohub_${token}_pack`);
   const idxPath = join(packDir, `tmp_cohub_${token}_idx`);
   try {
-    if (!await store.download(pack.packKey, packPath)) throw new Error(`checkpoint pack missing: ${pack.packKey}`);
-    if (!await store.download(pack.idxKey, idxPath)) throw new Error(`checkpoint pack index missing: ${pack.idxKey}`);
+    const [hasPack, hasIdx] = await Promise.all([store.download(pack.packKey, packPath), store.download(pack.idxKey, idxPath)]);
+    if (!hasPack) throw new Error(`checkpoint pack missing: ${pack.packKey}`);
+    if (!hasIdx) throw new Error(`checkpoint pack index missing: ${pack.idxKey}`);
     const [packStat, idxStat] = await Promise.all([stat(packPath), stat(idxPath)]);
     if (packStat.size !== pack.size || idxStat.size !== pack.idxSize) throw new Error(`checkpoint pack size mismatch: ${pack.packKey}`);
     await installPackFiles(repoDir, pack.checksum, { packPath, idxPath });
@@ -251,7 +252,7 @@ async function downloadPack(store: CheckpointObjectReader, repoDir: string, pack
   }
 }
 
-export async function installPacks(store: CheckpointObjectReader, repoDir: string, packs: CheckpointPackRef[], concurrency = 4) {
+export async function installPacks(store: CheckpointObjectReader, repoDir: string, packs: CheckpointPackRef[], concurrency = 16) {
   let installed = 0;
   const queue = [...packs];
   await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
@@ -281,9 +282,10 @@ export async function markCheckpointCommitComplete(repoDir: string, commit: stri
 /**
  * Make every object reachable from `commits` readable in the cache
  * repository. A commit without a manifest is a legacy commit and must already
- * be present locally.
+ * be present locally. With `compact: false` the caller owns running
+ * `compactCheckpointCache` once it is off its latency-critical path.
  */
-export async function ensureCheckpointCommits(store: CheckpointObjectReader, repoDir: string, commits: string[]) {
+export async function ensureCheckpointCommits(store: CheckpointObjectReader, repoDir: string, commits: string[], options: { compact?: boolean } = {}) {
   let installed = 0;
   for (const commit of new Set(commits)) {
     if (await stat(completeMarker(repoDir, commit)).then(() => true, () => false)) continue;
@@ -306,7 +308,7 @@ export async function ensureCheckpointCommits(store: CheckpointObjectReader, rep
     if (!await hasCommit(repoDir, commit)) throw new CheckpointObjectsUnavailableError(commit);
     await markCheckpointCommitComplete(repoDir, commit);
   }
-  if (installed > 0) await compactCachePacks(repoDir).catch((error) => console.warn(`[checkpoint-storage] cache repack failed repo=${repoDir}:`, error));
+  if (installed > 0 && options.compact !== false) await compactCheckpointCache(repoDir).catch((error) => console.warn(`[checkpoint-storage] cache repack failed repo=${repoDir}:`, error));
   return { installed };
 }
 
@@ -320,7 +322,7 @@ const REPACK_CONFIG = ["-c", "pack.window=0", "-c", "core.packedGitWindowSize=16
  * geometric repack merges whole packs and never prunes by reachability, so
  * every object and completion marker stays valid.
  */
-async function compactCachePacks(repoDir: string) {
+export async function compactCheckpointCache(repoDir: string) {
   const names = await readdir(checkpointPackDir(repoDir)).catch(() => [] as string[]);
   if (names.filter((name) => name.endsWith(".pack")).length <= CACHE_PACK_LIMIT) return;
   await runCheckpointGit([...REPACK_CONFIG, "repack", "--geometric=2", "-d", "-q"], { cwd: repoDir });

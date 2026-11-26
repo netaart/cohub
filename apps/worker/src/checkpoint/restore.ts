@@ -235,9 +235,9 @@ async function restoreUserGitRepos(input: { workspaceDir: string; restoreTmpDir:
  * Make `commitHash` readable in a space's cache repository: from its storage
  * manifest when there is one, otherwise from the legacy source repository.
  */
-export async function prepareCheckpointRepo(input: { sourceSpaceId: string; targetRepoDir: string; commitHash: string }) {
+export async function prepareCheckpointRepo(input: { sourceSpaceId: string; targetRepoDir: string; commitHash: string; compact?: boolean }) {
   await initCheckpointRepo(input.targetRepoDir);
-  await ensureCheckpointCommits(checkpointObjectStore, input.targetRepoDir, [input.commitHash]).catch(async (error) => {
+  await ensureCheckpointCommits(checkpointObjectStore, input.targetRepoDir, [input.commitHash], { compact: input.compact }).catch(async (error) => {
     if (!(error instanceof CheckpointObjectsUnavailableError)) throw error;
     const sourceRepoDir = getCheckpointSystemRepoDir(input.sourceSpaceId);
     await runCheckpointGit(["fetch", "-q", "--no-tags", sourceRepoDir, input.commitHash], { cwd: input.targetRepoDir });
@@ -254,21 +254,34 @@ async function readCommitJson<T>(restoreTmpDir: string, paths: string[], fallbac
   return fallback;
 }
 
+/**
+ * The cache repository is left uncompacted so the workspace is ready sooner;
+ * the caller runs `compactCheckpointCache` on `targetRepoDir` afterwards.
+ */
 export async function restoreWorkspaceFromCheckpoint(input: {
   checkpointId: string;
   targetWorkspaceDir: string;
   targetRepoDir: string;
   restoreTmpDir: string;
 }) {
+  const timings: Record<string, number> = {};
+  const timed = async <T>(label: string, fn: () => Promise<T>) => {
+    const started = performance.now();
+    try {
+      return await fn();
+    } finally {
+      timings[label] = Math.round(performance.now() - started);
+    }
+  };
   const [checkpoint] = await db.select().from(checkpoints).where(eq(checkpoints.id, input.checkpointId)).limit(1);
   if (!checkpoint) throw new Error("checkpoint not found");
   const [sourceSpace] = await db.select().from(spaces).where(eq(spaces.id, checkpoint.spaceId)).limit(1);
   if (!sourceSpace) throw new Error("checkpoint source space not found");
-  await prepareCheckpointRepo({ sourceSpaceId: sourceSpace.id, targetRepoDir: input.targetRepoDir, commitHash: checkpoint.commitHash });
-  await archiveCommit({ repoDir: input.targetRepoDir, commitHash: checkpoint.commitHash, restoreTmpDir: input.restoreTmpDir });
+  await timed("restoreObjects", () => prepareCheckpointRepo({ sourceSpaceId: sourceSpace.id, targetRepoDir: input.targetRepoDir, commitHash: checkpoint.commitHash, compact: false }));
+  await timed("restoreArchive", () => archiveCommit({ repoDir: input.targetRepoDir, commitHash: checkpoint.commitHash, restoreTmpDir: input.restoreTmpDir }));
   const assetManifest = await readJson<AssetManifest>(join(input.restoreTmpDir, CHECKPOINT_ASSET_MANIFEST_PATH), { version: 1, assets: [] });
   const gitReposManifest = await readCommitJson<UserGitReposManifest>(input.restoreTmpDir, [USER_GIT_REPOS_PATH, LEGACY_USER_GIT_REPOS_PATH], { version: 1, repos: [] });
-  await restoreFilesFromArchive({ restoreTmpDir: input.restoreTmpDir, targetDir: input.targetWorkspaceDir, assetManifest });
-  await restoreUserGitRepos({ workspaceDir: input.targetWorkspaceDir, restoreTmpDir: input.restoreTmpDir, manifest: gitReposManifest });
-  return { checkpoint, sourceSpace, assetManifest, gitReposManifest };
+  await timed("restoreFiles", () => restoreFilesFromArchive({ restoreTmpDir: input.restoreTmpDir, targetDir: input.targetWorkspaceDir, assetManifest }));
+  await timed("restoreUserGitRepos", () => restoreUserGitRepos({ workspaceDir: input.targetWorkspaceDir, restoreTmpDir: input.restoreTmpDir, manifest: gitReposManifest }));
+  return { checkpoint, sourceSpace, assetManifest, gitReposManifest, timings };
 }

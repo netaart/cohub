@@ -105,10 +105,19 @@ func (c *Client) reportOnce(ctx context.Context, url string, body []byte) (Respo
 	return response, resp.StatusCode, err
 }
 
+// Setup starts as soon as bootstrap is seen ready, so the first minute polls
+// quickly; a bootstrap still pending after that backs off.
+const (
+	bootstrapPollInterval     = time.Second
+	bootstrapSlowPollInterval = 5 * time.Second
+	bootstrapFastPollWindow   = time.Minute
+)
+
 func (c *Client) WaitForBootstrap(ctx context.Context, payload func() Payload, onWait func(string, error)) error {
 	if c.cfg.IsLocal() {
 		return fmt.Errorf("setup is disabled for local sandboxes")
 	}
+	started := time.Now()
 	for {
 		response, err := c.ReportWithBootstrap(ctx, payload())
 		status := "waiting"
@@ -122,7 +131,11 @@ func (c *Client) WaitForBootstrap(ctx context.Context, payload func() Payload, o
 			}
 		}
 		onWait(status, err)
-		if err := wait(ctx, 5*time.Second); err != nil {
+		delay := bootstrapPollInterval
+		if time.Since(started) > bootstrapFastPollWindow {
+			delay = bootstrapSlowPollInterval
+		}
+		if err := wait(ctx, delay); err != nil {
 			return err
 		}
 	}

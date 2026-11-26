@@ -61,6 +61,6 @@ The cloud runtime uses its existing instance-authenticated sandbox report channe
 - `pending`, `running`, missing/invalid status: wait.
 - `failed`: remain waiting with an explicit bootstrap failure message; execute nothing.
 
-The sandbox retries the gate every five seconds while waiting, including after transient API failures. Only an explicit `ready` response unlocks setup. An older API response without a gate fails closed. This requires deploying the API before the new sandbox image. The final setup report is retried until acknowledged; successful idle sandboxes do not keep polling.
+The sandbox retries the gate every second for the first minute, then every five seconds, while waiting, including after transient API failures. Only an explicit `ready` response unlocks setup. An older API response without a gate fails closed. This requires deploying the API before the new sandbox image. The final setup report is retried until acknowledged; successful idle sandboxes do not keep polling.
 
 The same loop handles either bootstrap/sandbox startup ordering and import retries without relying on PubSub delivery or a checkpointable ready-marker file. Setup deduplication is process-local, never stored as a workspace marker.
