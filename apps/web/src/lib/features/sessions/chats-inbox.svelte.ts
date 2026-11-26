@@ -12,6 +12,7 @@ import type { SessionListForkRecord } from "#lib/cache/db.ts";
 import { getCacheUserKeyAsync } from "#lib/cache/keys.ts";
 import { openCommandPalette } from "#lib/command-palette/open.ts";
 import { subscribeSpaceChannel } from "#lib/features/session-chat/index.ts";
+import { nextSpaceChips } from "#lib/features/sessions/space-chips.ts";
 import { spacesInbox } from "#lib/features/spaces/spaces-inbox.svelte.ts";
 import { type LiveChange, LiveList } from "#lib/lists/live-list.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
@@ -60,7 +61,6 @@ import {
 import { goto } from "$app/navigation";
 
 const PAGE_SIZE = 30;
-const SPACE_CHIP_LIMIT = 6;
 const MEMO_LIMIT = 12;
 const EMPTY_PAGE_INFO = { hasMore: false, nextCursor: null };
 
@@ -135,7 +135,7 @@ function isFullRecord(
 
 class ChatsInbox {
 	filter = $state<ChatsFilter>(DEFAULT_CHATS_FILTER);
-	recentSpaces = $state<UserSessionSpaceSummary[]>([]);
+	recentSpaces = $state.raw<UserSessionSpaceSummary[]>([]);
 
 	readonly list = new LiveList<ChatsFilter, UserSessionListItem, Forks>({
 		name: "chats",
@@ -190,7 +190,8 @@ class ChatsInbox {
 	#roomSpaceId: string | null = null;
 	#stopRoom: (() => void) | null = null;
 	#stop: (() => void) | null = null;
-	#chipsFrozen = false;
+	#releaseRecent: (() => void) | null = null;
+	#chipsSettled = false;
 
 	get view(): ChatsView {
 		return this.viewOf(this.filter);
@@ -219,13 +220,19 @@ class ChatsInbox {
 		const stopChips = $effect.root(() => {
 			$effect(() => {
 				const spaces = spacesInbox.list.view("recent").items;
-				untrack(() => this.#setRecentSpaces(spaces));
+				const scoped = Boolean(this.filter.space);
+				untrack(() => this.#syncChips(spaces, scoped));
 			});
 		});
+		const onVisibility = () => {
+			if (document.hidden) this.#syncChips();
+		};
+		document.addEventListener("visibilitychange", onVisibility);
 		this.#stop = () => {
 			stopSessionSync();
 			stopEvents();
 			stopChips();
+			document.removeEventListener("visibilitychange", onVisibility);
 			this.#hide();
 			this.list.stop();
 			this.#stop = null;
@@ -350,20 +357,24 @@ class ChatsInbox {
 		this.#userKey = userKey;
 		this.filter = readChatsFilter(userKey);
 		this.recentSpaces = [];
-		this.#chipsFrozen = false;
+		this.#chipsSettled = false;
 	}
 
 	async #show() {
 		await this.#ensureUser();
 		if (this.#visible === 0) return;
 		this.#watch();
-		void spacesInbox.list.open("recent");
+		this.#releaseRecent?.();
+		this.#releaseRecent = spacesInbox.list.watch("recent");
 	}
 
 	#hide() {
 		this.#releaseWatch?.();
 		this.#releaseWatch = null;
+		this.#releaseRecent?.();
+		this.#releaseRecent = null;
 		this.#joinRoom(null);
+		this.#syncChips();
 	}
 
 	#watch() {
@@ -566,21 +577,19 @@ class ChatsInbox {
 		};
 	}
 
-	#setRecentSpaces(spaces: SpaceRecord[]) {
-		const next = spaces
-			.filter((space) => !space.isArchived)
-			.slice(0, SPACE_CHIP_LIMIT)
-			.map(spaceSummaryOf);
-		if (!this.#chipsFrozen || this.recentSpaces.length === 0) {
-			this.recentSpaces = next;
-			this.#chipsFrozen = next.length > 0;
-			return;
-		}
-		const byId = new Map(spaces.map((space) => [space.id, space]));
-		this.recentSpaces = this.recentSpaces.map((chip) => {
-			const space = byId.get(chip.id);
-			return space ? spaceSummaryOf(space) : chip;
-		});
+	#syncChips(
+		spaces = spacesInbox.list.view("recent").items,
+		scoped = Boolean(this.filter.space),
+	) {
+		const hold =
+			this.#chipsSettled && scoped && this.#visible > 0 && !document.hidden;
+		this.recentSpaces = nextSpaceChips(
+			this.recentSpaces,
+			spaces,
+			hold,
+			spaceSummaryOf,
+		);
+		this.#chipsSettled = hold || spacesInbox.list.isLive("recent");
 	}
 }
 
