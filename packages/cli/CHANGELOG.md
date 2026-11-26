@@ -1,5 +1,26 @@
 # @neta-art/cohub-cli
 
+## 10.38.0
+
+### Minor Changes
+
+- fa6755e: App purchases accept an optional `returnUrl` so buyers can return directly to a cart or another page on the App after checkout. Use `--return-url` with `cohub apps commerce purchase` for the same behavior.
+- 6f4b90f: Board scripts run in one engine everywhere: `cohub boards export`, `simulate` and `profile` run them in a headless Chrome, as the Cohub app does, instead of Node. Without an installed Chrome, Chromium or Edge, Chrome's headless shell downloads once, the first time a Board with scripts, shaders or 3D needs it. Exports with scripts draw several times faster: frames without shaders or 3D draw with Canvas 2D, and videos stream raw frames to ffmpeg instead of writing a PNG per frame. `script.time` lets a timeline drive a script's clock (`boards place` adds the track for a scripted item), modules import fonts, images and `.bin` files as bytes with `with { type: "bytes" }`, script workers can draw Canvas text in Geist and Geist Mono on every screen, `fetch()` in an export or simulation says there is no network, and `profile` reports what each script's updates and draws cost. `--at 33:35s` now fails instead of reading 33 as milliseconds. The SDK's Node script host is gone, and `board/testing` takes `scripts: { files, element }` and runs them in the page.
+- c16d1bb: A background Runtime now moves to a newer CLI without disconnecting. Once idle, it hands the same Runtime to the newer version, and the Space and desktop never see it go offline. If the new version fails to start, the old one picks the Runtime back up. `cohub runtime up` from a newer CLI updates a running Runtime in place.
+
+### Patch Changes
+
+- 3faa973: Claude Code Turns on a Local Runtime record the input, cache read, and cache write tokens of every tool call. When the stream closed a call with zero counts, they were recorded as zero, so Turn totals could count only the last call's cache usage.
+- a21aee7: Download sandboxd v2.111.0.
+- f29bc6e: The Runtime stops re-uploading the archive of a Turn that was resolved on the server. The archive stays on the machine; it no longer retries every 10 seconds.
+- 3685182: A running local Runtime stops syncing a subdirectory's harness sessions as soon as that subdirectory is bound to its own Space with `cohub runtime up`, instead of mirroring them until the parent Runtime restarts.
+- 94f0412: `--steer` now lets the current turn finish its running tools, then runs your message before the next model request. Stop still interrupts at once.
+- Updated dependencies [fa6755e]
+- Updated dependencies [6f4b90f]
+- Updated dependencies [f29bc6e]
+- Updated dependencies [c16d1bb]
+  - @neta-art/cohub@13.31.0
+
 ## 10.37.1
 
 ### Patch Changes
