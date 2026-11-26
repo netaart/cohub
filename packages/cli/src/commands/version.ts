@@ -16,7 +16,7 @@ export function registerVersion(program: Command): void {
         `cohub     ${about.version}${about.commit ? ` (${about.commit})` : ""} · Node ${about.node}`,
         `PATH      ${about.path ? `${about.path.path} · ${about.path.version ?? "unknown"}` : "No cohub on PATH"}`,
         ...about.runtimes.map((runtime, index) =>
-          `${index ? "         " : "Runtimes "} ${runtime.version ?? "older"} · ${runtime.root}${isNewerVersion(about.version, runtime.version ?? undefined) ? " (reconnect to update)" : ""}`),
+          `${index ? "         " : "Runtimes "} ${runtime.version ?? "older"} · ${runtime.root}${isNewerVersion(about.version, runtime.version ?? undefined) ? " (cohub runtime up to update)" : ""}`),
       ];
       process.stdout.write(`${rows.join("\n")}\n`);
     });

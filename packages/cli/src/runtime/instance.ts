@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createConnection, createServer, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -82,6 +82,22 @@ export async function controlRuntimeInstance(directory: string, action: string, 
 
 export const UNCONFIRMED_WORK = "Unconfirmed executions remain";
 
+const STOPPED = "stopped";
+export const runtimeInstanceStopped = (directory: string) => stat(join(directory, STOPPED)).then(() => true, () => false);
+
+export async function requestRuntimeHandoff(directory: string, runtimeId: string, timeoutMs = 30_000): Promise<string | undefined> {
+  const record = await readRecord(directory);
+  if (!record || !alive(record.pid)) return undefined;
+  try {
+    const { status } = await request(record, "handoff", { runtimeId }, timeoutMs);
+    if (status.runtimeId !== runtimeId) throw new Error("Runtime identity changed");
+    return record.nonce;
+  } catch (error) {
+    if (["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? "")) return undefined;
+    throw error;
+  }
+}
+
 export async function stopRuntimeInstance(directory: string, force = false) {
   const local = await requestRuntimeInstance(directory, "stop", force);
   const until = Date.now() + 15_000;
@@ -127,19 +143,27 @@ export async function watchRuntimeInstance(directory: string, onStatus: (status:
 
 export type RuntimeInstanceHandle = {
   changed(): void;
+  replaced(signal: AbortSignal): Promise<boolean>;
   close(): Promise<void>;
 };
 
 /** Private local IPC is both the single-instance guard and the control surface. */
-export async function ownRuntimeInstance(directory: string, status: () => RuntimeSummary, stop: (force: boolean) => Promise<void>, control: (action: string, message: Record<string, unknown>) => Promise<unknown> = async () => { throw new Error("Unknown Runtime control request"); }): Promise<RuntimeInstanceHandle> {
+export async function ownRuntimeInstance(directory: string, status: () => RuntimeSummary, stop: (force: boolean) => Promise<void>, control: (action: string, message: Record<string, unknown>) => Promise<unknown> = async () => { throw new Error("Unknown Runtime control request"); }, predecessor?: string): Promise<RuntimeInstanceHandle> {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   return withRuntimeSpaceBindingsLock(async () => {
-    if (await requestRuntimeInstance(directory)) throw new Error("Runtime already running; use status");
+    const current = await readRecord(directory);
+    const yielded = predecessor !== undefined && current?.nonce === predecessor;
+    if (!yielded && await requestRuntimeInstance(directory)) throw new Error("Runtime already running; use status");
+    const nonce = randomUUID();
+    // Never the yielded predecessor's endpoint, so closing its own never removes ours.
     const socketPath = process.platform === "win32"
-      ? `\\\\.\\pipe\\cohub-${createHash("sha256").update(directory).digest("hex").slice(0, 24)}`
-      : join(directory, "control.sock");
-    if (process.platform !== "win32") await rm(socketPath, { force: true });
-    const record: InstanceRecord = { pid: process.pid, nonce: randomUUID(), socket: socketPath };
+      ? `\\\\.\\pipe\\cohub-${createHash("sha256").update(directory).digest("hex").slice(0, 24)}-${nonce.slice(0, 8)}`
+      : join(directory, yielded && current.socket === join(directory, "ctl-a.sock") ? "ctl-b.sock" : "ctl-a.sock");
+    if (process.platform !== "win32") {
+      const stale = (await readdir(directory)).filter((name) => /^(control|ctl-[ab])\.sock$/.test(name) && !(yielded && join(directory, name) === current.socket));
+      await Promise.all(stale.map((name) => rm(join(directory, name), { force: true })));
+    }
+    const record: InstanceRecord = { pid: process.pid, nonce, socket: socketPath };
     const clients = new Set<Socket>();
     const watchers = new Set<Socket>();
     const statusLine = () => `${JSON.stringify({ nonce: record.nonce, status: status() })}\n`;
@@ -166,7 +190,10 @@ export async function ownRuntimeInstance(directory: string, status: () => Runtim
             return;
           }
           let result: unknown;
-          if (message.action === "stop") await stop(message.force === true);
+          if (message.action === "stop") {
+            await stop(message.force === true);
+            await writeFile(join(directory, STOPPED), record.nonce, { mode: 0o600 }).catch(() => undefined);
+          }
           else if (message.action !== "status") result = await control(String(message.action), message);
           socket.end(`${JSON.stringify({ nonce: record.nonce, status: status(), ...(result === undefined ? {} : { result }) })}\n`);
         })().catch((error) => socket.end(`${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`));
@@ -181,6 +208,7 @@ export async function ownRuntimeInstance(directory: string, status: () => Runtim
       const temporary = join(directory, `${record.nonce}.tmp`);
       await writeFile(temporary, JSON.stringify(record), { mode: 0o600 });
       await rename(temporary, join(directory, "owner.json"));
+      await rm(join(directory, STOPPED), { force: true });
     } catch (error) { server.close(); throw error; }
     return {
       changed: () => {
@@ -188,11 +216,20 @@ export async function ownRuntimeInstance(directory: string, status: () => Runtim
         const line = statusLine();
         for (const watcher of watchers) watcher.write(line);
       },
+      replaced: async (signal) => {
+        while (!signal.aborted) {
+          if ((await readRecord(directory).catch(() => record))?.nonce !== record.nonce) return true;
+          await delay(50, undefined, { signal }).catch(() => undefined);
+        }
+        return false;
+      },
       close: async () => {
         for (const client of clients) client.destroy();
         await new Promise<void>((resolve) => server.close(() => resolve()));
         // Never remove a replacement owner's files.
-        if ((await readRecord(directory))?.nonce === record.nonce) await rm(join(directory, "owner.json"));
+        await withRuntimeSpaceBindingsLock(async () => {
+          if ((await readRecord(directory).catch(() => null))?.nonce === record.nonce) await rm(join(directory, "owner.json"));
+        }, { path: join(directory, "owner.json") });
       },
     };
   }, { path: join(directory, "owner.json") });

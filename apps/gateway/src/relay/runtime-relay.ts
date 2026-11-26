@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
 import { createLogger } from "@cohub/infra/logging";
-import { isUuid, RUNTIME_CONTROL_FEATURES, type RuntimeCatalogRefresh, type RuntimeApprovalDecision, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
+import { isUuid, RUNTIME_CONTROL_FEATURES, RUNTIME_HANDOFF_GRACE_MS, RUNTIME_NOT_FORWARDED_CLOSE, type RuntimeCatalogRefresh, type RuntimeApprovalDecision, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
 
@@ -22,6 +22,8 @@ export type RuntimeRelayDependencies = {
   /** Replaces the registration only while `previous` still holds the lease; without it, Runtimes reconnect to change it. */
   update?: (spaceId: string, previous: RuntimeRegistration, next: RuntimeRegistration) => Promise<boolean>;
   release: (spaceId: string, record: RuntimeRegistration) => Promise<void>;
+  handoff?: (spaceId: string, record: RuntimeRegistration) => Promise<void>;
+  handoffGraceMs?: number;
   heartbeatMs?: number;
   recover?: (spaceId: string, ownerUserId: string, execution: RuntimePendingExecution) => Promise<unknown>;
   nativeEvent?: (spaceId: string, ownerUserId: string, requestId: string, event: import("@cohub/protocol").NativeRuntimeEvent) => Promise<unknown>;
@@ -72,7 +74,7 @@ const nativeRequestId = (raw: unknown) => {
 };
 
 export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
-  const registrations = new Map<string, { socket: WebSocket; record: RuntimeRegistration; peers: Map<string, WebSocket> }>();
+  const registrations = new Map<string, { socket: WebSocket; record: RuntimeRegistration; peers: Map<string, WebSocket>; handingOff?: boolean }>();
   const send = (socket: WebSocket, frame: unknown) => {
     const data = JSON.stringify(frame);
     if (socket.readyState !== socket.OPEN || Buffer.byteLength(data) + socket.bufferedAmount > RUNTIME_MAX_FRAME_BYTES) throw new Error("Runtime backpressure limit exceeded");
@@ -97,6 +99,12 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
     let updating: Promise<boolean> | null = null;
     let pendingCatalog: RuntimeRegistration["capabilities"] | null = null;
     let draining = false;
+    let handingOff = false;
+    const release = (spaceId: string, record: RuntimeRegistration) => {
+      const run = () => void deps.release(spaceId, record).catch(() => undefined);
+      if (handingOff) setTimeout(run, deps.handoffGraceMs ?? RUNTIME_HANDOFF_GRACE_MS).unref();
+      else run();
+    };
     // Off the frame chain, so heartbeats and execution events keep flowing while Redis answers. The
     // record is swapped before anything awaiting `updating` resumes, so a racing renew sees it.
     async function drainCatalogs(update: NonNullable<RuntimeRelayDependencies["update"]>): Promise<boolean> {
@@ -107,7 +115,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           pendingCatalog = null;
           if (!await update(spaceId, previous, next)) return false;
           // The close released the record it saw, which this update had already replaced.
-          if (closed) { await deps.release(spaceId, next).catch(() => undefined); return true; }
+          if (closed) { release(spaceId, next); return true; }
           current.record = next;
           const registration = registrations.get(spaceId);
           if (registration?.socket === socket) registration.record = next;
@@ -245,6 +253,14 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             authorizedAt = Date.now();
             logger.debug("runtime.control.auth_refreshed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId });
           } else if (frame.type === "runtime.heartbeat") lastHeartbeat = Date.now();
+          else if (frame.type === "runtime.handoff") {
+            await deps.handoff?.(current.spaceId, current.record);
+            handingOff = true;
+            const registration = registrations.get(current.spaceId);
+            if (registration?.socket === socket) registration.handingOff = true;
+            logger.info("runtime.control.handoff", { spaceId: current.spaceId, runtimeId: current.record.runtimeId, connectionId: current.record.connectionId });
+            send(socket, { type: "runtime.handoff" });
+          }
           else if (frame.type === "runtime.capabilities") {
             const update = deps.update;
             if (!update) throw new RuntimeProtocolError("Runtime capability updates are unavailable");
@@ -318,11 +334,12 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
         activePeers: peers.size,
         code,
         reason: reason.toString(),
+        handingOff,
         ...client,
       });
       if (registration?.socket === socket) registrations.delete(current.spaceId);
       for (const peer of peers.values()) peer.close(1011, "Runtime disconnected");
-      void deps.release(current.spaceId, current.record).catch(() => undefined);
+      release(current.spaceId, current.record);
     });
   }
   function peer(socket: WebSocket, request: IncomingMessage, spaceId: string) {
@@ -333,7 +350,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
     }
     const registration = registrations.get(spaceId);
     const connection = new URL(request.url ?? "/", "http://localhost").searchParams.get("connection");
-    if (!registration || registration.record.connectionId !== connection || registration.socket.readyState !== registration.socket.OPEN) {
+    if (!registration || registration.handingOff || registration.record.connectionId !== connection || registration.socket.readyState !== registration.socket.OPEN) {
       logger.debug("runtime.peer.unavailable", { spaceId, connectionId: connection, runtimeId: registration?.record.runtimeId });
       socket.close(4404, "Runtime unavailable");
       return;
@@ -349,6 +366,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       try {
         const command = runtimeCommandSchema.parse(JSON.parse(data.toString()));
         if (command.type === "turn.start" || command.type === "turn.recover") {
+          if (registration.handingOff) { socket.close(RUNTIME_NOT_FORWARDED_CLOSE, "Runtime handing off"); return; }
           const execution = command.type === "turn.start" ? command.input : command.execution;
           if (requestId || execution.spaceId !== spaceId || registration.peers.has(command.requestId)) throw new Error("Invalid execution identity");
           if (registration.peers.size >= 8) {

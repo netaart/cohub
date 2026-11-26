@@ -42,6 +42,10 @@ export type RuntimeCatalogRefresh = z.infer<typeof runtimeCatalogRefreshSchema>;
 export const runtimeRegistrationKey = (spaceId: string) => `runtime:space:${spaceId}`;
 export const runtimeWorkspaceKey = (spaceId: string) => `runtime:workspace:${spaceId}`;
 export const runtimeDisplaysKey = (spaceId: string) => `runtime:displays:${spaceId}`;
+export const runtimeHandoffKey = (spaceId: string) => `runtime:handoff:${spaceId}`;
+export const RUNTIME_HANDOFF_GRACE_MS = 30_000;
+/** A Gateway closes a Turn request it did not forward with this code; it may be sent again as new. */
+export const RUNTIME_NOT_FORWARDED_CLOSE = 4425;
 export const runtimeWorkspaceSchema = z.object({
   runtimeId: z.string().uuid(),
   connectionId: z.string().uuid(),
@@ -203,7 +207,7 @@ export function parseRuntimeRegistration(raw: string): RuntimeRegistration | nul
 }
 
 /** Control frames a Gateway accepts beyond the base protocol; older Gateways omit the list. */
-export const RUNTIME_CONTROL_FEATURES = ["capabilities", "approvals", "nativeMessages"] as const;
+export const RUNTIME_CONTROL_FEATURES = ["capabilities", "approvals", "nativeMessages", "handoff"] as const;
 export const runtimeReadySchema = z.object({ type: z.literal("runtime.ready"), connectionId: z.string().uuid(), features: z.array(z.string()).optional() });
 
 export type RuntimeExecutionIdentity = { spaceId: string; sessionId: string; turnId: string; harness: LocalHarness };
@@ -323,6 +327,7 @@ export const runtimeClientFrameSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runtime.capabilities"), capabilities: runtimeCapabilitiesSchema }).strict(),
   z.object({ type: z.literal("runtime.recovery"), executions: z.array(runtimePendingExecutionSchema).min(1).max(RUNTIME_RECOVERY_BATCH_SIZE) }).strict(),
   z.object({ type: z.literal("runtime.heartbeat") }),
+  z.object({ type: z.literal("runtime.handoff") }).strict(),
   z.object({ type: z.literal("runtime.auth"), token: z.string().min(1).max(16_384) }),
   z.object({ type: z.literal("runtime.event"), requestId: id, event: runtimeEventSchema }),
   z.object({ type: z.literal("runtime.native"), requestId: id, event: nativeRuntimeEventSchema }),

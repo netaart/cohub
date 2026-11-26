@@ -2,7 +2,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
 import { createLogger } from "@cohub/infra/logging";
-import { displaysSnapshotSchema, fileWatcherStatusSchema, type DisplaysSnapshot } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, RUNTIME_HANDOFF_GRACE_MS, type DisplaysSnapshot } from "@cohub/protocol";
 import { relayAuthClose } from "../local-sandbox-auth.js";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
@@ -55,6 +55,8 @@ export type SandboxRelayDeps = {
   renewWorkspace: (runner: RegisteredRunner) => Promise<boolean>;
   releaseWorkspace: (spaceId: string, receipt: string) => Promise<void>;
   reportStatus: (report: SandboxRelayStatusReport) => Promise<void>;
+  handingOff?: (spaceId: string, runtimeId: string) => Promise<boolean>;
+  handoffGraceMs?: number;
   runtimeChanged: (spaceId: string) => Promise<void>;
   publishWatcherEvent: (spaceId: string, frameType: string, payload: unknown) => Promise<void>;
   storeWatcherStatus: (spaceId: string, status: unknown) => Promise<void>;
@@ -340,11 +342,18 @@ export function createSandboxRelay(deps: SandboxRelayDeps) {
       // Only clear if this socket is still the active runner for the space.
       if (runnersBySpace.get(spaceId)?.socket === socket) {
         runnersBySpace.delete(spaceId);
-        await deps.releaseWorkspace(spaceId, runner.receipt);
-        logger.info("[Relay] local sandbox disconnected", { spaceId, runtimeId: runner.runtimeId ?? null });
-        await deps.reportStatus({ spaceId, status: "stopped", runtimeId: runner.runtimeId ?? null, connectionId: runner.connectionId }).catch((error) =>
-          logger.warn("[Relay] failed to report stopped", { spaceId, error }),
-        );
+        const { runtimeId, receipt, connectionId } = runner;
+        const disconnected = async () => {
+          await deps.releaseWorkspace(spaceId, receipt);
+          logger.info("[Relay] local sandbox disconnected", { spaceId, runtimeId: runtimeId ?? null });
+          await deps.reportStatus({ spaceId, status: "stopped", runtimeId: runtimeId ?? null, connectionId }).catch((error) =>
+            logger.warn("[Relay] failed to report stopped", { spaceId, error }),
+          );
+        };
+        if (runtimeId && await deps.handingOff?.(spaceId, runtimeId).catch(() => false)) {
+          logger.info("[Relay] local sandbox handing off", { spaceId, runtimeId });
+          setTimeout(() => void disconnected().catch((error) => logger.warn("[Relay] cleanup failed", { error })), deps.handoffGraceMs ?? RUNTIME_HANDOFF_GRACE_MS).unref();
+        } else await disconnected();
       }
       runner = null;
     };

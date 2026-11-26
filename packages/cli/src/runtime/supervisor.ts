@@ -14,7 +14,8 @@ import type { CatalogCache } from "./model-catalog.js";
 import { serveRuntime, type Execution } from "./connection.js";
 import { discoverHarnesses, refreshHarnesses, type HarnessExecutables } from "./harnesses/index.js";
 import { RuntimeDiagnostics, serializeDiagnosticError, type RuntimeDiagnostic, type RuntimeDiagnosticLevel } from "./diagnostics.js";
-import { ownRuntimeInstance, runtimeInstanceDirectory, UNCONFIRMED_WORK, type RuntimeInstanceHandle } from "./instance.js";
+import { ownRuntimeInstance, requestRuntimeHandoff, requestRuntimeInstance, runtimeInstanceDirectory, UNCONFIRMED_WORK, type RuntimeInstanceHandle } from "./instance.js";
+import { createRuntimeUpdater } from "./detached.js";
 import { readRuntimePreferences } from "./preferences.js";
 import { createDiagnosticConsole, type RuntimeSummary } from "./presentation.js";
 import { join } from "node:path";
@@ -25,6 +26,7 @@ import { NativeRuntime } from "./native/daemon.js";
 
 const DISPLAY_ANSWER_MS = 10_000;
 const ACTIVITY_MS = 60_000;
+const TAKEOVER_MS = 60_000;
 
 export type RuntimeLaunch = {
   spaceId: string;
@@ -39,6 +41,8 @@ export type RuntimeLaunch = {
   /** Start importing earlier conversations as soon as the Runtime is connected. */
   importHistory?: boolean;
   display?: string;
+  resume?: { runtimeId: string; takeOver?: boolean };
+  skipUpdate?: string;
 };
 
 export function sandboxOutputLevel(value: unknown, stream: "stdout" | "stderr"): RuntimeDiagnosticLevel {
@@ -66,7 +70,7 @@ async function listenWindowsControlPipe() {
   return { path, stream, close: () => { server.close(); stream.end(); } };
 }
 
-export async function runRuntime(config: RuntimeLaunch, onState: (status: RuntimeSummary) => void, externalSignal?: AbortSignal, onDiagnostic?: (event: RuntimeDiagnostic) => void) {
+export async function runRuntime(config: RuntimeLaunch, onState: (status: RuntimeSummary) => void, externalSignal?: AbortSignal, onDiagnostic?: (event: RuntimeDiagnostic) => void): Promise<string | undefined> {
   const controller = new AbortController();
   const signal = externalSignal ? AbortSignal.any([externalSignal, controller.signal]) : controller.signal;
   const stop = () => controller.abort();
@@ -78,7 +82,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   const archives = new RuntimeArchiveStore(join(stateRoot, "archives"), space);
   const consoleSink = config.background ? undefined : createDiagnosticConsole(config.verbose);
   const diagnostics = new RuntimeDiagnostics({
-    root: stateRoot, spaceId: config.spaceId, runtimeId: randomUUID(),
+    root: stateRoot, spaceId: config.spaceId, runtimeId: config.resume?.runtimeId ?? randomUUID(), resumed: Boolean(config.resume),
     onEvent: (event) => { consoleSink?.(event); onDiagnostic?.(event); },
   });
   archives.setErrorReporter((error, index) => diagnostics.log("warn", "archive.upload_pending", { error: serializeDiagnosticError(error) }, {
@@ -93,6 +97,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     spaceId: config.spaceId, root: config.root, runtimeId: diagnostics.runtimeId,
     pid: process.pid, version: CLI_VERSION, harnesses: config.harnesses, background: config.background,
     ...(config.display ? { display: config.display } : {}),
+    ...(config.resume ? { handoff: true } : {}),
     state: "starting", harnessConnected: false, workspaceConnected: false,
     diagnosticsPath: diagnostics.directory,
   };
@@ -105,7 +110,14 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     if (JSON.stringify(status) === JSON.stringify(next)) return;
     const becameReady = next.state === "ready" && status.state !== "ready";
     status = next;
-    if (becameReady) { hasBeenReady = true; diagnostics.log("info", "runtime.available"); }
+    if (becameReady) {
+      hasBeenReady = true;
+      diagnostics.log("info", "runtime.available");
+      if (next.handoff && !yielding) {
+        next.handoff = undefined;
+        if (config.resume?.takeOver) diagnostics.log("info", "runtime.handoff_completed", { version: CLI_VERSION });
+      }
+    }
     onState({ ...status });
     instance?.changed();
   };
@@ -114,6 +126,43 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   let nativeStarted = false;
   let tokenInFlight: Promise<string> | null = null;
   const executions = new Map<string, Execution>();
+  const handoff: { prepare: ((commit: () => boolean) => Promise<boolean>) | null } = { prepare: null };
+  let yielding = null as { version: string; torn: () => void } | null;
+  let stopAfterHandoff: boolean | undefined;
+  const handoffTimer = config.resume ? setTimeout(() => { if (!yielding) update({ handoff: undefined }); }, TAKEOVER_MS) : undefined;
+  const bridgeProcesses = new Set<string>();
+  const quiet = () => !executions.size && !native.status().running && !bridgeProcesses.size;
+  const idle = async () => status.state === "ready" && !yielding && !status.displayOnRequest && quiet()
+    && native.status().import.state !== "running" && !await native.executor.results.unconfirmed();
+  const updater = config.background ? createRuntimeUpdater({
+    spaceId: config.spaceId, root: config.root, identity: config.identity, runtimeId: status.runtimeId,
+    harnesses: config.harnesses, executables: config.executables,
+    auto: process.env.COHUB_CLI_AUTO_UPDATE !== "0", skip: config.skipUpdate,
+    display: () => status.display, idle,
+    pending: (version) => update({ update: version }),
+    log: (level, event, data) => diagnostics.log(level, event, data),
+  }) : null;
+  const yieldTo = async (runtimeId: unknown) => {
+    const successor = updater?.launching;
+    if (!successor || runtimeId !== status.runtimeId) throw new Error("Runtime handoff refused");
+    const busy = () => { updater.defer(); return new Error("Runtime is busy; it updates once idle"); };
+    if (!await idle() || status.display !== successor.display) throw busy();
+    let torn!: Promise<void>;
+    // Runs as the Gateway confirms, so nothing can start between this last check and the disconnect.
+    const commit = () => {
+      if (!quiet() || status.display !== successor.display || status.state === "stopping") return false;
+      torn = new Promise<void>((resolve) => { yielding = { version: successor.version, torn: resolve }; });
+      diagnostics.log("info", "runtime.handoff_yielded", { version: successor.version });
+      update({ handoff: true });
+      stop();
+      return true;
+    };
+    let committed: boolean;
+    try { committed = handoff.prepare ? await handoff.prepare(commit) : commit(); }
+    catch (error) { updater.defer(); throw error; }
+    if (!committed) throw busy();
+    await torn;
+  };
   let bridgeControl: { features: string[]; send: (frame: object) => void } | null = null;
   let workspace: { url: string; token: string } | null = null;
   let displayAnswer: ((frame: { spec: string; error?: string }) => void) | null = null;
@@ -159,24 +208,45 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     })().finally(() => { tokenInFlight = null; });
     return tokenInFlight;
   };
+  const cache = config.catalogCache ?? {};
+  const prepare = () => Promise.all([
+    ensureSandboxdBinary({ onStatus: (message) => diagnostics.log("info", "sandboxd.download", { message }) }),
+    config.capabilities ?? discoverHarnesses(config.harnesses, config.executables, config.root, undefined, cache),
+  ]);
+  let prepared: ReturnType<typeof prepare> | undefined;
+  const directory = runtimeInstanceDirectory(config.identity, config.spaceId);
   try {
-    instance = await ownRuntimeInstance(runtimeInstanceDirectory(config.identity, config.spaceId), summary, async (force) => {
+    let predecessor: string | undefined;
+    if (config.resume?.takeOver) {
+      onState({ ...status });
+      prepared = prepare();
+      await prepared;
+      predecessor = await requestRuntimeHandoff(directory, config.resume.runtimeId);
+      if (!predecessor) throw new Error("The Runtime to take over is no longer running");
+    }
+    instance = await ownRuntimeInstance(directory, summary, async (force) => {
+      if (yielding) { stopAfterHandoff = force; return; }
       if (!force && await native.executor.results.unconfirmed()) throw new Error(`${UNCONFIRMED_WORK}. Use down --yes to stop; results and files are retained`);
       update({ state: "stopping" });
       setTimeout(stop, 30);
     }, (action, message) => {
-      if (action === "display") return setDisplay(String(message.spec ?? ""));
+      if (action === "display") return yielding ? Promise.reject(new Error("The Runtime is updating; try again in a moment")) : setDisplay(String(message.spec ?? ""));
       if (action === "keepAwake") return applyKeepAwake();
       if (action === "workspace") return Promise.resolve(status.state === "ready" ? workspace : null);
+      if (action === "handoff") return yieldTo(message.runtimeId);
+      if (action === "update") {
+        if (!updater) return Promise.reject(new Error("This Runtime runs in a terminal; restart it there to update"));
+        const { version, node, entry, sandboxd } = message;
+        if (typeof version !== "string" || typeof node !== "string" || typeof entry !== "string" || sandboxd !== undefined && typeof sandboxd !== "string") return Promise.reject(new Error("Invalid update request"));
+        return updater.request({ version, node, entry, sandboxd });
+      }
       return native.control(action, message);
-    });
+    }, predecessor);
+    if (predecessor) await native.control("reload", {}).catch((error: unknown) => diagnostics.log("warn", "native.config_unreadable", { error: serializeDiagnosticError(error) }));
     onState({ ...status });
     diagnostics.log("info", "runtime.cli_started", { platform: process.platform, node: process.versions.node, harnesses: config.harnesses });
-    const cache = config.catalogCache ?? {};
-    const [binary, capabilities] = await Promise.all([
-      ensureSandboxdBinary({ onStatus: (message) => diagnostics.log("info", "sandboxd.download", { message }) }),
-      config.capabilities ?? discoverHarnesses(config.harnesses, config.executables, config.root, undefined, cache),
-    ]);
+    if (config.resume && !config.resume.takeOver) diagnostics.log("warn", "runtime.handoff_resumed", { version: config.skipUpdate });
+    const [binary, capabilities] = await (prepared ?? prepare());
     signal.throwIfAborted();
     const url = new URL(resolveWebsocketUrl()); url.pathname = url.pathname.replace(/\/ws$/, "/runtime/relay");
     const relay = new URL(url); relay.pathname = relay.pathname.replace(/\/runtime\/relay$/, "/sandbox/relay");
@@ -238,6 +308,10 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
                 if (value && typeof value === "object" && !Array.isArray(value)) parsed = value as Record<string, unknown>;
               } catch { /* Compatibility with text loggers. */ }
               const data = parsed ? Object.fromEntries(Object.entries(parsed).filter(([key]) => !["msg", "level", "time"].includes(key))) : {};
+              if (typeof parsed?.processId === "string") {
+                if (parsed.msg === "process:start") bridgeProcesses.add(parsed.processId);
+                else if (parsed.msg === "process:exit") bridgeProcesses.delete(parsed.processId);
+              }
               diagnostics.log(sandboxOutputLevel(parsed?.level, streamName), "sandboxd.log", { ...data, message: parsed?.msg ?? line }, { component: "sandboxd" });
             });
           }
@@ -329,6 +403,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
         } finally {
           retryDisconnectedBridge = undefined;
           bridgeControl = null;
+          bridgeProcesses.clear();
           workspace = null;
           childStopped = true;
           controlPipe?.close();
@@ -353,7 +428,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     await serveRuntime({
       spaceId: config.spaceId, cwd: config.root, url: url.toString(), capabilities,
       refreshCapabilities: (current, target) => refreshHarnesses(current, config.executables, config.root, (harness, error) => diagnostics.log("warn", "runtime.harness_catalog_failed", { harness, error: serializeDiagnosticError(error) }), { target, cache }),
-      runtimeId: status.runtimeId, diagnostics, token, signal, executor: native.executor, executions,
+      runtimeId: status.runtimeId, diagnostics, token, signal, executor: native.executor, executions, handoff,
       onReady: () => { update({ harnessConnected: true }); retryDisconnectedBridge?.(); },
       onDisconnected: () => { native.connect(null); update({ harnessConnected: false }); retryDisconnectedBridge?.(); },
       onNativeStop: (stop) => { native.stop(stop.sessionId, stop.turnId); },
@@ -367,17 +442,26 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     });
   } catch (error) {
     if (!signal.aborted) {
-      update({ state: "attention" });
-      diagnostics.log("error", "runtime.failed", { error: serializeDiagnosticError(error) });
+      if (instance || !config.resume?.takeOver) {
+        update({ state: "attention" });
+        diagnostics.log("error", "runtime.failed", { error: serializeDiagnosticError(error) });
+      }
       throw error;
     }
   } finally {
     controller.abort();
+    updater?.close();
+    clearTimeout(handoffTimer);
     try {
       await bridgeTask;
       if (nativeStarted) await native.close(AbortSignal.timeout(5_000));
     } finally {
       try {
+        if (yielding && updater) {
+          yielding.torn();
+          const replaced = await instance?.replaced(AbortSignal.any([AbortSignal.timeout(TAKEOVER_MS), updater.failed]));
+          if (replaced && stopAfterHandoff !== undefined) await requestRuntimeInstance(directory, "stop", stopAfterHandoff).catch(() => undefined);
+        }
         await diagnostics.close();
       } finally {
         try {
@@ -388,4 +472,5 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
       }
     }
   }
+  return stopAfterHandoff === undefined ? yielding?.version : undefined;
 }

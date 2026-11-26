@@ -55,6 +55,7 @@ export type RuntimeDiagnosticContext = {
 export type RuntimeDiagnosticsOptions = {
   root: string;
   runtimeId?: string;
+  resumed?: boolean;
   spaceId: string;
   component?: string;
   logFlushIntervalMs?: number;
@@ -220,6 +221,7 @@ export class RuntimeDiagnostics {
 
   constructor(options: RuntimeDiagnosticsOptions) {
     this.runtimeId = options.runtimeId ?? randomUUID();
+    if (options.resumed) this.sequence = Date.now() * 1000;
     this.spaceId = options.spaceId;
     this.component = options.component ?? "runtime";
     this.onEvent = options.onEvent;

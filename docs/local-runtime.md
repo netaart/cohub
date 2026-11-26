@@ -568,6 +568,26 @@ this only stops the process, never resolves an uncertain server-side turn.
 
 前台与后台共用监督器；两条连接均成功才显示就绪。后台启动未就绪时如实返回状态，
 进程继续重试。`down --yes` 允许停止包含未确认执行的进程，但不代替服务端的停止确认。
+
+A background Runtime moves to a newer CLI without disconnecting. It notices a newer install of
+its own CLI (the self-update, unless `COHUB_CLI_AUTO_UPDATE=0`), or is asked by a newer
+`cohub runtime up` or desktop app, and waits until it is idle: no Turn, native run, history
+import, command run through the file bridge, unconfirmed result or on-request screen share. It then starts the newer CLI's
+`runtime up`, which prepares sandboxd and Harnesses while the old process keeps serving. Only then
+does the old process yield: the Gateway acknowledges `runtime.handoff` and keeps the lease
+(and the file bridge's ready state) for `RUNTIME_HANDOFF_GRACE_MS`, the old process keeps its
+control socket until the new one owns the instance, and the new one reconnects with the same
+Runtime id. The Space, desktop and `runtime status` never see it offline; a Turn dispatched in
+between retries for up to 10 seconds while the new connection registers. A Runtime stopped meanwhile stays stopped, also when the stop arrives mid-handoff.
+If the successor exits before serving, the old version resumes the same Runtime id, without sharing the screen, and does not retry that version automatically. A
+foreground Runtime is never replaced; restart it in its terminal.
+
+后台 Runtime 可在不断线的情况下升级到新版 CLI：发现本机已安装更新（自更新，`COHUB_CLI_AUTO_UPDATE=0`
+可关闭），或由新版 `runtime up`、桌面应用请求后，等到空闲（无 Turn、原生运行、历史导入、文件桥命令、未确认结果或按需屏幕共享）
+再启动新版 `runtime up`。新进程准备完毕后旧进程才让出：Gateway 确认 `runtime.handoff` 并在宽限期内保留租约，
+旧进程保持控制套接字直到新进程接管，新进程以相同 Runtime id 重连。期间被停止的 Runtime 保持停止。新进程未就绪即退出时，
+旧版本以同一 id 恢复（不自动共享屏幕），且不再自动尝试该版本。前台 Runtime 不会被替换。
+
 `status` and `logs` use the directory binding, never silently fall back to Home.
 Local status and diagnostics remain available when the server cannot be reached.
 

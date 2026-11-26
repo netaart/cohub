@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { packagePath } from "../package-paths.js";
 
 const ENTRY = packagePath("bin", "cohub.js");
@@ -21,7 +21,7 @@ export function appendCliToPath(env: NodeJS.ProcessEnv = process.env, node = pro
   const temporary = `${file}.${process.pid}`;
   writeFileSync(temporary, script, { mode: 0o755 });
   renameSync(temporary, file);
-  const path = env.PATH?.split(delimiter).filter(Boolean) ?? [];
+  const path = env.PATH?.split(delimiter).filter((item) => item && dirname(item) !== dirname(dir)) ?? [];
   if (!path.includes(dir)) env.PATH = [...path, dir].join(delimiter);
   return dir;
 }

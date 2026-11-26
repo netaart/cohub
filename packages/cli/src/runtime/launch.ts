@@ -17,8 +17,9 @@ import { serializeDiagnosticError, type RuntimeDiagnostic } from "./diagnostics.
 import { createDiagnosticConsole, printRuntimeSummary, runtimeWebUrl, type RuntimeSummary } from "./presentation.js";
 import type { RuntimeLaunch } from "./supervisor.js";
 import { standaloneModule } from "../package-paths.js";
-
-export const EXPECTED_IDENTITY_ENV = "COHUB_RUNTIME_EXPECTED_IDENTITY";
+import { isNewerVersion } from "../self-update.js";
+import { CLI_VERSION } from "../version.js";
+import { awaitRuntimeVersion, EXPECTED_IDENTITY_ENV, requestRuntimeUpdate, RUNTIME_HANDOFF_ENV } from "./detached.js";
 
 export type RuntimeUpOptions = HarnessExecutables & { space?: string; new?: boolean; name?: string; harness: string[]; display?: string | boolean; yes?: boolean; json?: boolean; detach?: boolean; verbose?: boolean };
 /** Executable overrides come from the per-harness `--<harness> <path>` options. */
@@ -98,6 +99,31 @@ export async function startBackgroundRuntime(config: RuntimeLaunch): Promise<Run
   });
 }
 
+async function updateRunningRuntime(directory: string, existing: RuntimeSummary, json?: boolean) {
+  const from = existing.version ?? "of an older CLI";
+  let started: boolean;
+  try { ({ started } = await requestRuntimeUpdate(directory)); }
+  catch (error) {
+    const message = serializeDiagnosticError(error).message;
+    process.stderr.write(/Unknown Runtime control/.test(message)
+      ? `Runtime ${from} cannot update in place; run cohub runtime down, then up, to use ${CLI_VERSION}\n`
+      : `Runtime ${from} stays as is: ${message}\n`);
+    printRuntimeSummary(existing, json, true);
+    return;
+  }
+  if (!started) {
+    process.stderr.write(`Runtime ${from} updates to ${CLI_VERSION} once its current work finishes\n`);
+    printRuntimeSummary({ ...existing, update: CLI_VERSION }, json, true);
+    return;
+  }
+  if (!json) process.stderr.write(`Updating Runtime ${from} → ${CLI_VERSION} without disconnecting\n`);
+  const updated = await awaitRuntimeVersion(directory, CLI_VERSION);
+  const current = updated ?? await requestRuntimeInstance(directory).catch(() => null);
+  if (!updated) process.exitCode = current?.version === CLI_VERSION ? 2 : 1;
+  if (!updated) process.stderr.write(`${current?.version === CLI_VERSION ? `Runtime ${CLI_VERSION} is still connecting` : current ? `Update did not finish; Runtime ${from} keeps serving` : "Update did not finish"}. See cohub runtime logs\n`);
+  if (current) printRuntimeSummary(current, json, true);
+}
+
 /** Collaborators execute as this OS user; an elevated Windows token would grant them administrator rights. */
 async function assertNotElevatedOnWindows() {
   if (process.platform !== "win32") return;
@@ -122,6 +148,8 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   const expected = process.env[EXPECTED_IDENTITY_ENV];
   delete process.env[EXPECTED_IDENTITY_ENV];
   if (expected && expected !== identity) throw new Error("The signed-in account changed");
+  const handoff = process.env[RUNTIME_HANDOFF_ENV];
+  delete process.env[RUNTIME_HANDOFF_ENV];
   const binding = await getRuntimeSpaceBinding(root, identity);
   const existingId = requested || binding?.spaceId;
   let harnesses = parseRuntimeHarnesses(options.harness);
@@ -129,7 +157,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   let display = options.display === undefined ? undefined : parseRuntimeDisplay(options.display);
   if (existingId && !options.new) {
     const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, existingId));
-    if (existing) {
+    if (existing && existing.runtimeId !== handoff) {
       if (existing.root !== root || options.harness.length && [...existing.harnesses].sort().join() !== [...harnesses].sort().join() || Object.keys(executables).length || options.display !== undefined && display !== existing.display) {
         throw new Error("Runtime is running with a different configuration. Use down first");
       }
@@ -140,6 +168,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
       const directory = runtimeInstanceDirectory(identity, existing.spaceId);
       await controlRuntimeInstance(directory, "reload").catch(() => undefined);
       if (native.importHistory) await controlRuntimeInstance(directory, "import", { command: "start" }, 60_000).catch(() => undefined);
+      if (isNewerVersion(CLI_VERSION, existing.version)) return updateRunningRuntime(directory, existing, options.json);
       printRuntimeSummary(existing, options.json, true);
       return;
     }
@@ -201,9 +230,12 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
     },
   });
   // Consent (or --yes) precedes any user-level integration install; failure never blocks startup.
-  const native = await ensureNativeSync({ root, spaceId, identity, harnesses, yes: options.yes, executables });
-  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, catalogCache, executables, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory, display };
-  const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
+  const native = handoff ? { importHistory: false } : await ensureNativeSync({ root, spaceId, identity, harnesses, yes: options.yes, executables });
+  const config: RuntimeLaunch = {
+    spaceId, root, identity, harnesses, capabilities, catalogCache, executables, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory, display,
+    ...(handoff ? { resume: { runtimeId: handoff, takeOver: true } } : {}),
+  };
+  const existing = handoff ? null : await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
   if (existing) {
     if (existing.root !== root) throw new Error("This Space is running in another directory");
     printRuntimeSummary(existing, options.json, true); return;

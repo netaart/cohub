@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import WebSocket from "ws";
-import { RUNTIME_MAX_FRAME_BYTES, runtimeEventSchema, runtimeReadySchema, type RuntimeCommand, type RuntimeExecutionEvent, type RuntimeTurnInput } from "@cohub/protocol";
+import { RUNTIME_MAX_FRAME_BYTES, RUNTIME_NOT_FORWARDED_CLOSE, runtimeEventSchema, runtimeReadySchema, type RuntimeCommand, type RuntimeExecutionEvent, type RuntimeTurnInput } from "@cohub/protocol";
 
 export class RuntimeExecutionUncertainError extends Error {}
 export class RuntimeResultUnavailableError extends RuntimeExecutionUncertainError {}
@@ -19,6 +19,7 @@ export type RuntimeExchangeOptions = {
   heartbeatMs?: number;
   ackMs?: number;
   reconnectMs?: number;
+  dispatchRetryMs?: number;
 };
 
 /** A reconnect can only observe/replay a known execution, never restart model or tool work. */
@@ -30,6 +31,7 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
   let started = false;
   let completed = false;
   let disconnectedAt: number | null = null;
+  let undispatchedSince: number | null = null;
   let finalError: unknown = null;
   for (;;) {
     let acknowledged = false;
@@ -40,6 +42,9 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
     let phaseTimer: ReturnType<typeof setTimeout> | undefined;
     let abortTimer: ReturnType<typeof setTimeout> | undefined;
     let onAbort = () => {};
+    let unreachable = false;
+    let notForwarded = false;
+    const startedBefore: boolean = started;
     try {
       if (!started) options.signal.throwIfAborted();
       const endpoint = await options.endpoint();
@@ -115,8 +120,12 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
             if (event.type === "turn.end") completed = true;
           }).catch((error) => finish(error));
         });
-        connection.once("error", (error) => finish(error));
-        connection.once("close", () => { void chain.then(() => finish(new Error("Runtime connection closed"))).catch(finish); });
+        connection.once("error", (error) => { unreachable ||= !ready; finish(error); });
+        connection.once("close", (code) => {
+          notForwarded = code === RUNTIME_NOT_FORWARDED_CLOSE;
+          unreachable ||= !ready || notForwarded;
+          void chain.then(() => finish(new Error("Runtime connection closed"))).catch(finish);
+        });
         if (options.signal.aborted) onAbort();
       });
     } catch (error) {
@@ -127,11 +136,16 @@ export async function exchangeRuntimeTurn(options: RuntimeExchangeOptions): Prom
         }
         throw finalError;
       }
-      if (!started) throw error;
-      disconnectedAt ??= Date.now();
-      if (Date.now() - disconnectedAt >= (options.reconnectMs ?? 60_000)) {
-        if (completed) return; // Durable completion must not be downgraded because an ack was lost.
-        throw new RuntimeExecutionUncertainError("Runtime disconnected; original execution is not replayed and requires reconciliation", { cause: error });
+      if (notForwarded) started = startedBefore;
+      if (!started) {
+        undispatchedSince ??= Date.now();
+        if (!unreachable || options.signal.aborted || Date.now() - undispatchedSince >= (options.dispatchRetryMs ?? 10_000)) throw error;
+      } else {
+        disconnectedAt ??= Date.now();
+        if (Date.now() - disconnectedAt >= (options.reconnectMs ?? 60_000)) {
+          if (completed) return; // Durable completion must not be downgraded because an ack was lost.
+          throw new RuntimeExecutionUncertainError("Runtime disconnected; original execution is not replayed and requires reconciliation", { cause: error });
+        }
       }
     } finally {
       settled = true;

@@ -1,5 +1,5 @@
 import { createAgentTurnsQueue, enqueueRuntimeRecovery } from "@cohub/infra/agent-queue";
-import { AGENT_TURN_ABORT_CHANNEL, RUNTIME_APPROVAL_CHANNEL, RUNTIME_CATALOG_REFRESH_CHANNEL, runtimeCatalogRefreshSchema, runtimeApprovalDecisionSchema, runtimeRegistrationKey, type RuntimeRegistration } from "@cohub/protocol";
+import { AGENT_TURN_ABORT_CHANNEL, RUNTIME_APPROVAL_CHANNEL, RUNTIME_HANDOFF_GRACE_MS, runtimeHandoffKey, RUNTIME_CATALOG_REFRESH_CHANNEL, runtimeCatalogRefreshSchema, runtimeApprovalDecisionSchema, runtimeRegistrationKey, type RuntimeRegistration } from "@cohub/protocol";
 import { createLogger } from "@cohub/infra/logging";
 import { authorizeLocalSandbox } from "../api-client.js";
 import { gatewayConfig } from "../config.js";
@@ -47,6 +47,9 @@ const relay = createRuntimeRelay({
     const updated = await redisCommandClient.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2], 'EX', 40) return 1 else return 0 end", 1, runtimeRegistrationKey(spaceId), JSON.stringify(previous), JSON.stringify(next)) === 1;
     if (updated) await publishRuntimeChanged(spaceId).catch(() => undefined);
     return updated;
+  },
+  handoff: async (spaceId, record) => {
+    await redisCommandClient.set(runtimeHandoffKey(spaceId), record.runtimeId ?? "", "PX", RUNTIME_HANDOFF_GRACE_MS);
   },
   release: async (spaceId, record) => {
     const released = await redisCommandClient.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end", 1, runtimeRegistrationKey(spaceId), JSON.stringify(record));

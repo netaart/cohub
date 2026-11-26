@@ -27,7 +27,7 @@ cohub auth login
 cohub auth whoami
 ```
 
-CLI 会存储 session 并自动刷新。CLI 自更新会在后台执行，不会阻塞命令；更新成功后从下一次调用开始生效。可设置 `COHUB_CLI_AUTO_UPDATE=0` 关闭自更新。
+CLI 会存储 session 并自动刷新。CLI 自更新会在后台执行，不会阻塞命令；更新成功后从下一次调用开始生效。后台 Runtime 会在空闲时切换到新版本，且不断开连接；用新版 CLI 运行 `cohub runtime up` 也会请求切换。可设置 `COHUB_CLI_AUTO_UPDATE=0` 关闭自更新。
 
 在 Sandbox 或 CI 中，可用 `COHUB_EXECUTION_TOKEN` 覆盖已存储鉴权，用于临时运行。
 

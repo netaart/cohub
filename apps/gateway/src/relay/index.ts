@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { gatewayConfig } from "../config.js";
 import { redisCommandClient, REALTIME_OUTBOUND_CHANNEL } from "../redis.js";
-import { parseRuntimeRegistration, runtimeDisplaysKey, runtimeRegistrationKey, runtimeWorkspaceKey } from "@cohub/protocol";
+import { parseRuntimeRegistration, runtimeDisplaysKey, runtimeHandoffKey, runtimeRegistrationKey, runtimeWorkspaceKey } from "@cohub/protocol";
 import { publishRuntimeChanged } from "./status.js";
 import { authorizeLocalSandbox, reportLocalSandboxStatus } from "../api-client.js";
 import { enqueueSpaceHookFromEvent } from "../space-hooks.js";
@@ -93,6 +93,7 @@ const sandboxRelay = createSandboxRelay({
   authorize: (authToken, spaceId) => authorizeLocalSandbox({ authToken, spaceId }),
   renewWorkspace: renewWorkspaceLease,
   releaseWorkspace: releaseWorkspaceLease,
+  handingOff: async (spaceId, runtimeId) => await redisCommandClient.get(runtimeHandoffKey(spaceId)) === runtimeId,
   reportStatus: reportLocalSandboxStatus,
   runtimeChanged: publishRuntimeChanged,
   publishWatcherEvent: publishRelayWatcherEvent,

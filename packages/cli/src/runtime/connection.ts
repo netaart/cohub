@@ -69,6 +69,7 @@ export type RuntimeConnectionOptions = {
   onNativeStop?: (stop: RuntimeNativeStop) => void;
   onApprovalDecision?: (decision: RuntimeApprovalDecision) => void;
   executions?: Map<string, Execution>;
+  handoff?: { prepare: ((commit: () => boolean) => Promise<boolean>) | null };
 };
 
 export async function serveRuntime(options: RuntimeConnectionOptions) {
@@ -285,6 +286,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
   let readyTimer: ReturnType<typeof setTimeout>;
   const nativePending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   let nativeChannelReady = false;
+  let handoffPending: { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
 
   const send = (frame: unknown) => {
     if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > RUNTIME_MAX_FRAME_BYTES) {
@@ -338,6 +340,18 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
     nativePending.set(requestId, { resolve, reject, timer });
     try { send({ type: "runtime.native", requestId, event }); }
     catch (error) { clearTimeout(timer); nativePending.delete(requestId); reject(error instanceof Error ? error : new Error(String(error))); }
+  });
+  const handoffHere = (commit: () => boolean) => new Promise<boolean>((resolve, reject) => {
+    if (handoffPending) { reject(new Error("Runtime handoff already pending")); return; }
+    const timer = setTimeout(() => { handoffPending = null; closeTransport(); reject(new Error("Gateway did not confirm the handoff")); }, 5_000);
+    handoffPending = { resolve: () => {
+      clearTimeout(timer); handoffPending = null;
+      const committed = commit();
+      if (!committed) closeTransport();
+      resolve(committed);
+    }, reject, timer };
+    try { send({ type: "runtime.handoff" }); }
+    catch (error) { clearTimeout(timer); handoffPending = null; reject(error instanceof Error ? error : new Error(String(error))); }
   });
   options.signal.addEventListener("abort", shutdown, { once: true });
 
@@ -428,6 +442,8 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
     nativeChannelReady = false;
     for (const pending of nativePending.values()) { clearTimeout(pending.timer); pending.reject(new Error("Runtime native channel disconnected")); }
     nativePending.clear();
+    if (handoffPending) { clearTimeout(handoffPending.timer); handoffPending.reject(new Error("Runtime connection closed")); handoffPending = null; }
+    if (options.handoff?.prepare === handoffHere) options.handoff.prepare = null;
     options.onDisconnected?.();
     const executionMustStop = options.signal.aborted || fatal || conflict;
     if (options.announce.current === announceHere) options.announce.current = null;
@@ -518,6 +534,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         options.onReady();
         options.announce.current = announceHere;
         options.catalog.publish = publishCatalog;
+        if (options.handoff) options.handoff.prepare = frame.features?.includes("handoff") ? handoffHere : null;
         publishCatalog();
         let recoveryBatch = 0;
         for await (const executions of options.executor.results.pendingBatches()) {
@@ -532,6 +549,11 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
       }
       if (!connectionId) throw new Error("Runtime handshake is incomplete");
       if (raw.type === "runtime.heartbeat") {
+        return;
+      }
+      if (raw.type === "runtime.handoff") {
+        if (handoffPending) handoffPending.resolve();
+        else closeTransport();
         return;
       }
       if (raw.type === "runtime.catalog.refresh") {

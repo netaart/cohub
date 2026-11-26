@@ -63,7 +63,7 @@ const writeState = (state: Omit<UpdateState, "checkedAt">) => {
   writeFileSync(STATE_PATH, `${JSON.stringify({ checkedAt: new Date().toISOString(), ...state }, null, 2)}\n`);
 };
 
-const readInstalledVersion = (): string | undefined => {
+export const readInstalledVersion = (): string | undefined => {
   try {
     const pkg = JSON.parse(readFileSync(packagePath("package.json"), "utf-8")) as { version?: unknown };
     return typeof pkg.version === "string" ? pkg.version : undefined;

@@ -35,6 +35,11 @@ const messages: Record<string, string> = {
   "sandboxd.download": "Preparing file bridge",
   "sandboxd.connected": "File bridge connected",
   "sandboxd.disconnected": "File bridge disconnected; reconnecting",
+  "runtime.update_pending": "Newer CLI installed; updating when idle",
+  "runtime.handoff_yielded": "Handing over to the newer CLI",
+  "runtime.handoff_completed": "Updated without disconnecting",
+  "runtime.handoff_failed": "Update failed; this version keeps running",
+  "runtime.handoff_resumed": "Successor failed; this version resumed",
 };
 
 export function formatDiagnostic(event: RuntimeDiagnostic, verbose = false): string {
@@ -80,19 +85,21 @@ export type RuntimeSummary = {
   displayNeeds?: string[];
   direct?: boolean;
   native?: NativeStatus;
+  update?: string;
+  handoff?: boolean;
 };
 
 export function printRuntimeSummary(summary: RuntimeSummary, json = false, reused = false) {
   const value = { ...summary, url: runtimeWebUrl(summary.spaceId), reused };
   if (json) { process.stdout.write(`${JSON.stringify(value, null, 2)}\n`); return; }
-  const label = summary.state === "ready" ? "Runtime ready" : `Runtime ${summary.state}`;
+  const label = summary.handoff && summary.state !== "attention" ? "Runtime updating" : summary.state === "ready" ? "Runtime ready" : `Runtime ${summary.state}`;
   process.stdout.write(`\n${label}${reused ? " · reused" : ""}\n\n`);
   const rows = [
     ["Space", summary.spaceId],
     ["URL", value.url],
     ["Directory", summary.root],
     ["Harness", summary.harnesses.join(" · ") || "Cohub"],
-    ...(summary.version ? [["CLI", summary.version]] : []),
+    ...(summary.version ? [["CLI", `${summary.version}${summary.update ? ` · updates to ${summary.update} when idle` : ""}`]] : []),
     ["Mode", summary.background ? "Background" : "Foreground"],
     ...(summary.display ? [["Screen", summary.display === "auto" ? "This computer" : summary.display]] : []),
     ...(summary.direct ? [["Direct", "Files and screens on this machine skip the network"]] : []),

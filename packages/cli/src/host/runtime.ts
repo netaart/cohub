@@ -1,16 +1,17 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, watch, type FSWatcher } from "node:fs";
 import { opendir, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import type { DEVICE_RUNTIME_REFUSALS, DEVICE_RUNTIME_STOP_REFUSALS, DeviceDisplayStatus, DeviceFolderListing, DeviceRuntime, DeviceRuntimeInstance } from "@neta-art/cohub/host-bridge";
-import { EXPECTED_IDENTITY_ENV } from "../runtime/launch.js";
+import { launchDetachedRuntime, requestRuntimeUpdate } from "../runtime/detached.js";
 import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory, runtimeInstancesRoot, stopRuntimeInstance, UNCONFIRMED_WORK, watchRuntimeInstance } from "../runtime/instance.js";
 import { readRuntimePreferences, writeRuntimePreferences } from "../runtime/preferences.js";
 import type { RuntimeSummary } from "../runtime/presentation.js";
 import { readRuntimeSpaceBindings, runtimeSpaceBindingsPath } from "../runtime/space-binding.js";
 import { forgetHostRuntime, hostRuntimes, rememberHostRuntime } from "./runtimes.js";
 import type { HostEmit } from "./serve.js";
+import { isNewerVersion } from "../self-update.js";
+import { CLI_VERSION } from "../version.js";
 
 const MAX_INSTANCES = 256;
 const MAX_FOLDERS = 10_000;
@@ -35,6 +36,7 @@ const isRunning = (instance: DeviceRuntimeInstance | undefined): instance is Dev
 const samePath = (a: string, b: string) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 
 function deviceState(status: RuntimeSummary | null): DeviceRuntimeInstance["state"] {
+  if (status?.handoff && status.state !== "attention") return "ready";
   if (!status || status.state === "stopping") return "stopped";
   if (status.state === "ready") return "ready";
   return status.state === "attention" ? "error" : "connecting";
@@ -326,7 +328,11 @@ export class DeviceRuntimeHost {
       for (const item of await hostRuntimes(key)) {
         const bound = bindings.filter((binding) => binding.key === key && binding.spaceId === item.spaceId).at(-1);
         if (!bound || !samePath(bound.root, item.root)) { await forgetHostRuntime(key, item.spaceId); continue; }
-        const running = await requestRuntimeInstance(runtimeInstanceDirectory(key, item.spaceId)).catch(() => true);
+        const directory = runtimeInstanceDirectory(key, item.spaceId);
+        const running = await requestRuntimeInstance(directory).catch(() => true);
+        if (typeof running === "object" && running?.background && isNewerVersion(CLI_VERSION, running.version)) {
+          await requestRuntimeUpdate(directory, { version: CLI_VERSION, node: process.execPath, entry: this.options.cli, sandboxd: process.env.COHUB_SANDBOXD_BIN }).catch(() => undefined);
+        }
         if (running || !await isDirectory(item.root)) continue;
         await this.#launch(key, item.spaceId, item.root).catch((error: unknown) => {
           process.stderr.write(`Could not reconnect ${item.root}: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -369,17 +375,6 @@ export class DeviceRuntimeHost {
   async #launch(key: string, spaceId: string, root: string) {
     const env = await this.options.env();
     if (this.options.account() !== key) throw new Error("The signed-in account changed");
-    const child = spawn(process.execPath, [this.options.cli, "runtime", "up", root, "--space", spaceId, "--detach", "--yes", "--no-display", "--json"], {
-      env: { ...env, [EXPECTED_IDENTITY_ENV]: key }, stdio: ["ignore", "ignore", "pipe"], windowsHide: true,
-    });
-    let stderr = "";
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-8_192); });
-    const code = await new Promise<number | null>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", resolve);
-    });
-    if (code === 0 || code === 2) return;
-    const reason = stderr.trim().split("\n").at(-1)?.replace(/^Runtime failed: /, "");
-    throw new Error(reason || `Runtime exited (${code})`);
+    await launchDetachedRuntime({ node: process.execPath, entry: this.options.cli, root, spaceId, identity: key, args: ["--no-display"], env });
   }
 }
