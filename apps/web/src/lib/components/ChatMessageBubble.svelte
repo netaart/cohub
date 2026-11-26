@@ -17,10 +17,8 @@ import {
 	resolveHarness,
 } from "@neta-art/cohub";
 import {
-	Archive,
 	ArrowDownLeft,
 	Check,
-	CloudUpload,
 	Copy,
 	GitFork,
 	Loader2,
@@ -393,6 +391,11 @@ const archiveLabel = $derived(
 				? m.runtime_archive_failed({}, { locale })
 				: "",
 );
+const archiveFailedHint = $derived(
+	archiveStatus === "failed"
+		? m.runtime_archive_failed_hint({}, { locale })
+		: "",
+);
 
 const footerStats = $derived.by(() => {
 	if (message.meta?.turn) return readTurnStats(message.meta.turn);
@@ -575,6 +578,7 @@ const statsIdentity = $derived.by((): StatsIdentity | null => {
 	if (thinking) details.push(formatThinkingLevelFull(thinking));
 	if (isFastServiceTier(modelMatch ?? undefined, serviceTier))
 		details.push(m.model_selector_fast({}, { locale }));
+	if (archiveLabel) details.push(archiveLabel);
 	return {
 		name: modelName,
 		title: provider ? `${provider}/${model}` : model,
@@ -698,7 +702,7 @@ function handleCopy() {
 
     {#if showMeta && ((message.role === 'assistant' && (message.meta?.model || hasUsage || hasDuration || timeDisplay || harnessLabel)) || (message.role === 'user' && timeDisplay))}
       <!-- Meta bar: copy | identity/model | tokens | time -->
-      <div class="mt-1 flex items-center gap-1 px-[var(--chat-msg-inset)] text-[11px] text-text-placeholder/50 select-none">
+      <div class="@container mt-1 flex items-center gap-1 px-[var(--chat-msg-inset)] text-[11px] text-text-placeholder/50 select-none">
         <!-- Copy button -->
         <button
           type="button"
@@ -778,26 +782,22 @@ function handleCopy() {
             <span class="shrink-0 text-[11px] font-medium text-text-placeholder/65" title={m.chat_note_no_reply({}, { locale })}>{m.composer_note({}, { locale })}</span>
           {/if}
         {:else if !reply}
-          {#if harnessLabel}
-            <span class="inline-flex shrink-0 items-center gap-1 rounded-[3px] bg-bg-hover-strong px-1.5 py-px text-[10px] font-medium leading-none text-text-tertiary" title={harnessTitle}><HarnessIcon {harness} size={10} />{harnessLabel}</span>
-          {/if}
-          {#if archiveLabel}
-            <span class="shrink-0 text-text-tertiary" title={archiveLabel} aria-label={archiveLabel} role="img">
-              {#if archiveStatus === 'ready'}<Archive size={12} />
-              {:else if archiveStatus === 'pending'}<CloudUpload size={12} />
-              {:else}<TriangleAlert size={12} />{/if}
-            </span>
-          {/if}
-
-          <!-- Model (truncates when space is tight) -->
-          {#if modelDisplayName}
-            <span class="min-w-0 truncate cursor-default" title={modelHoverText}>
-              {modelDisplayName}
+          {#if harnessLabel || modelDisplayName}
+            <span class="inline-flex min-w-0 items-center gap-1 cursor-default">
+              {#if harnessLabel}
+                <span class="inline-flex shrink-0 text-text-tertiary" title={harnessTitle} aria-label={harnessTitle} role="img"><HarnessIcon {harness} size={12} /></span>
+              {/if}
+              {#if modelDisplayName}
+                <span class="min-w-0 truncate" title={modelHoverText}>{modelDisplayName}</span>
+              {/if}
+              {#if archiveFailedHint}
+                <span class="inline-flex shrink-0 text-warning-soft/85" title={archiveFailedHint} aria-label={archiveFailedHint} role="img"><TriangleAlert size={12} /></span>
+              {/if}
             </span>
           {/if}
 
           {#if requestedThinkingLevel}
-            <span class="shrink-0 text-text-placeholder/65">
+            <span class="hidden shrink-0 text-text-placeholder/65 @sm:inline">
               {requestedThinkingLevelShort}
             </span>
           {/if}
