@@ -21,4 +21,6 @@ Create `.cohub/agent.json` in the Home Space:
 
 The config belongs to the user who sent the follow-up. The earliest queued follow-up decides the delivery mode for the claim. Steer messages always run on their own and are not affected by this setting.
 
+A steer jumps the queue without cutting off work in progress. The running Turn finishes its in-flight tool calls, then stops before its next model request, and the steer runs next with those tool results in context. If the running Turn ends without another model request, it completes normally and the steer runs right after. Turns on a local Harness stop at once. Stop still interrupts everything immediately.
+
 A missing Home Space or a missing `.cohub/agent.json` uses `together`. The file must be a regular file inside the Home Space workspace and at most 4096 bytes; a symlink that points outside the workspace or to a missing target is rejected. An invalid file (unknown version, unknown `followupDelivery` value, unknown field, or a rejected path or size) makes the claim throw, so the queued follow-ups stay queued. After the file is fixed, they start at the next claim, which runs when a new message is sent or the previous turn ends.

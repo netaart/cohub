@@ -1515,10 +1515,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					},
 				};
 			}
-			startGenerationRequest(sessionId, {
-				spaceId,
-				turnId: result.turn.id,
-			});
 		} catch (error) {
 			if (error instanceof HttpError && error.status === 409) {
 				await refreshSessionAfterStaleFollowupAction(sessionId);

@@ -20,7 +20,7 @@ import { processSandboxFsInstallJob } from "./sandbox-fs-install.js";
 import { processSandboxFsMutationJob, redactSandboxFsMutationJobPayload } from "./sandbox-fs-mutation.js";
 import { processRunCommandJob } from "./run-command.js";
 import { subscribeAbortEvents, closeAbortSubscriber } from "./abort.js";
-import { abortActiveTurnAtRoundBoundary, abortActiveTurnExecutions } from "./active-turns.js";
+import { requestActiveTurnStop } from "./active-turns.js";
 import { closeDb } from "./db.js";
 import { closeOwnershipRedis } from "./ownership.js";
 import { closeRedisConnections } from "./redis.js";
@@ -123,30 +123,11 @@ process.on("uncaughtException", (error) => {
 });
 
 await subscribeAbortEvents((event) => {
-  if (event.reason === "billing") {
-    if (abortActiveTurnAtRoundBoundary(event)) {
-      logger.info("[AgentAbort] stopping before the next LLM round", { spaceId: event.spaceId, sessionId: event.sessionId, turnId: event.turnId, reason: event.reason });
-    }
-    return;
-  }
-  const { controllersAborted, handlesAborted } = abortActiveTurnExecutions(event);
-  if (controllersAborted + handlesAborted === 0) {
-    logger.debug("[AgentAbort] no local active execution", {
-      spaceId: event.spaceId,
-      sessionId: event.sessionId,
-      turnId: event.turnId,
-      reason: event.reason,
-    });
-    return;
-  }
-  logger.info("[AgentAbort] aborted local active executions", {
-    spaceId: event.spaceId,
-    sessionId: event.sessionId,
-    turnId: event.turnId,
-    reason: event.reason,
-    controllersAborted,
-    handlesAborted,
-  });
+  const { deferred, controllersAborted, handlesAborted } = requestActiveTurnStop(event);
+  const fields = { spaceId: event.spaceId, sessionId: event.sessionId, turnId: event.turnId, reason: event.reason };
+  if (deferred) logger.info("[AgentAbort] stopping before the next LLM round", fields);
+  else if (controllersAborted + handlesAborted === 0) logger.debug("[AgentAbort] no local active execution", fields);
+  else logger.info("[AgentAbort] aborted local active executions", { ...fields, controllersAborted, handlesAborted });
 });
 
 await subscribeSandboxLifecycleEvents((event) => {

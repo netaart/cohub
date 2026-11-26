@@ -96,13 +96,17 @@ mock.module("../runtime/context-store.js", { exports: {
   loadRequestedContextWindow: async () => null,
 } });
 
+let duringTool: ((signal?: AbortSignal) => Promise<void>) | null = null;
 const readTool: AgentTool = {
   name: "read", label: "read", description: "read a file", parameters: Type.Object({ path: Type.String() }),
-  execute: async () => ({ content: [{ type: "text", text: "same" }], details: undefined }),
+  execute: async (_id, _params, signal) => {
+    await duringTool?.(signal);
+    return { content: [{ type: "text", text: "same" }], details: undefined };
+  },
 };
 
 const { processAgentTurnJob, getActiveSessionHandles } = await import("../processor.js");
-const { abortActiveTurnExecutions, clearActiveAbortEvent } = await import("../active-turns.js");
+const { clearActiveAbortEvent, requestActiveTurnStop } = await import("../active-turns.js");
 
 function sse(events: Array<Record<string, unknown>>) {
   return events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
@@ -331,18 +335,28 @@ function blockingReply(onRequest: () => void) {
   });
 }
 
-test("steering a running Turn interrupts it and continues with the steer Turn", async () => {
+const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+test("a steer lets the running tool finish and continues with the steer Turn", async () => {
   const sessionId = crypto.randomUUID();
   const running = makeTurn(sessionId, "running");
   const steer = makeTurn(sessionId, "steer");
-  replies = [blockingReply(() => {
-    abortActiveTurnExecutions({ spaceId, sessionId, turnId: running.id, reason: "interrupt", continuedByTurnId: steer.id, actorUserId: "owner" } as AgentTurnAbortEvent);
-  })];
+  let toolAborted: boolean | undefined;
+  replies = [() => toolReply("tool-steer")];
+  duringTool = async (signal) => {
+    requestActiveTurnStop({ spaceId, sessionId, turnId: running.id, reason: "interrupt", continuedByTurnId: steer.id, actorUserId: "owner" } as AgentTurnAbortEvent);
+    await tick();
+    toolAborted = signal?.aborted;
+  };
   await run(sessionId, [running]);
+  duringTool = null;
   clearActiveAbortEvent(running.id);
+  assert.equal(toolAborted, false);
+  assert.equal(upstream.length, 1);
   assert.deepEqual(kinds("interrupt", "abort", "fail"), [{ kind: "interrupt", turnId: running.id, continuedByTurnId: steer.id }]);
 
   await run(sessionId, [steer]);
+  assert.deepEqual(upstream.map((request) => request.lastUserText), ["steer"]);
   assert.deepEqual(kinds("user", "assistant", "interrupt", "fail"), [
     { kind: "user", turnId: steer.id, userMessageId: idOf(steer), text: "steer" },
     { kind: "assistant", turnId: steer.id, userMessageId: idOf(steer), stopReason: "stop" },
@@ -353,7 +367,7 @@ test("stopping the running Turn reaches its execution", async () => {
   const sessionId = crypto.randomUUID();
   const owner = makeTurn(sessionId, "stop me");
   replies = [blockingReply(() => {
-    const { controllersAborted } = abortActiveTurnExecutions({ spaceId, sessionId, turnId: owner.id, reason: "abort", actorUserId: "owner" } as AgentTurnAbortEvent);
+    const { controllersAborted } = requestActiveTurnStop({ spaceId, sessionId, turnId: owner.id, reason: "abort", actorUserId: "owner" } as AgentTurnAbortEvent);
     assert.equal(controllersAborted, 1);
   })];
   await run(sessionId, [owner]);

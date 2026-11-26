@@ -349,7 +349,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
         if (fileVisibility !== "full") throw new Error("Local Harness requires full workspace access");
         const remoteController = new AbortController();
         activeTurn = { id: batch.ownerTurn.id, controller: remoteController };
-        setActiveAbortController(batch.ownerTurn.id, remoteController);
+        setActiveAbortController(batch.ownerTurn.id, remoteController, "steer");
         const remoteAbort = await getAbortEvent(batch.ownerTurn.id);
         if (remoteAbort) {
           setActiveAbortEvent(remoteAbort);
@@ -445,7 +445,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
       const abortController = new AbortController();
       activeTurn = { id: batch.ownerTurn.id, controller: abortController };
       if (lock.signal.aborted) abortController.abort();
-      setActiveAbortController(batch.ownerTurn.id, abortController);
+      setActiveAbortController(batch.ownerTurn.id, abortController, "round");
       const pendingAbortEvent = await getAbortEvent(batch.ownerTurn.id);
       if (pendingAbortEvent) {
         setActiveAbortEvent(pendingAbortEvent);

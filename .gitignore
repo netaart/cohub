@@ -55,3 +55,6 @@ deploy/**/values.yaml
 
 # Optional private npm auth for hosted billing builds
 .npmrc.local
+
+# Paraglide compiler cache
+apps/web/project.inlang/cache/

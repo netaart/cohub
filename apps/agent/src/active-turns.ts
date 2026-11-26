@@ -7,12 +7,18 @@ export type ActiveAbortHandle = {
   abort: () => void | Promise<void>;
 };
 
+/** `round` stops before the next LLM round, `steer` stops on a steer at once, no mode stops only on an explicit abort. */
+export type ActiveStopMode = "round" | "steer";
+
 const ABORT_EVENT_TTL_MS = 10 * 60 * 1000;
-const activeAbortControllers = new Map<string, Set<AbortController>>();
+const activeAbortControllers = new Map<string, Map<AbortController, ActiveStopMode | undefined>>();
 const activeAbortHandles = new Map<string, Map<string, ActiveAbortHandle>>();
 const activeAbortEvents = new Map<string, AgentTurnAbortEvent>();
 const activeAbortEventTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const roundBoundaryAbortEvents = new Map<string, AgentTurnAbortEvent>();
+
+const reaches = (mode: ActiveStopMode | undefined, event: AgentTurnAbortEvent) =>
+  event.reason === "abort" || mode === "round" || (mode === "steer" && event.reason === "interrupt");
 
 function abortController(controller: AbortController) {
   if (controller.signal.aborted) return false;
@@ -24,15 +30,12 @@ function abortHandle(handle: ActiveAbortHandle) {
   void Promise.resolve(handle.abort()).catch(() => undefined);
 }
 
-export function getActiveAbortControllers(turnId: string) {
-  return activeAbortControllers.get(turnId) ?? null;
-}
-
-export function setActiveAbortController(turnId: string, controller: AbortController) {
-  const controllers = activeAbortControllers.get(turnId) ?? new Set<AbortController>();
-  controllers.add(controller);
+export function setActiveAbortController(turnId: string, controller: AbortController, mode?: ActiveStopMode) {
+  const controllers = activeAbortControllers.get(turnId) ?? new Map<AbortController, ActiveStopMode | undefined>();
+  controllers.set(controller, mode);
   activeAbortControllers.set(turnId, controllers);
-  if (activeAbortEvents.has(turnId)) abortController(controller);
+  const event = activeAbortEvents.get(turnId);
+  if (event && reaches(mode, event)) abortController(controller);
 }
 
 export function clearActiveAbortController(turnId: string, controller: AbortController) {
@@ -48,7 +51,7 @@ export function registerActiveAbortHandle(turnId: string, handle: ActiveAbortHan
   const handles = activeAbortHandles.get(turnId) ?? new Map<string, ActiveAbortHandle>();
   handles.set(handle.id, handle);
   activeAbortHandles.set(turnId, handles);
-  if (activeAbortEvents.has(turnId)) abortHandle(handle);
+  if (activeAbortEvents.get(turnId)?.reason === "abort") abortHandle(handle);
   return () => {
     const current = activeAbortHandles.get(turnId);
     if (!current) return;
@@ -65,6 +68,7 @@ export function clearActiveAbortEvent(turnId: string) {
 }
 
 export function setActiveAbortEvent(event: AgentTurnAbortEvent) {
+  if (activeAbortEvents.get(event.turnId)?.reason === "abort" && event.reason !== "abort") return;
   clearActiveAbortEvent(event.turnId);
   activeAbortEvents.set(event.turnId, event);
   activeAbortEventTimers.set(event.turnId, setTimeout(() => clearActiveAbortEvent(event.turnId), ABORT_EVENT_TTL_MS));
@@ -72,27 +76,35 @@ export function setActiveAbortEvent(event: AgentTurnAbortEvent) {
 
 export function abortActiveTurnExecutions(event: AgentTurnAbortEvent) {
   setActiveAbortEvent(event);
-  const controllers = activeAbortControllers.get(event.turnId);
-  const handles = activeAbortHandles.get(event.turnId);
   let controllersAborted = 0;
   let handlesAborted = 0;
 
-  for (const controller of controllers ?? []) {
-    if (abortController(controller)) controllersAborted += 1;
+  for (const [controller, mode] of activeAbortControllers.get(event.turnId) ?? []) {
+    if (reaches(mode, event) && abortController(controller)) controllersAborted += 1;
   }
 
-  for (const handle of handles?.values() ?? []) {
-    abortHandle(handle);
-    handlesAborted += 1;
+  if (event.reason === "abort") {
+    for (const handle of activeAbortHandles.get(event.turnId)?.values() ?? []) {
+      abortHandle(handle);
+      handlesAborted += 1;
+    }
   }
 
   return { controllersAborted, handlesAborted };
 }
 
-export function abortActiveTurnAtRoundBoundary(event: AgentTurnAbortEvent) {
-  if (!activeAbortControllers.has(event.turnId) || activeAbortEvents.has(event.turnId)) return false;
-  roundBoundaryAbortEvents.set(event.turnId, event);
+function deferToRoundBoundary(event: AgentTurnAbortEvent) {
+  const controllers = activeAbortControllers.get(event.turnId);
+  if (!controllers || ![...controllers.values()].includes("round") || activeAbortEvents.has(event.turnId)) return false;
+  const pending = roundBoundaryAbortEvents.get(event.turnId);
+  if (!pending || pending.reason === "billing") roundBoundaryAbortEvents.set(event.turnId, event);
   return true;
+}
+
+export function requestActiveTurnStop(event: AgentTurnAbortEvent) {
+  if (event.reason !== "abort" && deferToRoundBoundary(event)) return { deferred: true, controllersAborted: 0, handlesAborted: 0 };
+  if (event.reason === "billing") return { deferred: false, controllersAborted: 0, handlesAborted: 0 };
+  return { deferred: false, ...abortActiveTurnExecutions(event) };
 }
 
 export function applyRoundBoundaryAbort(turnId: string) {

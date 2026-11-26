@@ -74,12 +74,6 @@ export type SessionHandle = {
   pendingUserMessages: PendingUserMessage[];
   userMessageIdentityError: Error | null;
   pendingExecutionAuths: Array<{ turnId?: string | null; actorUserId: string | null; executionToken: string | null; executionScopes?: Permission[] | null }>;
-  steerDrainPromise: Promise<void> | null;
-  pendingSteerCompletions: Array<{
-    ack: () => Promise<void>;
-    reject: (reason: string) => Promise<void>;
-    done: () => void;
-  }>;
   activeDirectShellCommand: {
     turnId: string;
     abortController: AbortController;

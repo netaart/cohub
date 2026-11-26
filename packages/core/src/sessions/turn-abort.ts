@@ -3,6 +3,8 @@ import {
   AGENT_TURN_ABORT_CHANNEL,
   AGENT_TURN_ABORT_TTL_SECONDS,
   agentTurnAbortKey,
+  isNativeClientTurn,
+  resolveHarness,
   type AgentTurnAbortEvent,
 } from "@cohub/protocol";
 
@@ -12,15 +14,17 @@ export type AgentTurnAbortRedis = {
   publish(channel: string, message: string): Promise<unknown>;
 };
 
-const isBillingStop = (raw: string | null) => {
+const storedStopReason = (raw: string | null) => {
   try {
-    return raw != null && (JSON.parse(raw) as Partial<AgentTurnAbortEvent>).reason === "billing";
+    return raw == null ? null : (JSON.parse(raw) as Partial<AgentTurnAbortEvent>).reason ?? null;
   } catch {
-    return false;
+    return null;
   }
 };
 
-/** A billing stop never replaces a user stop; repeating one re-notifies. */
+export const steerStopsTurnAtOnce = (meta: unknown) => resolveHarness(meta) !== "cohub" || isNativeClientTurn(meta);
+
+/** An abort replaces any stop; a steer replaces only a billing stop. */
 export async function requestAgentTurnAbort(
   redis: AgentTurnAbortRedis,
   input: Omit<AgentTurnAbortEvent, "id" | "timestamp">,
@@ -28,8 +32,12 @@ export async function requestAgentTurnAbort(
   const event: AgentTurnAbortEvent = { ...input, id: randomUUID(), timestamp: Date.now() };
   const raw = JSON.stringify(event);
   const key = agentTurnAbortKey(event.turnId);
-  if (event.reason !== "billing") await redis.set(key, raw, "EX", AGENT_TURN_ABORT_TTL_SECONDS);
-  else if (!await redis.set(key, raw, "EX", AGENT_TURN_ABORT_TTL_SECONDS, "NX") && !isBillingStop(await redis.get(key))) return null;
+  if (event.reason === "abort") await redis.set(key, raw, "EX", AGENT_TURN_ABORT_TTL_SECONDS);
+  else if (!await redis.set(key, raw, "EX", AGENT_TURN_ABORT_TTL_SECONDS, "NX")) {
+    const current = storedStopReason(await redis.get(key));
+    if (event.reason === "interrupt" && current === "billing") await redis.set(key, raw, "EX", AGENT_TURN_ABORT_TTL_SECONDS);
+    else if (event.reason !== "billing" || current !== "billing") return null;
+  }
   await redis.publish(AGENT_TURN_ABORT_CHANNEL, raw);
   return event;
 }

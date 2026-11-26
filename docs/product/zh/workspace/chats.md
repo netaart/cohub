@@ -90,7 +90,7 @@ Chats 是 turn-based：
 
 ### Follow-ups
 
-某些排队中的 follow-ups 可被 steer 或 cancel。当 Agent 正在执行、而下一条指令需要改变时使用。
+某些排队中的 follow-ups 可被 steer 或 cancel。当 Agent 正在执行、而下一条指令需要改变时使用。Steer 会等 Agent 执行完当前的工具调用，再把你的消息插到它的下一步之前；需要立刻打断时使用停止。
 
 ## Forking
 

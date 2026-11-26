@@ -38,8 +38,6 @@ export type CohubAgentSession = {
   consumePendingForcedCompaction(): boolean;
   prompt(text: string, options?: { images?: ImageContent[] }): Promise<void>;
   promptMessages(messages: AgentMessage[]): Promise<void>;
-  steer(text: string, images?: ImageContent[]): Promise<void>;
-  enqueueSteer(text: string, images?: ImageContent[]): void;
   waitForIdle(): Promise<void>;
   setModel(model: Model<Api>): Promise<void>;
   configureRuntimeIdentity(input: { userId?: string | null; spaceOwnerUserId?: string | null; modelRegistry: CohubModelRegistry; imageToTextConfig?: ImageToTextConfig | null; requestedModel?: { provider: string; id: string }; requestedThinkingLevel?: string | null; requestedContextWindow?: number | null }): Promise<void>;
@@ -384,13 +382,6 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
       await agent.waitForIdle();
       await runPendingRetries();
       await agent.waitForIdle();
-    },
-    async steer(text, images) {
-      agent.steer(createUserMessage(text, images));
-      await agent.waitForIdle();
-    },
-    enqueueSteer(text, images) {
-      agent.steer(createUserMessage(text, images));
     },
     async waitForIdle() {
       await agent.waitForIdle();

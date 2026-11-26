@@ -29,7 +29,7 @@ import type { AuthUser } from "../../lib/middleware.js";
 import { submitSessionPrompt } from "../../session-prompts.js";
 import { recordSessionNote } from "../../session-notes.js";
 import { onTurnSettled } from "../../turn-settled.js";
-import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError, resolveSessionTurnOrigin } from "@cohub/core/sessions";
+import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError, resolveSessionTurnOrigin, steerStopsTurnAtOnce } from "@cohub/core/sessions";
 import { delegatedPromptAuthFromAppSession, promptAuthContextFromAppSession } from "../../prompt-auth-context.js";
 import { buildSessionTurnResponse } from "../../session-turn-response.js";
 import { getSessionTurnById, hydrateTurnAuthorProfiles } from "../../session-turns.js";
@@ -205,8 +205,10 @@ async function promoteQueuedTurnToSteer(input: {
       }),
     }).where(eq(sessionTurns.id, target.id));
 
-    const [activeTurn] = await tx.select({ id: sessionTurns.id, status: sessionTurns.status }).from(sessionTurns).where(and(eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"]))).orderBy(desc(sessionTurns.sequence)).limit(1);
-    if (activeTurn && activeTurn.id !== target.id) {
+    const [activeTurn] = await tx.select({ id: sessionTurns.id, status: sessionTurns.status, meta: sessionTurns.meta }).from(sessionTurns).where(and(eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"]))).orderBy(desc(sessionTurns.sequence)).limit(1);
+    const steeredTurn = activeTurn && activeTurn.id !== target.id ? activeTurn : null;
+    const stopsAtOnce = steeredTurn ? steerStopsTurnAtOnce(steeredTurn.meta) : false;
+    if (steeredTurn && stopsAtOnce) {
       // Merge, not rewrite: the row is unlocked and children may append `messagesSent`.
       const abortMeta = sanitizeMeta({
         abortRequestedAt: now.toISOString(),
@@ -217,11 +219,16 @@ async function promoteQueuedTurnToSteer(input: {
         status: "abort_requested",
         meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(abortMeta)}::jsonb`,
         updatedAt: now,
-      }).where(and(eq(sessionTurns.id, activeTurn.id), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"])));
-      affectedTurnIds.push(activeTurn.id);
+      }).where(and(eq(sessionTurns.id, steeredTurn.id), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"])));
+      affectedTurnIds.push(steeredTurn.id);
     }
 
-    return { targetId: target.id, activeTurnId: activeTurn?.id ?? null, activeTurnStatus: activeTurn?.status ?? null, affectedTurnIds };
+    return {
+      targetId: target.id,
+      steeredTurnId: steeredTurn?.id ?? null,
+      abortRequestedTurnId: stopsAtOnce && steeredTurn?.status === "running" ? steeredTurn.id : null,
+      affectedTurnIds,
+    };
   });
 
   try {
@@ -237,8 +244,8 @@ async function promoteQueuedTurnToSteer(input: {
       updatedAt: failedAt,
     }).where(and(eq(sessionTurns.id, result.targetId), eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.status, "queued"))).returning({ id: sessionTurns.id, status: sessionTurns.status, meta: sessionTurns.meta });
     if (failed) void onTurnSettled(failed);
-    if (result.activeTurnId && result.activeTurnId !== result.targetId && result.activeTurnStatus === "running") {
-      await db.update(sessionTurns).set({ status: "running", updatedAt: failedAt }).where(and(eq(sessionTurns.id, result.activeTurnId), eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.status, "abort_requested")));
+    if (result.abortRequestedTurnId) {
+      await db.update(sessionTurns).set({ status: "running", updatedAt: failedAt }).where(and(eq(sessionTurns.id, result.abortRequestedTurnId), eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.status, "abort_requested")));
     }
     await loadHydratedTurns(input.sessionId, result.affectedTurnIds)
       .then((turns) => dispatchAffectedTurnUpdates({
@@ -250,11 +257,11 @@ async function promoteQueuedTurnToSteer(input: {
     throw new Error("failed to enqueue steered turn");
   }
 
-  if (result.activeTurnId && result.activeTurnId !== result.targetId) {
+  if (result.steeredTurnId) {
     await requestAgentTurnAbort({
       spaceId: input.spaceId,
       sessionId: input.sessionId,
-      turnId: result.activeTurnId,
+      turnId: result.steeredTurnId,
       reason: "interrupt",
       continuedByTurnId: result.targetId,
       actorUserId: input.actorUserId,

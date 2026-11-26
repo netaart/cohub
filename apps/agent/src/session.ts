@@ -596,8 +596,6 @@ export async function loadOrCreateSessionHandle(input: {
     pendingUserMessages: [],
     userMessageIdentityError: null,
     pendingExecutionAuths: [],
-    steerDrainPromise: null,
-    pendingSteerCompletions: [],
     activeDirectShellCommand: null,
     currentUserMessageId: null,
     currentUserMessageMeta: null,

@@ -90,7 +90,7 @@ Useful patterns:
 
 ### Follow-ups
 
-Some queued follow-ups can be steered or cancelled. Use that when the Agent is mid-work and the next instruction should change.
+Some queued follow-ups can be steered or cancelled. Use that when the Agent is mid-work and the next instruction should change. Steering lets the Agent finish the tool calls it is running, then puts your message ahead of its next step. Use Stop to interrupt at once.
 
 ## Forking
 

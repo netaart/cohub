@@ -9,7 +9,7 @@ import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions, spac
 import { sanitizePostgresJsonValue } from "../content/sanitize.js";
 import { nextSessionVersion, unarchiveSessionInTx } from "../labels/session-archive.js";
 import { resolveSessionTurnOrigin } from "./turn-origin.js";
-import { requestAgentTurnAbort, type AgentTurnAbortRedis } from "./turn-abort.js";
+import { requestAgentTurnAbort, steerStopsTurnAtOnce, type AgentTurnAbortRedis } from "./turn-abort.js";
 import { appendSentTurn, sentTurnRefFor } from "./sent-turns.js";
 import { withNextSessionMessageSequence } from "./message-sequence.js";
 import { extractTurnReferences } from "../references/extract.js";
@@ -408,7 +408,7 @@ export function createSessionServices(input: {
   }) {
     const actorUserId = typeof promptInput.meta.userId === "string" && promptInput.meta.userId.trim() ? promptInput.meta.userId.trim() : null;
     const dispatchIntent = promptInput.meta.dispatchIntent === "steer" ? "steer" : "followup";
-    const [activeTurn] = await input.db.select({ id: sessionTurns.id })
+    const [activeTurn] = await input.db.select({ id: sessionTurns.id, meta: sessionTurns.meta })
       .from(sessionTurns)
       .where(and(eq(sessionTurns.sessionId, promptInput.sessionId), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"])))
       .orderBy(desc(sessionTurns.sequence))
@@ -419,11 +419,13 @@ export function createSessionServices(input: {
     }
 
     if (dispatchIntent === "steer" && activeTurn && activeTurn.id !== promptInput.turnId) {
-      const [updatedActiveTurn] = await input.db.update(sessionTurns).set({
-        status: "abort_requested",
-        meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify({ abortRequestedAt: new Date().toISOString(), continuedByTurnId: promptInput.turnId })}::jsonb`,
-        updatedAt: new Date(),
-      }).where(and(eq(sessionTurns.id, activeTurn.id), eq(sessionTurns.sessionId, promptInput.sessionId), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"]))).returning();
+      const [updatedActiveTurn] = steerStopsTurnAtOnce(activeTurn.meta)
+        ? await input.db.update(sessionTurns).set({
+          status: "abort_requested",
+          meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify({ abortRequestedAt: new Date().toISOString(), continuedByTurnId: promptInput.turnId })}::jsonb`,
+          updatedAt: new Date(),
+        }).where(and(eq(sessionTurns.id, activeTurn.id), eq(sessionTurns.sessionId, promptInput.sessionId), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"]))).returning()
+        : [];
       if (updatedActiveTurn) {
         await Promise.resolve(input.onSessionTurnUpdated?.({
           spaceId: promptInput.spaceId,
