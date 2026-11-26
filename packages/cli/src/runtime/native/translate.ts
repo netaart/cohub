@@ -1,6 +1,6 @@
 import type { ContentBlock, NativeTurnProgress, RuntimeExecutionEvent, RuntimeMessage } from "@neta-art/cohub";
 import { codexContext, codexTokenTotals, codexUsage, subtractCodexTokens, type CodexTokenTotals } from "../codex-usage.js";
-import { epochSecondsIso, identifiable } from "../harnesses/process.js";
+import { epochSecondsIso, identifiable, runningTool } from "../harnesses/process.js";
 import { record, type JsonRecord } from "../json-rpc.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
@@ -18,7 +18,7 @@ export function piContent(value: unknown): ContentBlock[] {
   });
 }
 
-export function codexItemContent(item: JsonRecord): ContentBlock[] {
+export function codexItemContent(item: JsonRecord, running = item.status === "inProgress"): ContentBlock[] {
   if (item.type === "agentMessage" || item.type === "plan") return [{ type: "text", text: text(item.text) }];
   if (item.type === "reasoning") return [{ type: "thinking", thinking: [...list(item.summary), ...list(item.content)].map(text).join("\n") }];
   if (item.type === "userMessage") return [];
@@ -27,9 +27,18 @@ export function codexItemContent(item: JsonRecord): ContentBlock[] {
   if (!identifiable(id)) return [];
   const name = item.type === "commandExecution" ? "bash" : item.type === "fileChange" ? "apply_patch" : text(item.tool) || text(item.type);
   const input = item.type === "commandExecution" ? { command: item.command, cwd: item.cwd } : item.type === "fileChange" ? { changes: item.changes } : record(item.arguments);
+  const call: Extract<ContentBlock, { type: "tool_use" }> = { type: "tool_use", id, name, input };
+  if (running) {
+    const tool = runningTool(call);
+    return [text(item.aggregatedOutput) ? { ...tool, _meta: { ...tool._meta, partialResult: item.aggregatedOutput } } : tool];
+  }
   return [
-    { type: "tool_use", id, name, input },
-    { type: "tool_result", tool_use_id: id, content: typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : JSON.stringify(item.result ?? item.error ?? item.changes ?? item), is_error: item.status === "failed" || typeof item.exitCode === "number" && item.exitCode !== 0 },
+    call,
+    {
+      type: "tool_result", tool_use_id: id, content: typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : JSON.stringify(item.result ?? item.error ?? item.changes ?? item),
+      is_error: item.status === "failed" || typeof item.exitCode === "number" && item.exitCode !== 0,
+      ...(typeof item.durationMs === "number" ? { _meta: { timing: { durationMs: item.durationMs } } } : {}),
+    },
   ];
 }
 
@@ -134,7 +143,7 @@ export function codexTranslator(emit: (event: RuntimeExecutionEvent) => void, id
         ordinals.set(text(item.id), ordinal);
         items.set(text(item.id), item);
         emit({ type: "message.start", ordinal });
-        if (!["agentMessage", "reasoning", "plan"].includes(text(item.type))) emit({ type: "content.replace", ordinal, content: codexItemContent(item).filter((block) => block.type !== "tool_result") });
+        if (!["agentMessage", "reasoning", "plan"].includes(text(item.type))) emit({ type: "content.replace", ordinal, content: codexItemContent(item, true) });
       }
       if (method === "item/agentMessage/delta" || method === "item/reasoning/textDelta" || method === "item/reasoning/summaryTextDelta") {
         const id = text(params.itemId);

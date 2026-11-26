@@ -1,4 +1,6 @@
 <script lang="ts">
+import type { HarnessKind } from "@cohub/protocol/runtime";
+import type { ToolVerb } from "@cohub/protocol/tools";
 import { ChevronDown, ChevronRight, Loader2, Play } from "lucide-svelte";
 import ImageBlocks from "#lib/components/ImageBlocks.svelte";
 import RelatedSessionLink from "#lib/components/RelatedSessionLink.svelte";
@@ -6,10 +8,9 @@ import StatusGlyph from "#lib/components/StatusGlyph.svelte";
 import ToolInputDetail from "#lib/components/ToolInputDetail.svelte";
 import ToolOutputDetail from "#lib/components/ToolOutputDetail.svelte";
 import {
-	getToolFilePath,
 	sanitizeToolDomId,
-	summarizeToolInput,
 	type ToolCallViewModel,
+	toolFilePath,
 } from "#lib/components/tool-call-format.ts";
 import {
 	actsOnDisplay,
@@ -35,6 +36,7 @@ type Props = {
 	showDuration?: boolean;
 	onExpand?: () => void | Promise<void>;
 	turnId?: string | null;
+	harness?: HarnessKind;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 };
 
@@ -47,6 +49,7 @@ const {
 	showDuration = true,
 	onExpand,
 	turnId = null,
+	harness = "cohub",
 	onOpenFile,
 }: Props = $props();
 
@@ -61,23 +64,30 @@ const statusTone = {
 	failed: "error",
 } as const;
 
-function toolActivityVerb(name: string): string {
-	switch (name) {
-		case "bash":
+function toolActivityVerb(verb: ToolVerb): string {
+	switch (verb) {
+		case "run":
 			return m.tool_verb_executing({}, { locale });
 		case "edit":
 			return m.tool_verb_patching({}, { locale });
-		case "find":
-		case "grep":
+		case "search":
 			return m.tool_verb_scanning({}, { locale });
-		case "ls":
+		case "list":
 			return m.tool_verb_listing({}, { locale });
 		case "read":
 			return m.tool_verb_reading({}, { locale });
 		case "write":
 			return m.tool_verb_writing({}, { locale });
-		default:
-			return m.tool_verb_running({}, { locale });
+		case "delete":
+			return m.tool_verb_deleting({}, { locale });
+		case "fetch":
+			return m.tool_verb_fetching({}, { locale });
+		case "delegate":
+			return m.tool_verb_delegating({}, { locale });
+		case "plan":
+			return m.tool_verb_planning({}, { locale });
+		case "ask":
+			return m.tool_verb_asking({}, { locale });
 	}
 }
 
@@ -87,9 +97,13 @@ const shouldWaitForDetails = $derived(expanded && loading && needsDetails);
 const isPlaceholderResult = $derived(
 	shouldWaitForDetails && (tool.result === "[]" || tool.result === ""),
 );
+const quietResult = $derived(
+	Boolean(tool.view.quietResult) && tool.status === "done",
+);
 const showResult = $derived(
 	hasVisibleResult &&
 		!isPlaceholderResult &&
+		!quietResult &&
 		(!needsDetails || Boolean(tool.partialResult) || autoExpandWhileRunning),
 );
 const resultLabel = $derived(
@@ -97,10 +111,10 @@ const resultLabel = $derived(
 		? m.tool_err({}, { locale })
 		: m.tool_out({}, { locale }),
 );
-const filePath = $derived(getToolFilePath(tool.name, tool.input));
+const filePath = $derived(toolFilePath(tool.view, harness));
 const isRunning = $derived(tool.status === "running");
 const runningPhase = $derived(tool.phase ?? "drafting");
-const runningVerb = $derived(toolActivityVerb(tool.name));
+const runningVerb = $derived(toolActivityVerb(tool.view.verb));
 const durationLabel = $derived(
 	showDuration && isDisplayableDurationMs(tool.durationMs)
 		? formatDurationMs(tool.durationMs, locale)
@@ -126,7 +140,20 @@ const statusLabel = $derived(
 				? m.tool_status_done({}, { locale })
 				: durationLabel || tool.status,
 );
-const inputSummary = $derived(summarizeToolInput(tool.name, tool.input));
+const target = $derived(tool.view.target);
+const targetPath = $derived.by(() => {
+	if (target?.kind !== "path") return null;
+	const cut = target.text.lastIndexOf("/", target.text.length - 2) + 1;
+	return { dir: target.text.slice(0, cut), base: target.text.slice(cut) };
+});
+const hasInput = $derived(
+	Boolean(
+		tool.view.subtitle ||
+			tool.view.primary ||
+			tool.view.fields.length ||
+			tool.view.sections.length,
+	),
+);
 const detailIdPrefix = $derived(`tool-call-${sanitizeToolDomId(tool.id)}`);
 const relations = useSessionRelations();
 const replaySpace = useDisplayReplay();
@@ -187,7 +214,7 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 			onclick={toggle}
 		>
 			<StatusGlyph tone={statusTone[tool.status]} motion={isRunning ? "active" : "none"} soft={tool.status === "done"} class="[--status-glyph-size:6px]" />
-			<span class="w-[3.25rem] shrink-0 truncate font-mono text-[13px] text-text-tertiary">{tool.name}</span>
+			<span class="w-[var(--tool-label-width,3.25rem)] shrink-0 truncate font-mono text-[13px] text-text-tertiary" title={tool.view.label === tool.name ? undefined : tool.name}>{tool.view.label}</span>
 			{#if filePath}
 				<span
 					role="link"
@@ -197,8 +224,13 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 					onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleFileClick(e); } }}
 					title={m.tool_open_file({}, { locale })}
 				>{filePath}</span>
-			{:else if inputSummary}
-				<span class="min-w-0 flex-1 truncate font-mono text-[13px] text-text-placeholder">{inputSummary}</span>
+			{:else if targetPath}
+				<span class="flex min-w-0 flex-1 font-mono text-[13px] text-text-placeholder" title={target?.text}>
+					<span class="min-w-0 truncate">{targetPath.dir}</span>
+					<span class="max-w-full shrink-0 truncate text-text-secondary/85">{targetPath.base}</span>
+				</span>
+			{:else if target}
+				<span class="min-w-0 flex-1 truncate font-mono text-[13px] text-text-placeholder">{target.kind === "command" ? `$ ${target.text}` : target.text}</span>
 			{:else}
 				<span class="min-w-0 flex-1"></span>
 			{/if}
@@ -233,10 +265,10 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 				</div>
 			{:else}
 				<div class="space-y-2">
-					{#if tool.input && Object.keys(tool.input).length > 0}
+					{#if hasInput}
 						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2 max-sm:grid-cols-[1.25rem_minmax(0,1fr)] max-sm:gap-1.5">
 							<div class="pt-[3px] font-mono text-[10px] uppercase leading-none tracking-wide text-text-placeholder select-none">{m.tool_in({}, { locale })}</div>
-							<ToolInputDetail name={tool.name} input={tool.input} idPrefix={detailIdPrefix} autoFollow={isRunning} />
+							<ToolInputDetail view={tool.view} idPrefix={detailIdPrefix} autoFollow={isRunning} />
 						</div>
 					{/if}
 					{#if showResult}

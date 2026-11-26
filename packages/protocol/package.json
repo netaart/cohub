@@ -77,6 +77,11 @@
       "types": "./dist/ports/index.d.ts",
       "default": "./dist/ports/index.js"
     },
+    "./tools": {
+      "source": "./src/tools/index.ts",
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.js"
+    },
     "./display": {
       "source": "./src/display/index.ts",
       "types": "./dist/display/index.d.ts",

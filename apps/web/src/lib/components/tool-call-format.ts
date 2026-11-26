@@ -1,35 +1,17 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { MessageToolCallsFile } from "@cohub/protocol/model";
+import type { HarnessKind } from "@cohub/protocol/runtime";
+import {
+	presentTool,
+	type ToolSection,
+	type ToolView,
+	toolLabel,
+} from "@cohub/protocol/tools";
 import type { Locale } from "#lib/i18n/locale.ts";
 import { m } from "#lib/paraglide/messages.js";
 import type { ToolState } from "#lib/session-tree.ts";
 
-export type ToolInputField = {
-	label: string;
-	value: string;
-	mono?: boolean;
-};
-
-export type ToolInputDiffLine = {
-	sign: "+" | "-";
-	text: string;
-};
-
-export type ToolInputSection = {
-	id: string;
-	label: string;
-	summary?: string;
-	kind: "text" | "json" | "diff";
-	value?: string;
-	lines?: ToolInputDiffLine[];
-	collapsible?: boolean;
-};
-
-export type ToolInputView = {
-	primary?: { value: string };
-	fields: ToolInputField[];
-	sections: ToolInputSection[];
-};
+const WORKSPACE = "/workspace/";
 
 export type ToolCallStatus = "running" | "done" | "failed";
 
@@ -39,6 +21,7 @@ export type ToolCallViewModel = {
 	id: string;
 	name: string;
 	input?: Record<string, unknown>;
+	view: ToolView;
 	result?: string;
 	partialResult?: string;
 	status: ToolCallStatus;
@@ -58,6 +41,7 @@ export type ToolCallsSummary = {
 
 export function summarizeToolCalls(
 	content: readonly ContentBlock[],
+	harness: HarnessKind,
 ): ToolCallsSummary {
 	const results = indexToolResults(content);
 	const counts = new Map<string, number>();
@@ -67,7 +51,8 @@ export function summarizeToolCalls(
 	for (const block of content) {
 		if (block.type !== "tool_use") continue;
 		count += 1;
-		counts.set(block.name, (counts.get(block.name) ?? 0) + 1);
+		const label = toolLabel(harness, block.name);
+		counts.set(label, (counts.get(label) ?? 0) + 1);
 		const status = toolCallStatus(block, results.get(block.id), null);
 		if (status === "failed") failed += 1;
 		if (status === "running") running = true;
@@ -76,38 +61,6 @@ export function summarizeToolCalls(
 		.map(([name, n]) => (n > 1 ? `${name} ×${n}` : name))
 		.join(" · ");
 	return { count, names, failed, running };
-}
-
-export function summarizeToolInput(
-	name: string,
-	input?: Record<string, unknown>,
-): string {
-	if (!input) return "";
-	const command = input.command;
-	if (name === "bash") {
-		if (typeof command === "string") return `$ ${command}`;
-		if (command && typeof command === "object" && "preview" in command) {
-			return `$ ${String((command as { preview?: unknown }).preview ?? "")}`;
-		}
-	}
-	if (typeof input.path === "string") {
-		if (["read", "write", "edit", "ls"].includes(name)) return input.path;
-	}
-	if (name === "grep" && typeof input.pattern === "string") {
-		return [input.pattern, typeof input.path === "string" ? input.path : null]
-			.filter(Boolean)
-			.join(" · ");
-	}
-	if (name === "find" && typeof input.pattern === "string") {
-		return [input.pattern, typeof input.path === "string" ? input.path : null]
-			.filter(Boolean)
-			.join(" · ");
-	}
-	try {
-		return JSON.stringify(input);
-	} catch {
-		return String(input);
-	}
 }
 
 export function stringifyToolValue(value: unknown): string {
@@ -138,17 +91,6 @@ export function stringifyToolValue(value: unknown): string {
 	}
 }
 
-export function formatToolInput(input?: Record<string, unknown>): string {
-	if (!input || Object.keys(input).length === 0) return "";
-	return JSON.stringify(input, null, 2);
-}
-
-function workspacePath(path: string): string {
-	return path.startsWith("/workspace/")
-		? path.slice("/workspace/".length)
-		: path;
-}
-
 export function sanitizeToolDomId(value: string): string {
 	return value.replace(/[^a-zA-Z0-9_-]+/g, "-") || "tool";
 }
@@ -171,270 +113,42 @@ export function isLongTextValue(value: string): boolean {
 	return value.length > 700 || value.split("\n").length > 10;
 }
 
-function primitiveToString(value: unknown): string | null {
-	if (typeof value === "string") return value;
-	if (typeof value === "number" || typeof value === "boolean")
-		return String(value);
-	if (value == null) return "null";
-	return null;
+export function toolFilePath(view: ToolView, harness: HarnessKind) {
+	const path = view.target?.kind === "path" ? view.target.text : "";
+	if (harness !== "cohub" || !["read", "write", "edit"].includes(view.verb))
+		return null;
+	return path.startsWith(WORKSPACE) && path.length > WORKSPACE.length
+		? path.slice(WORKSPACE.length)
+		: null;
 }
 
-function jsonString(value: unknown): string {
-	try {
-		return JSON.stringify(value, null, 2);
-	} catch {
-		return String(value);
-	}
+export function isLongSection(section: ToolSection): boolean {
+	if (section.kind === "diff")
+		return (
+			section.lines.length > 10 ||
+			isLongTextValue(section.before ?? "") ||
+			isLongTextValue(section.after ?? "")
+		);
+	if (section.kind === "todos") return false;
+	return isLongTextValue(section.text);
 }
 
-function addRemainingInputs(
-	input: Record<string, unknown>,
-	used: Set<string>,
-	view: ToolInputView,
-) {
-	for (const [key, value] of Object.entries(input)) {
-		if (used.has(key)) continue;
-		const primitive = primitiveToString(value);
-		if (primitive !== null) {
-			view.fields.push({
-				label: key,
-				value: primitive,
-				mono: typeof value === "string",
-			});
-			continue;
-		}
-		const text = jsonString(value);
-		view.sections.push({
-			id: `json-${key}`,
-			label: key,
-			kind: "json",
-			value: text,
-			collapsible: isLongTextValue(text),
-		});
-	}
-}
-
-function replacementDiffLines(
-	oldText: string,
-	newText: string,
-): ToolInputDiffLine[] {
-	return [
-		...oldText.split("\n").map((text) => ({ sign: "-" as const, text })),
-		...newText.split("\n").map((text) => ({ sign: "+" as const, text })),
-	];
-}
-
-export function formatToolInputView(
-	name: string,
-	input?: Record<string, unknown>,
+export function describeSection(
+	section: ToolSection,
 	locale?: Locale,
-): ToolInputView | null {
-	if (!input || Object.keys(input).length === 0) return null;
-	const view: ToolInputView = { fields: [], sections: [] };
-	const used = new Set<string>();
-
-	if (name === "bash" && typeof input.command === "string") {
-		view.primary = { value: input.command };
-		used.add("command");
-		if (typeof input.timeout === "number") {
-			view.fields.push({ label: "timeout", value: `${input.timeout}s` });
-			used.add("timeout");
-		}
-	} else if (
-		["read", "write", "edit", "ls"].includes(name) &&
-		typeof input.path === "string"
-	) {
-		view.primary = { value: workspacePath(input.path) };
-		used.add("path");
-		if (name === "read") {
-			const offset =
-				typeof input.offset === "number" ? input.offset : undefined;
-			const limit = typeof input.limit === "number" ? input.limit : undefined;
-			if (offset !== undefined && limit !== undefined) {
-				view.fields.push({
-					label: "lines",
-					value: `${offset}–${offset + limit - 1}`,
-				});
-				used.add("offset");
-				used.add("limit");
-			} else if (offset !== undefined) {
-				view.fields.push({ label: "offset", value: String(offset) });
-				used.add("offset");
-			} else if (limit !== undefined) {
-				view.fields.push({ label: "limit", value: String(limit) });
-				used.add("limit");
-			}
-		}
-		if (name === "write" && typeof input.content === "string") {
-			view.sections.push({
-				id: "content",
-				label: "content",
-				summary: describeTextValue(input.content, locale),
-				kind: "text",
-				value: input.content,
-				collapsible: isLongTextValue(input.content),
-			});
-			used.add("content");
-		}
-		if (name === "edit" && Array.isArray(input.edits)) {
-			view.fields.push({
-				label: "edits",
-				value:
-					input.edits.length === 1
-						? m.tool_replacements_one({ count: input.edits.length }, { locale })
-						: m.tool_replacements_many(
-								{ count: input.edits.length },
-								{ locale },
-							),
-			});
-			input.edits.forEach((edit, index) => {
-				if (!edit || typeof edit !== "object") {
-					const value = jsonString(edit);
-					view.sections.push({
-						id: `edit-${index + 1}`,
-						label: `#${index + 1}`,
-						kind: "json",
-						value,
-						collapsible: isLongTextValue(value),
-					});
-					return;
-				}
-				const oldText = (edit as { oldText?: unknown }).oldText;
-				const newText = (edit as { newText?: unknown }).newText;
-				if (typeof oldText === "string" && typeof newText === "string") {
-					view.sections.push({
-						id: `edit-${index + 1}`,
-						label: `#${index + 1}`,
-						summary: `${describeTextValue(oldText, locale)} → ${describeTextValue(newText, locale)}`,
-						kind: "diff",
-						lines: replacementDiffLines(oldText, newText),
-						collapsible: isLongTextValue(oldText) || isLongTextValue(newText),
-					});
-					return;
-				}
-				// Streaming partial: render diff progressively as each side arrives.
-				if (typeof oldText === "string" || typeof newText === "string") {
-					const partialLines: ToolInputDiffLine[] = [];
-					if (typeof oldText === "string") {
-						partialLines.push(
-							...oldText
-								.split("\n")
-								.map((text) => ({ sign: "-" as const, text })),
-						);
-					}
-					if (typeof newText === "string") {
-						partialLines.push(
-							...newText
-								.split("\n")
-								.map((text) => ({ sign: "+" as const, text })),
-						);
-					}
-					const partialSummary = [
-						typeof oldText === "string"
-							? describeTextValue(oldText, locale)
-							: "…",
-						typeof newText === "string"
-							? describeTextValue(newText, locale)
-							: "…",
-					].join(" → ");
-					view.sections.push({
-						id: `edit-${index + 1}`,
-						label: `#${index + 1}`,
-						summary: partialSummary,
-						kind: "diff",
-						lines: partialLines,
-						collapsible:
-							(typeof oldText === "string" && isLongTextValue(oldText)) ||
-							(typeof newText === "string" && isLongTextValue(newText)),
-					});
-					return;
-				}
-				const value = jsonString(edit);
-				view.sections.push({
-					id: `edit-${index + 1}`,
-					label: `#${index + 1}`,
-					kind: "json",
-					value,
-					collapsible: isLongTextValue(value),
-				});
-			});
-			used.add("edits");
-		}
-	} else if (
-		["grep", "find"].includes(name) &&
-		typeof input.pattern === "string"
-	) {
-		view.primary = { value: input.pattern };
-		used.add("pattern");
-		if (typeof input.path === "string") {
-			view.fields.push({
-				label: "path",
-				value: workspacePath(input.path),
-				mono: true,
-			});
-			used.add("path");
-		}
-		for (const key of [
-			"glob",
-			"ignoreCase",
-			"literal",
-			"context",
-			"limit",
-		] as const) {
-			const value = input[key];
-			const primitive = primitiveToString(value);
-			if (primitive !== null && value !== undefined) {
-				view.fields.push({
-					label: key,
-					value: primitive,
-					mono: typeof value === "string",
-				});
-				used.add(key);
-			}
-		}
+): string | undefined {
+	if (section.kind === "text") return describeTextValue(section.text, locale);
+	if (section.kind !== "diff") return undefined;
+	if (section.before !== undefined || section.after !== undefined) {
+		const side = (value?: string) =>
+			value === undefined ? "…" : describeTextValue(value, locale);
+		return `${side(section.before)} → ${side(section.after)}`;
 	}
-
-	addRemainingInputs(input, used, view);
-	return view;
-}
-
-/**
- * Returns the workspace-relative file path for read/write/edit tools.
- * Only absolute paths under /workspace are clickable in the tool call UI.
- */
-export function getToolFilePath(
-	name: string,
-	input?: Record<string, unknown>,
-): string | null {
-	if (!["read", "write", "edit"].includes(name)) return null;
-	const path = input?.path;
-	if (typeof path !== "string" || !path.startsWith("/workspace/")) return null;
-	const relativePath = path.slice("/workspace/".length);
-	return relativePath.length > 0 ? relativePath : null;
-}
-
-export function isSimpleInput(
-	name: string,
-	input?: Record<string, unknown>,
-): boolean {
-	if (!input) return true;
-	const keys = Object.keys(input);
-	if (keys.length === 0) return true;
-	if (
-		keys.length === 1 &&
-		keys[0] === "path" &&
-		typeof input.path === "string"
-	) {
-		return ["ls", "read", "write"].includes(name);
-	}
-	if (
-		name === "bash" &&
-		keys.length === 1 &&
-		typeof input.command === "string"
-	) {
-		return true;
-	}
-	return false;
+	const removed = section.lines.filter((line) => line.sign === "-").length;
+	const added = section.lines.filter((line) => line.sign === "+").length;
+	return [removed && `−${removed}`, added && `+${added}`]
+		.filter(Boolean)
+		.join(" ");
 }
 
 type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
@@ -485,6 +199,7 @@ function timingDurationMs(value: unknown): number | null {
 export function buildToolCallViewModels(input: {
 	content: ContentBlock[];
 	toolCallsFile?: MessageToolCallsFile | null;
+	harness: HarnessKind;
 }): ToolCallViewModel[] {
 	const results = indexToolResults(input.content);
 	const toolUseBlocks = input.content.filter(
@@ -517,10 +232,12 @@ export function buildToolCallViewModels(input: {
 			timingDurationMs(fullTool?.result?.meta?.timing) ??
 			timingDurationMs(block._meta?.timing) ??
 			timingDurationMs(result?._meta?.timing);
+		const toolInput = fullTool?.input ?? block.input;
 		return {
 			id: block.id,
 			name: block.name,
-			input: fullTool?.input ?? block.input,
+			input: toolInput,
+			view: presentTool(input.harness, block.name, toolInput),
 			result: resultContent,
 			partialResult,
 			status,
@@ -538,6 +255,7 @@ export function toolStateToViewModel(tool: ToolState): ToolCallViewModel {
 		id: tool.id,
 		name: tool.name,
 		input: tool.input,
+		view: presentTool("cohub", tool.name, tool.input),
 		result: tool.output,
 		status: tool.status,
 	};

@@ -2,7 +2,7 @@ import type { ContentBlock, NativeTurnMessage } from "@neta-art/cohub";
 import { record } from "../json-rpc.js";
 import { iso, type NativeTranscript, type NativeTranscriptTurn } from "../native/transcript.js";
 import { chainBranch, extendTurn, readChainedLines, startTurn } from "./chained-transcript.js";
-import { array, text } from "./process.js";
+import { array, text, toolTiming } from "./process.js";
 import { streamContent, streamUsage } from "./stream-json.js";
 
 const COMMAND = /^<command-name>\s*([^<]*)<\/command-name>/;
@@ -38,6 +38,7 @@ export async function readClaudeTranscript(path: string, nativeSessionId: string
   const branch = chainBranch(read.lines, (value) => value.isSidechain === true ? "" : text(value.uuid), (value) => text(value.parentUuid) || text(value.logicalParentUuid));
   const turns: NativeTranscriptTurn[] = [];
   const owners = new Map<string, NativeTurnMessage>();
+  const calls = new Map<string, unknown>();
   const messageIds = new Map<NativeTurnMessage, string>();
   let cwd = "", cloudSessionId = "";
   let current: NativeTranscriptTurn | null = null;
@@ -66,7 +67,7 @@ export async function readClaudeTranscript(path: string, nativeSessionId: string
         // Cohub sends its Turn id as the prompt's record id; a projected record names its Turn.
         current = startTurn(line, text(value.uuid), turns.at(-1)?.key ?? null, opened.content, text(cohub.turnId) || text(value.uuid));
         promptId = text(value.promptId); local = opened.local; interrupted = false; completedAt = current.startedAt;
-        owners.clear(); messageIds.clear();
+        owners.clear(); messageIds.clear(); calls.clear();
         continue;
       }
       if (!current) continue;
@@ -74,7 +75,7 @@ export async function readClaudeTranscript(path: string, nativeSessionId: string
         const id = text(block.tool_use_id);
         const owner = owners.get(id);
         if (!owner) continue;
-        owner.content.push({ type: "tool_result", tool_use_id: id, content: typeof block.content === "string" ? block.content : streamContent(block.content), is_error: block.is_error === true });
+        owner.content.push({ type: "tool_result", tool_use_id: id, content: typeof block.content === "string" ? block.content : streamContent(block.content), is_error: block.is_error === true, ...toolTiming(calls.get(id), value.timestamp) });
       }
       if (array(message.content).some((block) => text(record(block).text).startsWith(INTERRUPTED)) || text(message.content).startsWith(INTERRUPTED)) {
         interrupted = true;
@@ -98,7 +99,7 @@ export async function readClaudeTranscript(path: string, nativeSessionId: string
       for (const block of content) {
         const index = block.type === "tool_use" ? target.content.findIndex((existing) => existing.type === "tool_use" && existing.id === block.id) : -1;
         if (index >= 0) target.content[index] = block; else target.content.push(block);
-        if (block.type === "tool_use") owners.set(block.id, target);
+        if (block.type === "tool_use") { owners.set(block.id, target); if (!calls.has(block.id)) calls.set(block.id, value.timestamp); }
       }
       const model = text(native.model);
       if (model && model !== "<synthetic>") target.model = model;

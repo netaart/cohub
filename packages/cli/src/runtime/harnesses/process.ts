@@ -61,6 +61,17 @@ export function probe(command: [string, string[]], cwd: string, timeout: number,
   return execute(...command, { cwd, encoding: "utf8", timeout, killSignal: "SIGKILL", maxBuffer: 4 * 1024 * 1024, windowsHide: true, env: { ...env, MISE_OFFLINE: "1" } });
 }
 
+type ToolUse = Extract<ContentBlock, { type: "tool_use" }>;
+
+export const runningTool = (block: ToolUse, startedAt = new Date().toISOString()): ToolUse => ({ ...block, _meta: { ...block._meta, toolStatus: "running", timing: { startedAt } } });
+
+export function toolTiming(startedAt: unknown, completedAt: unknown = new Date().toISOString()): { _meta?: { timing: { startedAt: string; completedAt: string; durationMs: number } } } {
+  const start = typeof startedAt === "string" ? Date.parse(startedAt) : Number.NaN;
+  const end = typeof completedAt === "string" ? Date.parse(completedAt) : Number.NaN;
+  if (!(end >= start)) return {};
+  return { _meta: { timing: { startedAt: new Date(start).toISOString(), completedAt: new Date(end).toISOString(), durationMs: end - start } } };
+}
+
 /** Private per-user state shared by this machine's Runtimes, outside any harness's own data. */
 export const localStateDirectory = () => join(process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state"), "cohub");
 

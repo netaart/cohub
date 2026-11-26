@@ -4,6 +4,7 @@ import type {
 	SessionTurnRecord,
 	StoredIntermediateMessage,
 } from "@cohub/protocol/model";
+import { resolveHarness } from "@cohub/protocol/runtime";
 import { ChevronDown, ChevronRight } from "lucide-svelte";
 import IntermediateMessageBubble from "#lib/components/IntermediateMessageBubble.svelte";
 import StatusGlyph from "#lib/components/StatusGlyph.svelte";
@@ -37,7 +38,10 @@ const {
 const locale = $derived(getLocale());
 let open = $state(false);
 const summary = $derived(
-	summarizeToolCalls(messages.flatMap((message) => message.content)),
+	summarizeToolCalls(
+		messages.flatMap((message) => message.content),
+		resolveHarness(turn.meta),
+	),
 );
 const tone = $derived(
 	summary.running ? "activity" : summary.failed ? "error" : "success",

@@ -537,7 +537,7 @@ const inputContextPercent = $derived(
 const statsTurnMeta = $derived(
 	turnMeta ?? asRecord(message.meta?.parentTurnMeta),
 );
-const statsHarness = $derived(resolveHarness(statsTurnMeta));
+const sourceHarness = $derived(resolveHarness(statsTurnMeta));
 
 const statsIdentity = $derived.by((): StatsIdentity | null => {
 	const model = message.meta?.model?.trim();
@@ -579,11 +579,11 @@ const statsIdentity = $derived.by((): StatsIdentity | null => {
 		name: modelName,
 		title: provider ? `${provider}/${model}` : model,
 		harness:
-			statsHarness === "cohub"
+			sourceHarness === "cohub"
 				? null
 				: {
-						kind: statsHarness,
-						label: `${labelForHarness(statsHarness)} · ${m.runtime_local({}, { locale })}`,
+						kind: sourceHarness,
+						label: `${labelForHarness(sourceHarness)} · ${m.runtime_local({}, { locale })}`,
 					},
 		details,
 	};
@@ -594,7 +594,7 @@ const statsContext = $derived.by((): StatsContext | null => {
 	const usage = message.meta?.usage;
 	const tokens =
 		usage?.contextTokens ??
-		(statsHarness === "codex" ? 0 : getDisplayInputTokens(usage));
+		(sourceHarness === "codex" ? 0 : getDisplayInputTokens(usage));
 	return tokens > 0 ? { tokens, window: modelContextWindow } : null;
 });
 
@@ -680,6 +680,7 @@ function handleCopy() {
         onMarkdownSegmentStart={handleMarkdownSegmentStart}
         onLoadToolCalls={message.toolCallsLoader ?? undefined}
         turnId={message.meta?.turnId ?? message.meta?.turn?.id ?? null}
+        harness={sourceHarness}
         onOpenFile={reply ? undefined : onOpenFile}
         {onOpenUrl}
       />

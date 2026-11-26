@@ -6,6 +6,7 @@ import {
 } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { MessageToolCallsFile } from "@cohub/protocol/model";
+import type { HarnessKind } from "@cohub/protocol/runtime";
 import MarkdownView from "#lib/components/MarkdownView.svelte";
 import AttachmentBlocks from "#lib/components/TextAttachmentBlocks.svelte";
 import ThinkingBlocks from "#lib/components/ThinkingBlocks.svelte";
@@ -41,6 +42,7 @@ type Props = {
 	onMarkdownSegmentStart?: () => void;
 	onLoadToolCalls?: () => Promise<MessageToolCallsFile | null>;
 	turnId?: string | null;
+	harness?: HarnessKind;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 	onOpenUrl?: (href: string, event: MouseEvent) => void | Promise<void>;
 };
@@ -63,6 +65,7 @@ const {
 	onMarkdownSegmentStart,
 	onLoadToolCalls,
 	turnId = null,
+	harness = "cohub",
 	onOpenFile,
 	onOpenUrl,
 }: Props = $props();
@@ -302,7 +305,7 @@ const segments = $derived.by(() => {
 			{:else if segment.type === 'image'}
 				<AttachmentBlocks blocks={segment.blocks} />
 			{:else if segment.type === 'tool' && showToolCalls}
-				<ToolCallList content={segment.blocks} streaming={isStreaming} defaultExpanded={defaultExpandToolCalls} {onLoadToolCalls} {turnId} flush {onOpenFile} />
+				<ToolCallList content={segment.blocks} streaming={isStreaming} defaultExpanded={defaultExpandToolCalls} {onLoadToolCalls} {turnId} {harness} flush {onOpenFile} />
 			{/if}
 		</div>
 	{/each}

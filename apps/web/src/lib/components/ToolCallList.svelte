@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { MessageToolCallsFile } from "@cohub/protocol/model";
+import type { HarnessKind } from "@cohub/protocol/runtime";
 import ToolCallItem from "#lib/components/ToolCallItem.svelte";
 import { buildToolCallViewModels } from "#lib/components/tool-call-format.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -15,6 +16,7 @@ type Props = {
 	onLoadToolCalls?: () => Promise<MessageToolCallsFile | null>;
 	flush?: boolean;
 	turnId?: string | null;
+	harness?: HarnessKind;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 };
 
@@ -26,6 +28,7 @@ const {
 	onLoadToolCalls,
 	flush = false,
 	turnId = null,
+	harness = "cohub",
 	onOpenFile,
 }: Props = $props();
 
@@ -38,7 +41,10 @@ let requestedLoad = $state(false);
 
 const effectiveFile = $derived(toolCallsFile ?? loadedFile);
 const tools = $derived(
-	buildToolCallViewModels({ content, toolCallsFile: effectiveFile }),
+	buildToolCallViewModels({ content, toolCallsFile: effectiveFile, harness }),
+);
+const labelChars = $derived(
+	Math.max(0, ...tools.map((tool) => tool.view.label.length)),
 );
 
 async function ensureLoaded() {
@@ -65,14 +71,14 @@ function retryLoad() {
 </script>
 
 {#if tools.length > 0}
-	<div class={flush ? "space-y-0.5" : "mt-2 space-y-0.5"}>
+	<div class={flush ? "space-y-0.5" : "mt-2 space-y-0.5"} style:--tool-label-width={`clamp(3.25rem, ${labelChars}ch, 7rem)`}>
 		{#if loadError}
 			<button type="button" class="ml-[26px] mb-1 rounded-md border border-status-error/30 bg-status-error/5 px-2 py-1 text-left text-[12px] leading-snug text-status-error hover:bg-status-error/10" onclick={retryLoad}>
 				{loadError} · {m.common_retry({}, { locale })}
 			</button>
 		{/if}
 		{#each tools as tool (tool.id)}
-			<ToolCallItem {tool} loading={loading && requestedLoad && !effectiveFile} needsDetails={Boolean(onLoadToolCalls) && !effectiveFile} defaultExpanded={defaultExpanded || (streaming && tool.status === 'running')} autoExpandWhileRunning={streaming} onExpand={ensureLoaded} {turnId} {onOpenFile} />
+			<ToolCallItem {tool} loading={loading && requestedLoad && !effectiveFile} needsDetails={Boolean(onLoadToolCalls) && !effectiveFile} defaultExpanded={defaultExpanded || (streaming && tool.status === 'running')} autoExpandWhileRunning={streaming} onExpand={ensureLoaded} {turnId} {harness} {onOpenFile} />
 		{/each}
 	</div>
 {/if}

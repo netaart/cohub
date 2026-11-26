@@ -7,7 +7,7 @@ import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { describeError } from "../../network-error.js";
 import type { Executor } from "../native/execution.js";
 import type { TranscriptState } from "../native/ingest.js";
-import { array, closeHost, epochSecondsIso, harnessCommand, identifiable, inlineImage, missing, probe, text, turnEnvironment } from "./process.js";
+import { array, closeHost, epochSecondsIso, harnessCommand, identifiable, inlineImage, missing, probe, runningTool, text, toolTiming, turnEnvironment } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn } from "./types.js";
 
 const REDACTED_THINKING = "[Reasoning redacted]";
@@ -140,6 +140,13 @@ const nativeModel = (value: unknown) => { const model = text(value); return mode
 export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; model: string | null }, spent = 0) {
   const messages = new Map<string, Message>();
   const owners = new Map<string, Message>();
+  /** A complete call is already running: the CLI starts each tool as its block completes. */
+  const started = new Map<string, string>();
+  const start = (id: string) => {
+    const at = started.get(id) ?? new Date().toISOString();
+    started.set(id, at);
+    return at;
+  };
   let current: Message | null = null;
   let streaming: Message | null = null;
   let model = identity.model;
@@ -195,7 +202,8 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
         message.usage = { ...message.usage, ...counts(native.usage) };
         // Complete blocks supersede what streamed so far.
         message.partial.clear();
-        for (const block of streamContent(native.content)) {
+        for (const complete of streamContent(native.content)) {
+          const block = complete.type === "tool_use" ? runningTool(complete, start(complete.id)) : complete;
           const index = block.type === "tool_use" ? message.content.findIndex((existing) => existing.type === "tool_use" && existing.id === block.id) : -1;
           if (index >= 0) message.content[index] = block;
           else message.content.push(block);
@@ -211,7 +219,7 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
           const owner = block.type === "tool_result" ? owners.get(id) : undefined;
           if (!owner) continue;
           owner.content = owner.content.filter((existing) => existing.type !== "tool_result" || existing.tool_use_id !== id);
-          owner.content.push({ type: "tool_result", tool_use_id: id, content: typeof block.content === "string" ? block.content : streamContent(block.content), is_error: Boolean(block.is_error) });
+          owner.content.push({ type: "tool_result", tool_use_id: id, content: typeof block.content === "string" ? block.content : streamContent(block.content), is_error: Boolean(block.is_error), ...toolTiming(started.get(id)) });
           emit({ type: "content.replace", ordinal: owner.ordinal, content: [...owner.content] });
         }
         return false;

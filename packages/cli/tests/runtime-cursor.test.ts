@@ -75,7 +75,10 @@ for (const variant of ["", "call-ids"]) test(`Cursor Turns hand over Cohub histo
     assert.deepEqual(result.event.message.content, [{ type: "text", text: "history retained images:1" }]);
     assert.deepEqual(result.event.message.usage, { input: 3, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 5 });
     const commit = events.find((event) => event.type === "message.commit");
-    assert.deepEqual(commit?.type === "message.commit" && commit.message.content, [
+    const content = commit?.type === "message.commit" ? commit.message.content : [];
+    const timing = content[3]?._meta?.timing as { durationMs?: unknown } | undefined;
+    assert.equal(typeof timing?.durationMs, "number");
+    assert.deepEqual(content.map(({ _meta, ...block }) => block), [
       { type: "thinking", thinking: "plan" }, { type: "text", text: "Running" },
       { type: "tool_use", id: "c1", name: "shell", input: { command: "ls" } }, { type: "tool_result", tool_use_id: "c1", content: "ok", is_error: false },
     ]);

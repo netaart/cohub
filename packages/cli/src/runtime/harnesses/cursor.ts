@@ -14,7 +14,7 @@ import { fitHandoff } from "./handoff-budget.js";
 import {
   acceptsCursorDirectory, acceptsCursorTranscript, cursorChatsRoot, cursorConfigDirectory, cursorProjectsRoot, cursorSessionHeader, cursorTranscriptPath, readCursorTranscript,
 } from "./cursor-transcript.js";
-import { array, harnessCommand, harnessExecutableCandidates, localStateDirectory, missing, probe, text, turnEnvironment, writeImage } from "./process.js";
+import { array, harnessCommand, harnessExecutableCandidates, localStateDirectory, missing, probe, runningTool, text, toolTiming, turnEnvironment, writeImage } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn, LocalHarnessAdapter } from "./types.js";
 
 const BINARY = "cursor-agent";
@@ -330,17 +330,18 @@ export function cursorTranslator(emit: (event: RuntimeExecutionEvent) => void, i
         const step = event.subtype === "started" ? target(text(event.model_call_id)) : owners.get(id);
         if (!step) return false;
         if (event.subtype === "started") {
-          step.content.push({ type: "tool_use", id, name: tool.name, input: tool.input });
+          step.content.push(runningTool({ type: "tool_use", id, name: tool.name, input: tool.input }));
           step.modelCallId ||= text(event.model_call_id);
           owners.set(id, step);
           open = null;
         } else if (event.subtype === "completed") {
           const index = step.content.findIndex((block) => block.type === "tool_use" && block.id === id);
           if (index < 0) return false;
+          const startedAt = record(record(step.content[index]?._meta).timing).startedAt;
           step.content[index] = { type: "tool_use", id, name: tool.name, input: tool.input };
           const result = cursorResult(tool.result ?? {});
           const next = step.content[index + 1];
-          step.content.splice(index + 1, next?.type === "tool_result" && next.tool_use_id === id ? 1 : 0, { type: "tool_result", tool_use_id: id, ...result });
+          step.content.splice(index + 1, next?.type === "tool_result" && next.tool_use_id === id ? 1 : 0, { type: "tool_result", tool_use_id: id, ...result, ...toolTiming(startedAt) });
         }
         replace(step);
         return false;
