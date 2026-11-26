@@ -1,6 +1,7 @@
 package report
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cohub/apps/sandbox/env"
 )
@@ -81,5 +83,26 @@ func TestReportRetriesAreBounded(t *testing.T) {
 				t.Fatalf("attempts = %d, want %d", calls.Load(), want)
 			}
 		})
+	}
+}
+
+func TestWaitForBootstrapSeesReadyWithinASecond(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		status := "running"
+		if calls.Add(1) > 1 {
+			status = "ready"
+		}
+		_ = json.NewEncoder(w).Encode(Response{Bootstrap: &BootstrapGate{Status: status}})
+	}))
+	defer server.Close()
+	client := NewClient(env.Config{SpaceID: "test-space", InternalAPIBaseURL: server.URL, SandboxReportToken: "test-report-token"}, "test")
+	started := time.Now()
+	err := client.WaitForBootstrap(context.Background(), func() Payload { return Payload{Status: "preparing"} }, func(string, error) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("bootstrap ready noticed after %s", elapsed)
 	}
 }

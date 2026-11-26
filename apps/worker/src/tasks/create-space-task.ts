@@ -7,6 +7,7 @@ import { registerTask } from "./registry.js";
 import { markWorkspaceChanged } from "../workspace-usage.js";
 import { db } from "../db.js";
 import { checkpoints, spaces } from "@cohub/db";
+import { compactCheckpointCache } from "@cohub/core/checkpoint/storage";
 import { checkpointForkReference, spaceForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "../reference-index-queue.js";
 import { assertDirectoryEmpty, ensureSpaceWorkspaceReady, getSpaceWorkspaceDir, runGit } from "../git.js";
@@ -203,6 +204,9 @@ async function postCheckpointRestore(input: {
   const stages: Record<string, unknown> = {};
   const dirs = await ensureCheckpointDirs(input.targetSpace.id);
 
+  stages.cacheCompaction = await timeIt("compactCheckpointCache", () => compactCheckpointCache(dirs.repoDir))
+    .then(({ duration }) => ({ status: "ready", durationMs: duration }), (error) => ({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
+
   const latest = await timeIt("materializeLatest", async () => {
     const scan = await scanWorkspace(dirs.workspaceDir);
     await materializeLatest({ latestDir: dirs.latestDir, files: scan.files, checkpointMeta: {
@@ -272,6 +276,7 @@ const createSpaceHandler = async (job: Job) => {
         await removeWorkerLocalTmpDir(restoreTmpDir).catch((error) => logger.warn(`[CreateSpace] failed to clean restore tmp ${restoreTmpDir}: ${error instanceof Error ? error.message : String(error)}`));
       });
       stageTimings.restoreWorkspaceFromCheckpoint = restoreDuration;
+      Object.assign(stageTimings, restoreResult.timings);
       await progress("create_checkpoint_alias");
       const { result: aliasResult, duration: aliasDuration } = await timeIt("createCheckpointAlias", () => createCheckpointAlias({ targetSpace: currentSpace, sourceCheckpoint: restoreResult.checkpoint }));
       stageTimings.createCheckpointAlias = aliasDuration;
