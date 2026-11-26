@@ -20,6 +20,7 @@ const association = {
 				{ "/": "/callback*", exclude: true },
 				{ "/": "/app-auth*", exclude: true },
 				{ "/": "/mobile/*", exclude: true },
+				{ "/": "/*/*/w/*", exclude: true },
 				{ "/": "/*" },
 			],
 		})),

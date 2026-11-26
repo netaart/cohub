@@ -93,6 +93,9 @@
                 <data
                     android:host="${oauthHost}"
                     android:scheme="https" />
+                <uri-relative-filter-group android:allow="false">
+                    <data android:pathPattern="/.*/.*/w/.*" />
+                </uri-relative-filter-group>
             </intent-filter>
         </activity>
 
