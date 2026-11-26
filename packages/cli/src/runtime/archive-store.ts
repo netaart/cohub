@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, rm, stat, link } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
-  LOCAL_HARNESS_SPECS, RUNTIME_ARCHIVE_SEGMENT_BYTES, harnessArchiveIndexSchema, validateArchiveBoundary, type LocalHarness,
+  LOCAL_HARNESS_SPECS, RUNTIME_ARCHIVE_SEGMENT_BYTES, RUNTIME_EXECUTION_RESOLVED_CODE, harnessArchiveIndexSchema, isHttpErrorCode, validateArchiveBoundary, type LocalHarness,
   type HarnessArchive, type HarnessArchiveIndex, type RuntimeArchivePage, type RuntimeArchiveUpload,
 } from "@neta-art/cohub";
 
@@ -93,8 +93,9 @@ export class RuntimeArchiveStore {
     if (saved) {
       if (saved.sessionId !== state.sessionId || saved.harness !== state.harness) throw new Error("Archive identity mismatch");
       if (state.expectedChecksum && state.expectedChecksum !== saved.sha256) throw new ArchiveCaptureIntegrityError("Native Turn bytes changed; original archive retained");
-      const committed = await stat(join(this.root, "ready", `${turnId}.json`)).catch((error) => { if (missing(error)) return null; throw error; });
-      if (!committed) await atomicRuntimeJson(join(this.root, "pending", `${turnId}.json`), saved);
+      const settled = await Promise.all(["ready", "resolved"].map((directory) => stat(join(this.root, directory, `${turnId}.json`))
+        .catch((error) => { if (missing(error)) return null; throw error; })));
+      if (!settled.some(Boolean)) await atomicRuntimeJson(join(this.root, "pending", `${turnId}.json`), saved);
       if (!await this.readIndex(headPath)) await atomicRuntimeJson(headPath, saved);
       return identity;
     }
@@ -202,10 +203,19 @@ export class RuntimeArchiveStore {
         await rm(join(this.root, "pending", `${index.turnId}.json`), { force: true });
         queue.push(...children.get(index.turnId) ?? []);
       } catch (error) {
-        if (!signal.aborted) {
-          this.errorReporter?.(error, index);
-        }
+        if (isHttpErrorCode(error, RUNTIME_EXECUTION_RESOLVED_CODE)) await this.retire(index, children);
+        else if (!signal.aborted) this.errorReporter?.(error, index);
       }
+    }
+  }
+  /** A resolved Turn and the versions built on it can never be accepted; keep them locally, out of the outbox. */
+  private async retire(index: HarnessArchiveIndex, children: Map<string, HarnessArchiveIndex[]>) {
+    await mkdir(join(this.root, "resolved"), { recursive: true, mode: 0o700 });
+    const stack = [index];
+    for (let next = stack.pop(); next; next = stack.pop()) {
+      await rename(join(this.root, "pending", `${next.turnId}.json`), join(this.root, "resolved", `${next.turnId}.json`))
+        .catch((error) => { if (!missing(error)) throw error; });
+      stack.push(...children.get(next.turnId) ?? []);
     }
   }
   async restore(reference: HarnessArchive, target: string, signal?: AbortSignal): Promise<HarnessArchiveIndex> {

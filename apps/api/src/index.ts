@@ -24,6 +24,7 @@ import { isAppBrowserTokenLive } from "./lib/app-browser-epoch.js";
 import { assertRequiredConfig, config } from "./config.js";
 
 import router from "./routes/index.js";
+import { handleApiError } from "./api-error.js";
 import { resolveRequestSourceTurn } from "./lib/request-source.js";
 import type { RequestSource } from "@cohub/protocol/provenance";
 
@@ -220,44 +221,9 @@ app.use(resolveRequestSourceTurn);
 
 app.route("/", router);
 
-const ERROR_LOG_FIELDS = ["code", "detail", "hint", "position", "constraint", "table", "column", "schema"] as const;
-
-const serializeErrorForLog = (error: unknown): unknown => {
-  if (error instanceof Error) {
-    const record = error as Error & Record<string, unknown>;
-    const fields = Object.fromEntries(ERROR_LOG_FIELDS.flatMap((key) => {
-      const value = record[key];
-      return value === undefined ? [] : [[key, value]];
-    }));
-    return {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-      ...fields,
-      cause: serializeErrorForLog(error.cause),
-    };
-  }
-  if (error === undefined) return undefined;
-  try {
-    return JSON.parse(JSON.stringify(error));
-  } catch {
-    return String(error);
-  }
-};
-
 app.notFound((c) => c.json({ message: "not found" }, 404));
 
-app.onError((error, c) => {
-  const requestId = c.get("requestId") ?? getOrCreateRequestId(c.req.header("x-request-id"));
-  const ids = getActiveTraceIdentifiers(requestId);
-  setRequestContextAttributes(trace.getActiveSpan(), ids);
-  applyTraceResponseHeaders(c.res.headers, ids);
-
-  const path = c.req.path;
-  const method = c.req.method;
-  logger.error(`[API Error] ${method} ${path} requestId=${requestId} traceId=${ids.traceId ?? "none"}:`, serializeErrorForLog(error));
-  return c.json({ message: "internal server error", requestId, traceId: ids.traceId }, 500);
-});
+app.onError(handleApiError);
 
 // ── Start server ─────────────────────────────────────────────────────────────
 

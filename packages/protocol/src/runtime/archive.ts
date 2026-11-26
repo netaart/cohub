@@ -4,6 +4,8 @@ import { LOCAL_HARNESS_SPECS, LOCAL_HARNESSES, localHarnessSchema } from "./harn
 const nativeFormats = LOCAL_HARNESSES.map((harness) => LOCAL_HARNESS_SPECS[harness].nativeFormat) as [string, ...string[]];
 
 export const RUNTIME_ARCHIVE_SEGMENT_BYTES = 4 * 1024 * 1024;
+/** The server manually resolved the Turn; its archive is never accepted. */
+export const RUNTIME_EXECUTION_RESOLVED_CODE = "runtime_execution_resolved";
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 export const runtimeArchiveSegmentSchema = z.object({
   offset: z.number().int().safe().nonnegative(),
