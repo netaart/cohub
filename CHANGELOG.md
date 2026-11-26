@@ -4,6 +4,22 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.111 — 2026-11-26
+
+- **Per-harness tool call views**: Claude Code, WorkBuddy, Codex, Cursor and Antigravity calls now render as commands, file paths, diffs and todo lists through adapters in `@cohub/protocol/tools`, with running state, recorded durations and streamed Codex output instead of raw JSON.
+- **Fork from any settled turn**: any finished Turn can seed a new Chat regardless of which runtime ran it; a shared `canForkTurn` gates the API, web and SDK, the CLI adds `spaces sessions turns fork`, and forks no longer inherit the parent's `nativeSync`.
+- **Turn statistics redesign**: the stats popover leads with the resolved model, local harness and its run settings, then shows time and token breakdowns once, a per-model table for Turns that used several models, and a note when figures were not reported.
+- **Warm runtimes and remembered choices**: Claude Code keeps its process between clean Turns to avoid cold starts, Cursor and Antigravity receive history fitted to a budget with omission notes, Codex handoffs resume the projected rollout, lost Runtimes fail unstarted Turns and clean up leftover harness process groups, and usage limits surface with reset times in Chat. New sessions start with the Runtime the Space's last new session used, and each local Harness keeps its last model, thinking level and tier instead of falling back to Cohub on its own.
+- **Native launch experience**: iOS and Android cover the web view with a spinning launch mark until the page is ready; a slow start offers a reload, connection or TLS failures explain themselves with a retry, offline starts retry once the network is usable, and repeated foreground crashes restart from home instead of looping.
+- **Billing SDK isolation**: the SDK-backed adapter moved behind a `CommerceSdk` port under `packages/billing/src/talesofai` with an optional, sha512-verified postinstall fetch, so open-source checkouts install, build and test without a private registry token.
+
+### Bug Fixes
+
+- **Sandbox file times**: versions are now computed with Node's millisecond math, so `cp -p` copies, editor saves and uploads stop failing with "file changed while copying".
+- **Steered follow-ups**: a steer now occupies the next queued slot, and successive steers keep their acceptance order.
+- **Claude Code default model**: Turns ending in a locally built `<synthetic>` error keep the model Claude Code actually resolved.
+- **App sessions under workerd**: session redirects are now handled correctly.
+
 ## v2.110 — 2026-11-24
 
 - **Shared playback preroll**: `boards play` and `boards seek` take `--preroll` (`board.play()` / `board.seek()`), holding the first frame until every watching screen reports its scene, next second of sound and scripts' `preload()`s loaded — at most 5 s — then starting everyone together; `resume` gains `ifCommand` so a replaced playback cannot be revived, and `boards viewers` / `board.viewers()` list each screen's readiness, camera, sound and lost audio start.
