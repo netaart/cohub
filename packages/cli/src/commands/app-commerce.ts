@@ -20,6 +20,7 @@ type ProductKeysOptions = JsonOption & {
 type PurchaseOptions = JsonOption & {
   appId?: string;
   productKey?: string;
+  returnUrl?: string;
 };
 
 type OrderGetOptions = JsonOption & {
@@ -210,13 +211,14 @@ Examples:
     .description("Create an app purchase checkout")
     .option("--app-id <id>", "App ID")
     .option("--product-key <key>", "Product key")
+    .option("--return-url <url>", "HTTPS URL on this app to return to after checkout")
     .option("--json", "Output as JSON")
     .action(async (opts: PurchaseOptions) => {
       const appId = requireAppId(opts.appId);
       const productKey = requireText(opts.productKey, "product key", "--product-key <key>");
       const client = createClient();
       try {
-        const result = await client.appCommerce.purchase(appId, { productKey });
+        const result = await client.appCommerce.purchase(appId, { productKey, returnUrl: opts.returnUrl });
         if (jsonRequested(opts)) return outJson(result);
         ok(`Checkout created: ${result.checkout.orderId}`);
         table([{

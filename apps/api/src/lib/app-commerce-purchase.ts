@@ -1,4 +1,24 @@
 import { createHash } from "node:crypto";
+import { resolveCohubAppOrigin, type CohubAppHostTemplate } from "@cohub/protocol";
+import { readCustomDomainBinding } from "./app-domain-binding.js";
+
+export async function resolvePurchaseReturnUrl(value: unknown, input: {
+  publicAppUrl: string | null;
+  appId: string;
+  hostTemplate: CohubAppHostTemplate | null;
+}, lookupDomain = readCustomDomainBinding): Promise<string | null> {
+  const url = typeof value === "string" ? URL.parse(value) : null;
+  if (url?.protocol !== "https:") return null;
+  const publicUrl = input.publicAppUrl && new URL(input.publicAppUrl);
+  if (publicUrl && url.origin === publicUrl.origin) {
+    return url.pathname === publicUrl.pathname ? url.href : null;
+  }
+  const managedAppId = input.hostTemplate && resolveCohubAppOrigin(url.origin, input.hostTemplate);
+  if (managedAppId) return managedAppId === input.appId ? url.href : null;
+  if (url.port) return null;
+  const binding = await lookupDomain(url.hostname);
+  return binding?.active && binding.appId === input.appId ? url.href : null;
+}
 
 const PURCHASE_ATTEMPT_ID_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
 

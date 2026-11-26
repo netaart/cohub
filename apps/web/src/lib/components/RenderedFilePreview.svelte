@@ -1,7 +1,6 @@
 <script lang="ts">
-import type { AppRecord } from "@neta-art/cohub";
+import { type AppRecord, readAppCheckoutState } from "@neta-art/cohub";
 import { onDestroy, untrack } from "svelte";
-import { readAppCheckoutState } from "#lib/components/app/app-checkout-state.ts";
 import AppAuthorizeDialog from "#lib/features/app/AppAuthorizeDialog.svelte";
 import { createAppBridgeHost } from "#lib/features/app/bridge-host.svelte.ts";
 import type { PreviewCaptureTarget } from "#lib/features/preview-mark/index.ts";

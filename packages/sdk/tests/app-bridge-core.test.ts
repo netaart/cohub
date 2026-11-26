@@ -2581,11 +2581,12 @@ test("purchase retries with the same attempt id", async () => {
 			type: "cohub.app.purchase",
 			requestId: "r2",
 			productKey: "pro-monthly",
+			returnUrl: "https://shop.neta.art/cart#/done",
 			purchaseAttemptId: "attempt-1",
 		}));
 		assert.deepEqual(requestBodies, [
 			{ productKey: "pro-monthly", purchaseAttemptId: "attempt-1" },
-			{ productKey: "pro-monthly", purchaseAttemptId: "attempt-1" },
+			{ productKey: "pro-monthly", purchaseAttemptId: "attempt-1", returnUrl: "https://shop.neta.art/cart#/done" },
 		]);
 		assert.equal(config.replies[1].payload.type, "cohub.app.purchase.result");
 	} finally {

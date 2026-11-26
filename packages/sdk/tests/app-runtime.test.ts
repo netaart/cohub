@@ -511,6 +511,7 @@ test("AppRuntimeApi delegates to the injected transport", async () => {
 	await runtime.purchase({
 		productKey: "pro-1",
 		purchaseAttemptId: "attempt-1",
+		returnUrl: "https://shop.neta.art/cart#/done",
 	});
 	await runtime.checkoutState();
 
@@ -533,6 +534,7 @@ test("AppRuntimeApi delegates to the injected transport", async () => {
 		type: "cohub.app.purchase",
 		productKey: "pro-1",
 		purchaseAttemptId: "attempt-1",
+		returnUrl: "https://shop.neta.art/cart#/done",
 	});
 	assert.deepEqual(calls[4].options, { timeoutMs: 8_000, retryIntervalMs: 250 });
 });
@@ -607,10 +609,10 @@ test("PopupBrokerTransport answers context locally without opening a popup", asy
 	assert.equal(result?.context?.app?.id, "work-1");
 });
 
-test("PopupBrokerTransport answers checkout-state locally without opening a popup", async () => {
+test("PopupBrokerTransport reads checkout status on the return page without opening a popup", async () => {
 	let opened = false;
 	const windowMock = {
-		location: { origin: "https://my-work.example" },
+		location: new URL("https://shop.neta.art/cart?cohub_checkout=cancel#/done"),
 		open: () => {
 			opened = true;
 			return { closed: false, close() {}, postMessage() {} };
@@ -629,7 +631,9 @@ test("PopupBrokerTransport answers checkout-state locally without opening a popu
 	);
 
 	assert.equal(opened, false);
-	assert.equal(result?.status, null);
+	assert.equal(result?.status, "cancel");
+	const offline = new OriginBrokerTransport("https://cohub.run", async () => null);
+	assert.equal((await createAppRuntime(offline).checkoutState())?.status, "cancel");
 });
 
 test("OriginBrokerTransport clears a cached token when the broker viewer changes", async () => {

@@ -5,11 +5,14 @@ import {
 	appReturnPath,
 	isUuidOrShortUuid,
 } from "@cohub/protocol";
-import type { AppPublicOwnerRecord, AppRecord } from "@neta-art/cohub";
+import {
+	type AppPublicOwnerRecord,
+	type AppRecord,
+	readAppCheckoutState,
+} from "@neta-art/cohub";
 import { AlertTriangle, Loader2, ShieldCheck } from "lucide-svelte";
 import { onDestroy, onMount } from "svelte";
 import { getAuthToken, signInWithRedirectPath } from "#lib/auth.ts";
-import { readAppCheckoutState } from "#lib/components/app/app-checkout-state.ts";
 import UserAvatar from "#lib/components/UserAvatar.svelte";
 import AppAuthorizeDialog from "#lib/features/app/AppAuthorizeDialog.svelte";
 import { isLegacyAppOriginAllowed } from "#lib/features/app/app-origin-allowlist.ts";

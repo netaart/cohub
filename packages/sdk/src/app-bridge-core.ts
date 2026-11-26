@@ -9,6 +9,7 @@ import {
 } from "@cohub/protocol";
 import { COHUB_SOURCE_HEADER } from "@cohub/protocol/provenance";
 import { PERMISSIONS, isUserLevelPermission, type CreateSpaceInput, type InvitationDetail, type Permission, type SpaceBootstrapSource, type SpaceRole } from "./types.js";
+import { pendingPurchaseKey, readPendingOrderId } from "./app-checkout.js";
 import type { AppRecord } from "./apis/apps.js";
 import type {
 	AppJoinSpaceResult,
@@ -101,6 +102,7 @@ export type AppPurchaseRequest = {
 	requestId: string;
 	productKey: string;
 	purchaseAttemptId: string;
+	returnUrl?: string;
 };
 
 export type AppCheckoutStarted = AppPurchaseRequest & {
@@ -783,7 +785,7 @@ export function createAppBridgeCore(
 		}
 	}
 
-	const pendingPurchaseStorageKey = `cohub-app-purchase:${app.id}`;
+	const pendingPurchaseStorageKey = pendingPurchaseKey(app.id);
 	const purchaseInFlight = new Map<string, Promise<unknown>>();
 	let activePurchase: { productKey: string; promise: Promise<unknown> } | null = null;
 	/** Space minted during the current create-space consent; retries skip create. */
@@ -1282,34 +1284,6 @@ export function createAppBridgeCore(
 		}
 	}
 
-	function readPendingPurchase(): {
-		orderId: string;
-		productKey: string;
-		at: number;
-	} | null {
-		if (typeof sessionStorage === "undefined") return null;
-		try {
-			const raw = sessionStorage.getItem(pendingPurchaseStorageKey);
-			if (!raw) return null;
-			const parsed = JSON.parse(raw) as {
-				orderId?: unknown;
-				productKey?: unknown;
-				at?: unknown;
-			};
-			return typeof parsed.orderId === "string" &&
-				typeof parsed.productKey === "string" &&
-				typeof parsed.at === "number"
-				? {
-						orderId: parsed.orderId,
-						productKey: parsed.productKey,
-						at: parsed.at,
-					}
-				: null;
-		} catch {
-			return null;
-		}
-	}
-
 	function clearPendingPurchase() {
 		if (typeof sessionStorage === "undefined") return;
 		try {
@@ -1319,10 +1293,7 @@ export function createAppBridgeCore(
 		}
 	}
 
-	async function createPurchase(
-		productKey: string,
-		purchaseAttemptId: string,
-	) {
+	async function createPurchase({ productKey, purchaseAttemptId, returnUrl }: AppPurchaseRequest) {
 		const userToken = await getAccessToken();
 		if (!userToken) {
 			await config.requestSignIn(
@@ -1344,6 +1315,7 @@ export function createAppBridgeCore(
 				body: JSON.stringify({
 					productKey,
 					purchaseAttemptId,
+					returnUrl,
 					...(promotionAttribution ? { promotionAttribution } : {}),
 				}),
 			},
@@ -1372,6 +1344,7 @@ export function createAppBridgeCore(
 			forceRefresh?: boolean;
 			productKey?: string;
 			purchaseAttemptId?: string;
+			returnUrl?: string;
 		};
 		if (!data?.requestId) return;
 		if (data.type === "cohub.app.authorize.v2") {
@@ -1424,10 +1397,8 @@ export function createAppBridgeCore(
 				data.type === "cohub.app.checkout-state" ||
 				data.type === "cohub.work.checkout-state"
 			) {
-				const pending = readPendingPurchase();
 				const checkoutState = getCheckoutState();
-				const orderId =
-					checkoutState.orderId ?? pending?.orderId ?? null;
+				const orderId = checkoutState.orderId ?? readPendingOrderId(app.id);
 				if (checkoutState.status && checkoutState.orderId)
 					clearPendingPurchase();
 				replyForRequest(data.requestId, {
@@ -1460,7 +1431,7 @@ export function createAppBridgeCore(
 					}, true);
 					return;
 				}
-				const purchase = { requestId: data.requestId, productKey, purchaseAttemptId };
+				const purchase = { requestId: data.requestId, productKey, purchaseAttemptId, returnUrl: data.returnUrl };
 				const existing = purchaseInFlight.get(purchaseAttemptId);
 				if (existing) {
 					await replyPurchaseResult(purchase, existing);
@@ -1997,10 +1968,7 @@ export function createAppBridgeCore(
 	}
 
 	async function executePurchase(purchase: AppPurchaseRequest) {
-		const checkout = await createPurchase(
-			purchase.productKey,
-			purchase.purchaseAttemptId,
-		);
+		const checkout = await createPurchase(purchase);
 		if (checkout && typeof checkout === "object") {
 			const next = checkout as {
 				checkoutUrl?: unknown;

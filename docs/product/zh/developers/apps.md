@@ -672,6 +672,9 @@ if (state.orderId) await client.app.commerce.getOrder(state.orderId);
 关键规则：
 
 - `purchase()` 重定向到 checkout；从用户的购买动作调用，绝不在初始化时调用。checkout 返回不是支付凭证 —— 重新查询 `getCheckoutState()` / `getOrder()`。
+- 如需在支付成功、失败或取消后返回购物车，可调用 `purchase({ productKey: "credit_pack", returnUrl: "https://shop.neta.art/cart#/done" })`。
+  `returnUrl` 必须是 HTTPS 绝对地址：可以是本 App 在 Cohub 上的公开页面（路径须完全一致，查询参数和 hash 可自定），也可以是本 App 的托管独立域名或已生效的自定义域名上的任意路径。
+  不传则返回原来的公开页面。回跳会设置 `cohub_checkout` 并保留 hash；跨域返回时，`getCheckoutState()` 的 `orderId` 可能为 `null`。
 - Space 积分计量 Space 内 App 的动作；Cohub Balance 是独立的全局平台托管商品组件（`cohubBalanceUsd`，整数美元，不可变）。
 - 商品价格不可变。变更价格的做法是新建版本化 product key（`image_credit_pack_050`），重绑 benefit，归档旧商品。
 - 商业化与 Action 搭配：Action 由你出钱运行并报告访客权益；`consumeCredits` 回收成本。这是 owner 出钱生成的标准模式 —— 见
