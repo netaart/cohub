@@ -7,6 +7,8 @@ import {
 } from "./script-runtime.js";
 import { scriptModuleUrls, type BoardScriptSources } from "./script-modules.js";
 
+export type BoardScriptFont = { family: string; data: ArrayBuffer };
+
 type Message = {
   token?: number;
   kind?: string;
@@ -16,6 +18,7 @@ type Message = {
   graph?: string;
   key?: string;
   sources?: BoardScriptSources;
+  fonts?: BoardScriptFont[];
   t?: number;
   scale?: number;
   draw?: boolean;
@@ -31,6 +34,7 @@ function scriptAgent(
   applyDelta: typeof applyScriptInputDelta,
   moduleUrls: typeof scriptModuleUrls,
   load: (url: string) => Promise<BoardScriptModule>,
+  logs: boolean,
 ) {
   type Instance = {
     runtime: ReturnType<typeof createScriptRuntime> | null;
@@ -41,7 +45,7 @@ function scriptAgent(
     outputVersion: number;
   };
   const graphs = new Map<string, BoardScriptSources>();
-  const json = new Map<string, { url: string; users: number }>();
+  const shared: Parameters<typeof scriptModuleUrls>[1] = new Map();
   const instances = new Map<number, Instance>();
   const calls = new Map<number, { token: number; resolve(value: unknown): void; reject(error: Error): void }>();
   let callId = 0;
@@ -52,6 +56,29 @@ function scriptAgent(
   for (let scope: object | null = self; scope; scope = Object.getPrototypeOf(scope))
     if (Object.hasOwn(scope, "postMessage")) delete (scope as { postMessage?: unknown }).postMessage;
   const send = (data: unknown, transfer: Transferable[] = []) => post(data, transfer);
+  let last: number | null = null;
+  if (logs) {
+    const printed = new Map<number, number>();
+    const text = (value: unknown) => {
+      if (typeof value === "string") return value;
+      if (value instanceof Error) return value.stack ?? value.message;
+      try {
+        return JSON.stringify(value) ?? String(value);
+      } catch {
+        return String(value);
+      }
+    };
+    const console = self.console as unknown as Record<string, (...values: unknown[]) => void>;
+    for (const level of ["log", "info", "debug", "warn", "error"]) {
+      console[level] = (...values: unknown[]) => {
+        const token = current ?? last;
+        const count = token === null ? 200 : (printed.get(token) ?? 0);
+        if (token === null || count >= 200) return;
+        printed.set(token, count + 1);
+        send({ token, kind: "log", level: level === "warn" || level === "error" ? level : "log", text: values.map(text).join(" ").slice(0, 2000) });
+      };
+    }
+  }
   let announced = false;
   const settle = () => {
     if (!announced) return;
@@ -89,6 +116,7 @@ function scriptAgent(
       instances.set(token, instance);
     }
     current = token;
+    last = token;
     try {
       if (data.input) instance.input = data.input;
       else if (data.delta && instance.input) instance.input = applyDelta(instance.input, data.delta);
@@ -97,7 +125,7 @@ function scriptAgent(
       if (!instance.runtime) {
         const sources = data.graph ? graphs.get(data.graph) : undefined;
         if (!sources) throw new Error("Missing script modules.");
-        instance.urls = moduleUrls(sources, json);
+        instance.urls = moduleUrls(sources, shared);
         const src = input.script.src;
         const url = src ? instance.urls.urls[src] : undefined;
         if (!url) throw new Error("Missing entry module.");
@@ -119,9 +147,11 @@ function scriptAgent(
         });
       }
       const runtime = instance.runtime;
+      const started = performance.now();
       if (data.input || data.delta) runtime.update(input);
       for (const event of data.events ?? []) runtime.event(event, data.t);
       runtime.step(data.t ?? 0);
+      const stepped = performance.now();
       let bitmap: ImageBitmap | undefined;
       if (instance.module?.draw && data.draw !== false && !(data.shaders && instance.module.shader)) {
         const scale = data.scale ?? 1;
@@ -138,13 +168,14 @@ function scriptAgent(
         runtime.draw(context as unknown as CanvasRenderingContext2D);
         bitmap = canvas.transferToImageBitmap();
       }
+      const cost = { step: stepped - started, draw: bitmap ? performance.now() - stepped : 0 };
       const output = runtime.output();
       const changed = output.version !== instance.outputVersion;
       const { shader: _shader, bend: _bend, parameters: _parameters, ...repeat } = output;
       const sent = changed ? (instance.outputVersion < 0 ? output : repeat) : undefined;
       instance.outputVersion = output.version;
       send(
-        { token, kind: "frame", request: data.request, output: sent, bitmap },
+        { token, kind: "frame", request: data.request, output: sent, bitmap, cost },
         bitmap ? [bitmap] : [],
       );
     } catch (error) {
@@ -156,9 +187,11 @@ function scriptAgent(
   }
   const queue: Array<[number, Message]> = [];
   let draining = false;
+  let fonts: Promise<unknown> = Promise.resolve();
   async function drain() {
     if (draining) return;
     draining = true;
+    await fonts;
     while (queue.length) {
       const [token, data] = queue.shift() as [number, Message];
       await process(token, data);
@@ -168,6 +201,15 @@ function scriptAgent(
   self.addEventListener("message", (event: MessageEvent<Message>) => {
     if (!event.isTrusted) return;
     const data = event.data;
+    if (data.kind === "fonts" && data.fonts) {
+      const list = data.fonts;
+      fonts = (async () => {
+        const set = (self as unknown as { fonts?: FontFaceSet }).fonts;
+        if (!set || typeof FontFace !== "function") return;
+        await Promise.all(list.map(async ({ family, data: bytes }) => set.add(await new FontFace(family, bytes, { weight: "100 900" }).load())));
+      })().catch((error: unknown) => console.error("Board fonts:", error));
+      return;
+    }
     if (data.kind === "graph" && data.key && data.sources) {
       graphs.set(data.key, data.sources);
       return;
@@ -184,7 +226,10 @@ function scriptAgent(
       send({ token: pending.token, kind: "busy" });
       if (data.error) pending.reject(new Error(data.error));
       else pending.resolve(data.value);
-      setTimeout(settle);
+      setTimeout(() => {
+        send({ token: pending.token, kind: "answered", call: data.call });
+        settle();
+      });
       return;
     }
     const token = data.token;
@@ -231,6 +276,7 @@ function scriptBroker(workerUrl: string, poolSize: number, timeoutMs: number) {
   const slots: Slot[] = [];
   const owners = new Map<number, Slot>();
   const graphs = new Map<string, unknown>();
+  let fonts: unknown = null;
   const toParent = (data: unknown, transfer: Transferable[] = []) => parent.postMessage(data, "*", transfer);
   function retire(slot: Slot, culprit: number | undefined) {
     slot.worker.terminate();
@@ -244,6 +290,7 @@ function scriptBroker(workerUrl: string, poolSize: number, timeoutMs: number) {
   }
   function spawn(): Slot {
     const slot: Slot = { worker: new Worker(workerUrl), tokens: new Set(), graphs: new Set(), owed: [], seen: performance.now(), busy: null };
+    if (fonts) slot.worker.postMessage({ kind: "fonts", fonts });
     slot.worker.onmessage = (event) => {
       const data = event.data;
       slot.seen = performance.now();
@@ -284,6 +331,11 @@ function scriptBroker(workerUrl: string, poolSize: number, timeoutMs: number) {
     if (event.source !== parent) return;
     const { token, data } = event.data ?? {};
     if (!data) return;
+    if (data.kind === "fonts") {
+      fonts = data.fonts;
+      for (const slot of slots) slot.worker.postMessage(data);
+      return;
+    }
     if (data.kind === "graph") {
       graphs.set(data.key, data.sources);
       return;
@@ -323,10 +375,25 @@ function scriptBroker(workerUrl: string, poolSize: number, timeoutMs: number) {
   toParent({ kind: "ready" });
 }
 
-export function boardScriptFrameSource(options: { timeoutMs?: number; poolSize?: number; network?: boolean } = {}): string {
+function offlineWorker() {
+  const message = "Board exports and simulations have no network.";
+  const scope = self as unknown as Record<string, unknown>;
+  const native = fetch;
+  scope.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input instanceof Request ? input.url : input).startsWith("blob:") ? native(input, init) : Promise.reject(new TypeError(message));
+  for (const name of ["WebSocket", "EventSource", "XMLHttpRequest"])
+    scope[name] = class {
+      constructor() {
+        throw new TypeError(message);
+      }
+    };
+}
+
+export function boardScriptFrameSource(options: { timeoutMs?: number; poolSize?: number; network?: boolean; logs?: boolean } = {}): string {
   const prelude =
     "const __name = (value, name) => Object.defineProperty(value, 'name', { value: name, configurable: true });";
-  const worker = `${prelude} (${scriptAgent.toString()})(${createScriptRuntime.toString()}, ${applyScriptInputDelta.toString()}, ${scriptModuleUrls.toString()}, url => import(url));`;
+  const offline = options.network ? "" : `(${offlineWorker.toString()})();`;
+  const worker = `${prelude} ${offline} (${scriptAgent.toString()})(${createScriptRuntime.toString()}, ${applyScriptInputDelta.toString()}, ${scriptModuleUrls.toString()}, url => import(url), ${Boolean(options.logs)});`;
   const cores = typeof navigator === "undefined" ? 4 : navigator.hardwareConcurrency || 4;
   const poolSize = options.poolSize ?? Math.max(1, Math.min(4, cores - 1));
   return `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src ${options.network ? "https: wss: http: ws: " : ""}blob:; form-action 'none'; base-uri 'none'"><script>

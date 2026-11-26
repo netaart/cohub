@@ -33,16 +33,16 @@ import type { Command } from "commander";
 import {
   BOARD_CREATE_INPUT_MAX_BYTES,
   BOARD_TRANSACTION_INPUT_MAX_BYTES,
-  BOARD_SIMULATION_MODES,
-  BOARD_SIMULATION_VIEWPORT,
   parseBoardJsonObject,
-  parseBoardSize,
   readBoardJsonObject,
   writeBoardOutput,
 } from "../board-command-support.js";
 import { BOARD_EXPORT_IMAGE_MEMORY_MIB, BOARD_EXPORT_RENDERERS, BOARD_GPU_EXPORT_MAX_PIXELS } from "../board-export-resources.js";
-import type { BoardExportRunOptions } from "../board-export.js";
-import type { BoardSimulationRender } from "../board-simulate.js";
+import type { BoardExportFrame, BoardExportRunOptions, BoardExportRunResult } from "../board-export.js";
+import type { BoardMediaFiles } from "../board-media-export.js";
+import type { BoardSimulationRun } from "../board-simulate.js";
+import { BOARD_SIMULATION_MODES, BOARD_SIMULATION_VIEWPORT, parseBoardSize } from "../board-simulation-options.js";
+import type { BoardSimulation, BoardSimulationRender } from "../board-simulation.js";
 import { settleBoardPatch } from "../board-media.js";
 import { formatBoardTime, parseBoardTime, parseBoardTimes } from "../board-time.js";
 import { createClient, createRealtimeClient } from "../client.js";
@@ -283,7 +283,7 @@ function withRenderOptions(command: Command, camera: string): Command {
     .option("--quality <q>", "JPEG/WebP quality from 0 to 1", "0.92")
     .option("--image-memory <mib>", "Decoded image memory budget in MiB", String(BOARD_EXPORT_IMAGE_MEMORY_MIB))
     .option("--no-images", "Draw placeholders instead of downloading images")
-    .option("--renderer <renderer>", "auto draws in Node and uses local Chrome for shaders and 3D; canvas or gpu forces one", "auto")
+    .option("--renderer <renderer>", "auto draws Boards with scripts, shaders or 3D in Chrome and others in Node; canvas or gpu forces one", "auto")
     .option("--force", "Replace existing output files");
 }
 
@@ -343,45 +343,92 @@ function parseRenderSpec(options: ExportOptions, out: string): RenderSpec {
 
 type Rendered = { json: Record<string, unknown>; message: string; warnings: string[] };
 
-async function renderBoard(spaceId: string, target: string, spec: RenderSpec, options: ExportOptions, signal: AbortSignal, extra: Partial<BoardExportRunOptions> = {}): Promise<Rendered | null> {
+type Draw = (
+  format: BoardExportFrame["format"],
+  onFrame: (frame: BoardExportFrame) => Promise<void>,
+  mediaFiles?: BoardMediaFiles,
+) => Promise<Pick<BoardExportRunResult, "media" | "warnings"> | null>;
+
+async function writeRendered(spaceId: string, spec: RenderSpec, options: ExportOptions, signal: AbortSignal, draw: Draw): Promise<Rendered | null> {
   const { out } = spec;
   const quiet = jsonRequested(options);
-  const run = {
-    ...spec.options,
-    spaceId,
-    target,
-    ...(spec.camera ? { camera: spec.size ?? extra.viewport ?? "viewport" as const } : {}),
-    ...(spec.view ? { view: spec.view } : {}),
-    signal,
-    onPlan: ({ width, height, frames }: { width: number; height: number; frames: number }) => {
-      if (!quiet) process.stderr.write(`Rendering ${width}x${height}, ${frames} frame(s)\n`);
-    },
-    onProgress: (completed: number, total: number) => {
-      if (!quiet && (completed === total || completed % 30 === 0)) process.stderr.write(`Rendered ${completed}/${total} frames\n`);
-    },
-    ...extra,
+  let counted = 0;
+  const progress = (total: number) => {
+    counted++;
+    if (!quiet && (counted === total || counted % 30 === 0)) process.stderr.write(`Rendered ${counted}/${total} frames\n`);
   };
-  const { runBoardExport, runBoardVideoExport } = await import("../board-export.js");
+  const total = spec.times?.length ?? 1;
   if (spec.video) {
+    const { encodeBoardVideo } = await import("../board-export.js");
     await mkdir(dirname(out), { recursive: true });
-    const result = await runBoardVideoExport({ ...run, format: spec.video.format, fps: spec.video.fps, output: out, force: options.force });
+    const result = await encodeBoardVideo({ spaceId, format: spec.video.format, fps: spec.video.fps, output: out, force: options.force, signal, start: spec.times?.[0] ?? 0 }, (onFrame, mediaFiles) =>
+      draw("rgba", async (frame) => {
+        await onFrame(frame);
+        progress(total);
+      }, mediaFiles));
     return { json: { file: out, ...result }, message: `${result.width}×${result.height} ${spec.video.format.toUpperCase()} to ${out}`, warnings: result.warnings };
   }
   const written: Array<{ path: string; time: number | null; width: number; height: number; bytes: number }> = [];
-  const result = await runBoardExport({
-    ...run,
-    format: spec.format,
-    onFrame: async (frame, index) => {
-      const path = spec.sequence ? framePath(out, index) : out;
-      await mkdir(dirname(path), { recursive: true });
-      await writeBoardOutput(path, frame.bytes, Boolean(options.force));
-      written.push({ path, time: frame.time, width: frame.width, height: frame.height, bytes: frame.bytes.length });
-    },
+  const result = await draw(spec.format, async (frame) => {
+    const path = spec.sequence ? framePath(out, written.length) : out;
+    await mkdir(dirname(path), { recursive: true });
+    await writeBoardOutput(path, frame.bytes, Boolean(options.force));
+    written.push({ path, time: frame.time, width: frame.width, height: frame.height, bytes: frame.bytes.length });
+    if (spec.sequence) progress(total);
   });
   const first = written[0];
   if (!result || !first) return null;
   const what = spec.sequence ? `${written.length} frames` : spec.format.toUpperCase();
   return { json: { files: written, warnings: result.warnings }, message: `${first.width}×${first.height} ${what} to ${spec.sequence ? dirname(out) || "." : out}`, warnings: result.warnings };
+}
+
+async function renderBoard(spaceId: string, target: string, spec: RenderSpec, options: ExportOptions, signal: AbortSignal, inputs?: string): Promise<Rendered | null> {
+  const quiet = jsonRequested(options);
+  const { checkBoardVideoTimes, runBoardExport } = await import("../board-export.js");
+  if (spec.video && !spec.options.animation) throw new Error("Video export needs --animation.");
+  if (spec.video) checkBoardVideoTimes(spec.times, spec.video.fps);
+  return writeRendered(spaceId, spec, options, signal, (format, onFrame, mediaFiles) => runBoardExport({
+    ...spec.options,
+    spaceId,
+    target,
+    format,
+    ...(spec.camera ? { camera: spec.size ?? "viewport" as const } : {}),
+    ...(spec.view ? { view: spec.view } : {}),
+    ...(mediaFiles ? { mediaFiles } : {}),
+    signal,
+    onPlan: ({ width, height, frames }) => {
+      if (!quiet) process.stderr.write(`Rendering ${width}x${height}, ${frames} frame(s)\n`);
+    },
+    onFrame,
+    ...(inputs === undefined ? {} : { inputs }),
+  }));
+}
+
+async function simulateBoardRun(
+  spaceId: string,
+  target: string,
+  input: { simulation: BoardSimulation; leader: boolean; view?: BoardScriptCamera; timeoutMs: number },
+  render: { spec: RenderSpec; options: ExportOptions } | null,
+  signal: AbortSignal,
+): Promise<{ result: BoardSimulationRun; rendered?: Rendered | null }> {
+  const { runBoardSimulation } = await import("../board-simulate.js");
+  const run = (drawing?: Parameters<typeof runBoardSimulation>[0]["drawing"]) => runBoardSimulation({ spaceId, target, signal, ...input, ...(drawing ? { drawing } : {}) });
+  if (!render) return { result: await run() };
+  const { spec } = render;
+  if (spec.video) (await import("../board-export.js")).checkBoardVideoTimes(spec.times, spec.video.fps);
+  let result: BoardSimulationRun | null = null;
+  const rendered = await writeRendered(spaceId, spec, render.options, signal, async (format, onFrame, mediaFiles) => {
+    result = await run({
+      render: simulationRender(spec),
+      options: spec.options,
+      format,
+      onFrame,
+      ...(mediaFiles ? { mediaFiles } : {}),
+    });
+    return result.drawn ?? null;
+  });
+  if (!result) throw new Error("The simulation did not run.");
+  return { result, rendered };
 }
 
 async function cancellable<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -405,8 +452,9 @@ function registerExportCommand(boards: Command): void {
     .option("--inputs <file>", "A Space file for scripts to run through from time 0: a recording, or simulate steps")
     .option("--async", "Run as a Task in the Space's sandbox and return at once; paths are Space paths"))
     .addHelpText("after", `
-Shaders and 3D draw in a shared headless Chrome that stays up a few minutes between calls;
-Boards without them never start it. Set COHUB_BOARD_GPU_DAEMON=0 to start one per call.
+Scripts, shaders and 3D run in a shared headless Chrome, as on a screen; it stays up a few
+minutes between calls, and Boards without them never start it. Without Chrome, its headless
+shell downloads once (COHUB_CHROME picks another). COHUB_BOARD_BROWSER_DAEMON=0 starts one per call.
 Browser frames are capped at ${BOARD_GPU_EXPORT_MAX_PIXELS / 1e6} megapixels; past it, scale goes down.
 
 Examples:
@@ -437,23 +485,20 @@ without its outline and label.`)
           let rendered: Rendered | null | undefined;
           if (steps) {
             if (options.animation) throw new Error("Simulate steps run on their own clock; drop --animation.");
-            const { parseBoardSimulation, runBoardSimulation } = await import("../board-simulate.js");
-            const simulation = await runBoardSimulation({
-              spaceId,
-              target,
-              signal,
+            const { parseBoardSimulation } = await import("../board-simulation.js");
+            const simulation = await simulateBoardRun(spaceId, target, {
               simulation: parseBoardSimulation(steps),
               leader: true,
               ...(spec.view ? { view: spec.view } : {}),
-              timeoutMs: spec.options.timeoutMs,
-              render: simulationRender(spec, (extra) => renderBoard(spaceId, target, spec, options, signal, extra)),
-            });
+              timeoutMs: spec.options.timeoutMs ?? parseBoardTime("2m", "--timeout"),
+            }, { spec, options }, signal);
             rendered = simulation.rendered;
-            if (rendered) rendered.warnings.push(...Object.entries(simulation.errors).map(([id, message]) => `${id}: ${message.split("\n")[0]}`), ...simulation.warnings);
-            else if (Object.keys(simulation.errors).length) throw new Error(Object.entries(simulation.errors).map(([id, message]) => `${id}: ${message.split("\n")[0]}`).join("\n"));
+            const errors = Object.entries(simulation.result.errors).map(([id, message]) => `${id}: ${message.split("\n")[0]}`);
+            if (rendered) rendered.warnings.push(...errors, ...simulation.result.warnings);
+            else if (errors.length) throw new Error(errors.join("\n"));
           } else {
             if (options.camera && !options.view && (!options.animation || !spec.times)) throw new Error("--camera needs --animation and --at, or --view.");
-            rendered = await renderBoard(spaceId, target, spec, options, signal, inputs === undefined ? {} : { inputs });
+            rendered = await renderBoard(spaceId, target, spec, options, signal, inputs);
           }
           if (!rendered) return error("Nothing to export: the region contains no items.");
           if (jsonRequested(options)) return outJson(rendered.json);
@@ -476,13 +521,12 @@ function simulationSteps(text: string): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) && "steps" in value ? value as Record<string, unknown> : null;
 }
 
-function simulationRender(spec: RenderSpec, render: (extra: Partial<BoardExportRunOptions>) => Promise<Rendered | null>): BoardSimulationRender<Rendered | null> {
+function simulationRender(spec: RenderSpec): BoardSimulationRender {
   return {
     ...(spec.times ? { times: spec.times } : {}),
     camera: spec.camera,
     scale: spec.options.scale,
     ...(spec.size ? { size: spec.size } : {}),
-    export: render,
   };
 }
 
@@ -523,8 +567,8 @@ another viewer's ctx.broadcast() to a script. What the scripts broadcast is repo
 running between them, and the clock runs on to the last). --camera draws the screen
 rather than the whole Board; screen layers are drawn unless --no-screen.
 
-Shaders are compiled with a local Chrome, Chromium or Edge when one is found, before
-the steps run; their errors join the scripts' errors and stop the run.
+Boards with scripts run in a headless Chrome, the engine of the Cohub app; shaders compile
+there before the steps run, and their errors join the scripts' errors and stop the run.
 Each tap and drag reports where it landed (a script's hit region, a selection handle,
 an item, or empty board) and what took it (a script, move, resize, rotate, select box).
 Scripts' console.log, warn and error lines print with their time (all of them in --json
@@ -541,7 +585,7 @@ Examples:
         const input = inline !== undefined
           ? parseBoardJsonObject(inline, "steps")
           : options.input !== undefined ? await readBoardJsonObject(options.input) : { steps: [] };
-        const { parseBoardSimulation, runBoardSimulation } = await import("../board-simulate.js");
+        const { parseBoardSimulation } = await import("../board-simulation.js");
         const simulation = parseBoardSimulation({
           ...input,
           ...(options.mode ? { mode: options.mode } : {}),
@@ -552,18 +596,14 @@ Examples:
         const spec = options.out ? parseRenderSpec(options, options.out) : null;
         const view = options.view ? parseBoardView(options.view) : undefined;
         const spaceId = await resolveSpace(boards);
-        const result = await cancellable((signal) => runBoardSimulation({
-          spaceId,
-          target,
+        const { result: run, rendered } = await cancellable((signal) => simulateBoardRun(spaceId, target, {
           simulation,
-          signal,
           leader: !options.follower,
           ...(view ? { view } : {}),
           timeoutMs: parseBoardTime(options.timeout ?? "2m", "--timeout"),
-          ...(spec ? { render: simulationRender(spec, (extra) => renderBoard(spaceId, target, spec, options, signal, extra)) } : {}),
-        }));
-        const { rendered, ...summary } = result;
-        if (jsonRequested(options)) return outJson({ ...summary, ...rendered?.json, warnings: [...summary.warnings, ...(rendered?.warnings ?? [])] });
+        }, spec ? { spec, options } : null, signal));
+        const { drawn: _drawn, ...result } = run;
+        if (jsonRequested(options)) return outJson({ ...result, ...rendered?.json, warnings: [...result.warnings, ...(rendered?.warnings ?? [])] });
         const changed = Object.keys((result.changes as { items?: object }).items ?? {}).length;
         ok(`Simulated ${formatBoardTime(result.time)}: ${result.commits} commit${result.commits === 1 ? "" : "s"}, ${changed} item${changed === 1 ? "" : "s"} changed (not saved)`);
         for (const press of result.presses) console.log(`  step ${press.step + 1}: ${describePress(press)}`);
@@ -573,8 +613,6 @@ Examples:
         if (result.logs.length > SIMULATE_LOG_LINES) console.log(`  > ${result.logs.length - SIMULATE_LOG_LINES} more lines in --json`);
         for (const [id, message] of Object.entries(result.errors)) console.log(`  ! ${id}: ${message.split("\n")[0]}`);
         for (const warning of result.warnings) console.log(`  ! ${warning}`);
-        if (result.shaders && !result.shaders.compiled)
-          console.log("  Shaders were checked but not compiled; install Chrome, Chromium or Edge, or set COHUB_CHROME, to compile them.");
         if (rendered) {
           console.log(`  Rendered ${rendered.message}`);
           for (const warning of rendered.warnings) console.log(`  ! ${warning}`);
@@ -609,7 +647,8 @@ function registerProfileCommand(boards: Command): void {
     .addHelpText("after", `
 Draws in a headless Chrome; without a GPU it uses software WebGL (reported as
 "software"), so compare the numbers with each other rather than with a real display.
-Scripts receive the profiled view as viewchange, as on a screen of --size.
+Scripts receive the profiled view as viewchange, as on a screen of --size, then run a
+second of frames; each reports what an update and a draw cost in its worker.
 
 Examples:
   cohub boards profile demo.board
@@ -640,17 +679,21 @@ Examples:
           const range = profile.rounds > 1 ? ` (${owner.range[0].toFixed(0)}–${owner.range[1].toFixed(0)})` : "";
           console.log(`  ${owner.id.padEnd(24)} ${ms(owner.ms).padStart(9)}${range.padEnd(12)}${traits.length ? `  ${traits.join(", ")}` : ""}`);
         }
+        for (const script of profile.scripts) {
+          const drawn = script.width ? `, draw ${ms(script.draw.p50)} (p95 ${ms(script.draw.p95)}) at ${script.width}×${script.height}` : "";
+          console.log(`  ${script.id.padEnd(24)} update ${ms(script.step.p50)} (p95 ${ms(script.step.p95)})${drawn}`);
+        }
         for (const hint of profile.hints) console.log(`  ! ${hint}`);
       } catch (cause) {
         handleHttp(cause);
       }
     });
 
-  boards.command("gpu-daemon", { hidden: true })
+  boards.command("browser-daemon", { hidden: true })
     .requiredOption("--browser <path>")
     .action(async (options: { browser: string }) => {
-      const { serveBoardGpu } = await import("../board-gpu/daemon.js");
-      await serveBoardGpu(options.browser);
+      const { serveBoardBrowser } = await import("../board-browser/daemon.js");
+      await serveBoardBrowser(options.browser);
     });
 }
 

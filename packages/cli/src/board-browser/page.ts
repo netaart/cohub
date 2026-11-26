@@ -1,5 +1,6 @@
 import {
   type BoardAssetSource,
+  type BoardDocument,
   type BoardSceneItem,
   boardAnimatesScriptParams,
   boardAssetKey,
@@ -10,6 +11,7 @@ import {
   boardModelFormat,
   boardProjection,
   boardTextureEdge,
+  boardTimedMedia,
   isBoardModelObject,
   isBoardViewLevel,
   normalizeBoardDocument,
@@ -19,8 +21,12 @@ import {
 import { createBoardExportScene, prepareBoardExport, renderBoardExport } from "@neta-art/cohub/board/export";
 import {
   type BoardDepthStage,
+  type BoardScriptCost,
+  type BoardScriptFont,
+  type BoardScriptHost,
   type BrowserBoardScriptExport,
   boardRenderTheme,
+  boardScriptFiles,
   createBoardRenderSampler,
   createBoardShaderLayer,
   createBoardShaderLayers,
@@ -33,7 +39,17 @@ import {
   boardModelSource,
 } from "@neta-art/cohub/board/render";
 import { autoDetectRenderer, ImageSource, Matrix, type Renderer, RenderTexture, Texture, type WebGLRenderer } from "pixi.js";
-import type { BoardGpuFrame, BoardGpuInit, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
+import { type BoardSimulationShader, simulateBoard } from "../board-simulation.js";
+import type {
+  BoardBrowserFrame,
+  BoardBrowserFrameInfo,
+  BoardBrowserInit,
+  BoardBrowserProfile,
+  BoardBrowserProfileInput,
+  BoardBrowserSimulation,
+  BoardBrowserShader,
+  BoardSimulationResult,
+} from "./protocol.js";
 
 let renderer: Renderer | null = null;
 let depth: Promise<BoardDepthStage | undefined> | null = null;
@@ -72,6 +88,14 @@ async function releaseModels() {
   for (const entry of entries) void entry.model.then((model) => model?.destroy());
 }
 
+async function releaseImages() {
+  for (const entry of textures.values()) entry?.texture.destroy(true);
+  textures.clear();
+  background?.destroy(true);
+  background = undefined;
+  await releaseModels();
+}
+
 function usesDepth(prepared: NonNullable<ReturnType<typeof prepareBoardExport>>): boolean {
   return boardDocumentUsesDepth(prepared.document) || (prepared.camera !== undefined && !isBoardViewLevel(prepared.camera.view));
 }
@@ -83,11 +107,26 @@ function depthStage(target: Renderer): Promise<BoardDepthStage | undefined> {
   return depth;
 }
 let session: {
-  init: BoardGpuInit;
+  init: BoardBrowserInit;
   sampler: ReturnType<typeof createBoardRenderSampler>;
   scripts: BrowserBoardScriptExport;
   layers: ReturnType<typeof createBoardShaderLayers>;
 } | null = null;
+const files = boardScriptFiles((path) => fetch(`file?path=${encodeURIComponent(path)}`));
+const scriptCosts = new Map<string, BoardScriptCost[]>();
+const recordCost = (id: string, cost: BoardScriptCost) => {
+  const list = scriptCosts.get(id);
+  if (list) list.push(cost);
+  else scriptCosts.set(id, [cost]);
+};
+
+const PAGE_FONTS = JSON.parse(document.querySelector("meta[name=cohub-fonts]")?.getAttribute("content") ?? "[]") as Array<{ family: string; file: string; script?: string }>;
+let loadingFonts: Promise<readonly BoardScriptFont[]> | null = null;
+const scriptFonts = () => (loadingFonts ??= Promise.all(PAGE_FONTS.flatMap(({ file, script }) => (script ? [{ file, family: script }] : [])).map(async ({ file, family }) => {
+  const response = await fetch(`fonts/${file}`);
+  if (!response.ok) throw new Error(`${family} could not be loaded.`);
+  return { family, data: await response.arrayBuffer() };
+})));
 const textures = new Map<string, { texture: Texture; edge: number } | null>();
 let background: Texture | null | undefined;
 
@@ -133,45 +172,121 @@ async function modelStill(item: BoardSceneItem): Promise<Texture | null> {
   return new Texture({ source: new ImageSource({ resource: image, alphaMode: "premultiply-alpha-on-upload" }) });
 }
 
-async function toBase64(blob: Blob): Promise<string> {
-  const url = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-  return url.slice(url.indexOf(",") + 1);
+async function upload(canvas: HTMLCanvasElement, info: BoardBrowserFrameInfo, format: BoardBrowserFrame["format"], quality?: number): Promise<void> {
+  let body: Blob | ArrayBuffer | null;
+  if (format === "rgba") {
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("The browser could not read the frame.");
+    body = context.getImageData(0, 0, canvas.width, canvas.height).data.buffer as ArrayBuffer;
+  } else body = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, `image/${format}`, quality));
+  if (!body) throw new Error("The browser could not encode the frame.");
+  const json = new TextEncoder().encode(JSON.stringify(info));
+  const length = new Uint8Array(4);
+  new DataView(length.buffer).setUint32(0, json.byteLength, true);
+  const response = await fetch("upload", { method: "POST", body: new Blob([length, json, body]) });
+  if (!response.ok) throw new Error((await response.text()) || "The frame was not received.");
 }
+
+type Draw = BoardBrowserFrame & {
+  document: BoardDocument;
+  sampler?: ReturnType<typeof createBoardRenderSampler>;
+  animation?: string | null;
+  theme: ReturnType<typeof boardRenderTheme>;
+  scripts?: BoardScriptHost;
+  layers: ReturnType<typeof createBoardShaderLayers>;
+};
+
+async function draw(target: Renderer, input: Draw): Promise<BoardBrowserFrameInfo> {
+  const { document, time } = input;
+  const at = time === null || !input.sampler ? undefined : { animation: input.animation ?? undefined, time };
+  const options = {
+    ...(input.sampler ? { sampler: input.sampler } : {}),
+    region: input.region,
+    camera: input.camera,
+    view: input.view,
+    viewport: input.viewport,
+    scale: input.scale,
+    padding: input.padding,
+    maxPixels: input.maxPixels,
+    screen: input.screen,
+    ...(at ? { at } : {}),
+    ...(input.scripts ? { scripts: input.scripts } : {}),
+  };
+  const prepared = prepareBoardExport(document, options);
+  if (!prepared) throw new Error("Nothing to export: the region contains no items.");
+  const visible = [...prepared.plan.items, ...prepared.plan.extras].filter((item) => prepared.scene.opacity(item.id) > 0);
+  const overrides = input.assetKeys ?? {};
+  const loaded = input.withImages ? await loadTextures(visible, prepared.plan.scale, input.imageMemory, overrides) : new Map<string, Texture>();
+  if (input.withImages && input.background === "paper" && document.board.background.image && background === undefined)
+    background = await fetchTexture("background=1").catch(() => null);
+  const lifted = usesDepth(prepared) ? await depthStage(target) : undefined;
+  const drawn = lifted ? await objectModels(prepared.plan.items) : undefined;
+  const shaded = (input.scripts?.shaders?.(prepared.document, time ?? 0) ?? []).length > 0;
+  const result = renderBoardExport(lifted || shaded ? target : await flatRenderer(), document, {
+    ...options,
+    ...input.theme,
+    background: input.background,
+    textures: loaded,
+    assetKey: (item: BoardSceneItem) => overrides[item.id] ?? boardAssetKey(item),
+    backgroundTexture: input.background === "paper" ? (background ?? undefined) : undefined,
+    shaderLayers: input.layers,
+    ...(lifted ? { depth: lifted, models: drawn } : {}),
+  });
+  freeRetired();
+  if (!result) throw new Error("Nothing to export: the region contains no items.");
+  const canvas = result.canvas as unknown as HTMLCanvasElement;
+  const info: BoardBrowserFrameInfo = {
+    time,
+    width: canvas.width,
+    height: canvas.height,
+    scale: result.plan.scale,
+    itemCount: result.plan.items.length,
+    warnings: result.warnings,
+    media: boardTimedMedia(prepared.scene),
+  };
+  await upload(canvas, info, input.format, input.quality);
+  return info;
+}
+
+function compileShaders(target: Renderer, shaders: readonly BoardSimulationShader[]): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const { id, shader, parameters } of shaders) {
+    try {
+      createBoardShaderLayer(target, shader, boardShaderParameters(parameters), id, { wait: true }).destroy();
+    } catch (error) {
+      errors[id] = error instanceof Error ? error.message : String(error);
+    }
+  }
+  return errors;
+}
+
+const percentile = (samples: readonly number[], at: number) => {
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * at))] ?? 0;
+};
 
 async function ensureRenderer(): Promise<Renderer> {
   renderer ??= await autoDetectRenderer({ preference: "webgl", width: 1, height: 1, antialias: true, backgroundAlpha: 0 });
   return renderer;
 }
 
+let flat: Promise<Renderer> | null = null;
+function flatRenderer(): Promise<Renderer> {
+  flat ??= autoDetectRenderer({ preference: "canvas", width: 1, height: 1, antialias: true, backgroundAlpha: 0 });
+  return flat;
+}
+
 const api = {
-  async compile(shaders: BoardGpuShader[]): Promise<Record<string, string>> {
-    const target = await ensureRenderer();
-    const errors: Record<string, string> = {};
-    for (const { id, shader, parameters } of shaders) {
-      try {
-        createBoardShaderLayer(target, shader, boardShaderParameters(parameters), id, { wait: true }).destroy();
-      } catch (error) {
-        errors[id] = error instanceof Error ? error.message : String(error);
-      }
-    }
-    return errors;
+  async compile(shaders: BoardBrowserShader[]): Promise<Record<string, string>> {
+    return compileShaders(await ensureRenderer(), shaders);
   },
   async release(): Promise<void> {
     session?.scripts.dispose();
     session?.layers.destroy();
     session = null;
-    for (const entry of textures.values()) entry?.texture.destroy(true);
-    textures.clear();
-    background?.destroy(true);
-    background = undefined;
-    await releaseModels();
+    await releaseImages();
   },
-  async init(init: BoardGpuInit): Promise<{ renderer: string }> {
+  async init(init: BoardBrowserInit): Promise<{ renderer: string }> {
     const renderer = await ensureRenderer();
     await document.fonts.ready;
     const board = normalizeBoardDocument(init.document);
@@ -192,23 +307,18 @@ const api = {
     session = {
       init: { ...init, document: board },
       sampler,
-      scripts: createBrowserBoardScriptExport(async (path) => {
-        const response = await fetch(`module?path=${encodeURIComponent(path)}`);
-        if (!response.ok) throw new Error(`${path} is not available.`);
-        return response.text();
-      }, {
-        ...(init.snapshots ? { snapshots: init.snapshots } : {}),
+      scripts: createBrowserBoardScriptExport(files, {
+        fonts: scriptFonts,
+        onCost: recordCost,
         ...(init.inputs ? { inputs: parseBoardScriptInputs(init.inputs) } : {}),
-        ...(init.env ? { env: init.env } : {}),
-        ...(init.resume ? { resume: true } : {}),
         ...(init.animation && boardAnimatesScriptParams(board) ? { documentAt: (time: number) => sampler.at(time).document } : {}),
       }),
       layers,
     };
     return { renderer: renderer.name };
   },
-  async profile(input: BoardGpuProfileInput): Promise<BoardGpuProfile> {
-    if (!renderer || !session) throw new Error("The GPU exporter is not ready.");
+  async profile(input: BoardBrowserProfileInput): Promise<BoardBrowserProfile> {
+    if (!renderer || !session) throw new Error("The browser is not ready.");
     const started = performance.now();
     const target = renderer;
     const { document, animation, theme: themeId } = session.init;
@@ -219,7 +329,9 @@ const api = {
     const options = { sampler, region: input.region, camera: input.camera, scale: input.scale, padding: 0, ...(at ? { at } : {}) };
     const planned = prepareBoardExport(document, options);
     if (!planned) throw new Error("Nothing to profile: the region contains no items.");
-    const scripts = await session.scripts.at(at ? sampler.at(time).document : document, time, boardExportView(planned.plan, planned.camera?.view));
+    const view = boardExportView(planned.plan, planned.camera?.view);
+    scriptCosts.clear();
+    const scripts = await session.scripts.at(at ? sampler.at(time).document : document, time, view);
     const gl = (target as WebGLRenderer).gl;
     const info = gl.getExtension("WEBGL_debug_renderer_info");
     const rendererName = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
@@ -277,7 +389,7 @@ const api = {
       const renders = (frames: number) => frames * input.rounds * (1 + owners.length);
       let frames = input.frames;
       let frameMs = Math.max(render(), 0.1);
-      let reduced: BoardGpuProfile["reduced"] = null;
+      let reduced: BoardBrowserProfile["reduced"] = null;
       let factor = 1;
       const budget = Math.max(input.budgetMs / 4, input.budgetMs - (performance.now() - started));
       for (let attempt = 0; attempt < 3 && frameMs * renders(frames) > budget; attempt++) {
@@ -335,6 +447,21 @@ const api = {
           state: shader?.state ? { width: shader.state.width, height: shader.state.height } : null,
         };
       });
+      for (let frame = 1; frame <= 60 && performance.now() - started < input.budgetMs; frame++) {
+        const next = time + (frame * 1000) / 60;
+        await session.scripts.at(at ? sampler.at(next).document : document, next, view);
+      }
+      const scriptResults = [...scriptCosts].map(([id, list]) => {
+        const drawn = list.filter((cost) => cost.width > 0);
+        const spread = (values: number[]) => ({ p50: percentile(values, 0.5), p95: percentile(values, 0.95) });
+        return {
+          id,
+          step: spread(list.map((cost) => cost.step)),
+          draw: spread(drawn.map((cost) => cost.draw)),
+          width: Math.max(0, ...drawn.map((cost) => cost.width)),
+          height: Math.max(0, ...drawn.map((cost) => cost.height)),
+        };
+      });
       return {
         renderer: rendererName,
         gpu: /swiftshader|llvmpipe|softpipe|software|basic render/i.test(rendererName) ? "software" : "hardware",
@@ -345,6 +472,7 @@ const api = {
         elapsedMs: performance.now() - started,
         frame: { p50, p95: all[Math.min(all.length - 1, Math.floor(all.length * 0.95))] ?? p50 },
         owners: results.sort((a, b) => b.ms - a.ms),
+        scripts: scriptResults.sort((a, b) => b.draw.p50 + b.step.p50 - a.draw.p50 - a.step.p50),
         effects: visible.filter((item) => hasBoardEffects(item.style)).length,
         items: visible.length,
       };
@@ -354,60 +482,62 @@ const api = {
       layers.destroy();
     }
   },
-  async render(frame: BoardGpuFrame): Promise<BoardGpuResult> {
-    if (!renderer || !session) throw new Error("The GPU exporter is not ready.");
-    const { document, animation, theme: themeId } = session.init;
-    const theme = boardRenderTheme(themeId);
-    const at = frame.time === null ? undefined : { animation: animation ?? undefined, time: frame.time };
+  async render(frame: BoardBrowserFrame): Promise<BoardBrowserFrameInfo> {
+    if (!renderer || !session) throw new Error("The browser is not ready.");
+    const { document, animation, theme } = session.init;
     const time = frame.time ?? 0;
-    const sample = at ? session.sampler.at(time).document : document;
-    const framing = {
-      sampler: session.sampler,
-      region: frame.region,
-      camera: frame.camera,
-      view: frame.view,
-      viewport: frame.viewport,
-      scale: frame.scale,
-      padding: frame.padding,
-      maxPixels: frame.maxPixels,
-      ...(at ? { at } : {}),
-    };
-    const planned = prepareBoardExport(document, framing);
+    const sampler = session.sampler;
+    const planned = prepareBoardExport(document, { ...frame, sampler, ...(frame.time === null ? {} : { at: { animation: animation ?? undefined, time } }) });
+    const sample = frame.time === null ? document : sampler.at(time).document;
     const scripts = await session.scripts.at(sample, time, planned ? boardExportView(planned.plan, planned.camera?.view) : undefined);
-    const options = { ...framing, screen: frame.screen, scripts };
-    const prepared = prepareBoardExport(document, options);
-    if (!prepared) throw new Error("Nothing to export: the region contains no items.");
-    const visible = [...prepared.plan.items, ...prepared.plan.extras].filter((item) => prepared.scene.opacity(item.id) > 0);
-    const overrides = frame.assetKeys ?? {};
-    const loaded = frame.withImages ? await loadTextures(visible, prepared.plan.scale, frame.imageMemory, overrides) : new Map<string, Texture>();
-    if (frame.withImages && frame.background === "paper" && document.board.background.image && background === undefined)
-      background = await fetchTexture("background=1").catch(() => null);
-    const lifted = usesDepth(prepared) ? await depthStage(renderer) : undefined;
-    const drawn = lifted ? await objectModels(prepared.plan.items) : undefined;
-    const result = renderBoardExport(renderer, document, {
-      ...options,
-      ...theme,
-      background: frame.background,
-      textures: loaded,
-      assetKey: (item: BoardSceneItem) => overrides[item.id] ?? boardAssetKey(item),
-      backgroundTexture: frame.background === "paper" ? (background ?? undefined) : undefined,
-      shaderLayers: session.layers,
-      ...(lifted ? { depth: lifted, models: drawn } : {}),
-    });
-    freeRetired();
-    if (!result) throw new Error("Nothing to export: the region contains no items.");
-    const canvas = result.canvas as unknown as HTMLCanvasElement;
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, `image/${frame.format}`, frame.quality));
-    if (!blob) throw new Error("The browser could not encode the frame.");
-    return {
-      data: await toBase64(blob),
-      width: canvas.width,
-      height: canvas.height,
-      scale: result.plan.scale,
-      itemCount: result.plan.items.length,
-      warnings: result.warnings,
-    };
+    return draw(renderer, { ...frame, document, sampler, animation, theme: boardRenderTheme(theme), scripts, layers: session.layers });
+  },
+  async simulate(input: BoardBrowserSimulation): Promise<BoardSimulationResult> {
+    const target = await ensureRenderer();
+    await document.fonts.ready;
+    const element = document.createElement("div");
+    element.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;visibility:hidden;pointer-events:none";
+    document.body.appendChild(element);
+    const layers = createBoardShaderLayers({ wait: true });
+    const board = normalizeBoardDocument(input.document);
+    const theme = boardRenderTheme(input.theme);
+    const { render, frame } = input;
+    try {
+      return await simulateBoard({
+        document: board,
+        spec: input,
+        recordings: input.recordings,
+        timeoutMs: input.timeoutMs,
+        scripts: { files, element, fonts: scriptFonts },
+        compile: async (shaders) => compileShaders(target, shaders),
+        ...(render && frame ? {
+          capture: async (shot) => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            await Promise.race([
+              draw(target, {
+                ...frame,
+                time: shot.time,
+                document: shot.document,
+                theme,
+                layers,
+                viewport: input.viewport,
+                ...(render.camera ? { camera: render.size ?? input.viewport } : {}),
+                ...(shot.view ? { view: shot.view } : {}),
+                ...(shot.scripts ? { scripts: shot.scripts } : {}),
+              }),
+              new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => reject(new Error(`The frame at ${shot.time} ms did not finish in ${frame.timeoutMs / 1000} s.`)), frame.timeoutMs);
+              }),
+            ]).finally(() => clearTimeout(timer));
+          },
+        } : {}),
+      });
+    } finally {
+      layers.destroy();
+      element.remove();
+      await releaseImages();
+    }
   },
 };
 
-(globalThis as { cohubBoardGpu?: typeof api }).cohubBoardGpu = api;
+(globalThis as { cohubBoard?: typeof api }).cohubBoard = api;

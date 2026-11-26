@@ -21,12 +21,14 @@ import {
 import {
 	type BoardRenderPalette,
 	type BoardRenderStyle,
+	type BoardScriptFiles,
 	createBoardRenderSampler,
 	type LoadedModel,
 	loadBoardDepthEngine,
 	prepareBrowserBoardScripts,
 } from "@neta-art/cohub/board/render";
 import { type Renderer, RendererType, Texture } from "pixi.js";
+import { boardScriptFonts } from "#lib/board/board-script-fonts.ts";
 
 export type BoardImageFormat = "png" | "jpeg" | "webp";
 
@@ -139,7 +141,7 @@ const EXTENSION: Record<BoardImageFormat, string> = {
 
 export type BoardStageExportBridge = {
 	snapshotScripts?: () => Promise<Record<string, BoardScriptSnapshot>>;
-	readModule?: (path: string) => Promise<string>;
+	scriptFiles?: BoardScriptFiles;
 	resolveMedia: (src: string) => Promise<string | null>;
 	renderer: () => Renderer | null;
 	viewTextures: () => ReadonlyMap<string, Texture>;
@@ -205,22 +207,25 @@ export async function exportBoardImage(
 			)
 		: undefined;
 	const hasScripts = hasBoardScripts(document, "export");
-	if (hasScripts && !bridge.readModule)
+	if (hasScripts && !bridge.scriptFiles)
 		throw new Error("Script export needs a module reader.");
 	const sample =
 		sampler && exportOptions.at
 			? sampler.at(exportOptions.at.time).document
 			: document;
 	const scripts =
-		hasScripts && bridge.readModule
+		hasScripts && bridge.scriptFiles
 			? await prepareBrowserBoardScripts(
 					sample,
 					exportOptions.at?.time ?? 0,
-					bridge.readModule,
+					bridge.scriptFiles,
 					exportOptions.at ? undefined : await bridge.snapshotScripts?.(),
-					sampler && boardAnimatesScriptParams(document)
-						? { documentAt: (time) => sampler.at(time).document }
-						: {},
+					{
+						fonts: boardScriptFonts,
+						...(sampler && boardAnimatesScriptParams(document)
+							? { documentAt: (time: number) => sampler.at(time).document }
+							: {}),
+					},
 				)
 			: null;
 	try {

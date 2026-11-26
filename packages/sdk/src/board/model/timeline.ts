@@ -47,7 +47,9 @@ function targetType(document: BoardDocument, target: string): string | null {
 
 export function boardPlayProperty(document: BoardDocument, target: string): string | null {
 	const type = targetType(document, target);
-	return type === "video" || type === "audio" ? "props.time" : type === "animation" ? "time" : null;
+	if (type === "video" || type === "audio") return "props.time";
+	if (type === "animation" || type === "script") return "time";
+	return document.items[target]?.script ? "script.time" : null;
 }
 
 export function boardPlayLength(document: BoardDocument, target: string): number | null {

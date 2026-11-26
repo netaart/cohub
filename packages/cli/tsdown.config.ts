@@ -41,7 +41,7 @@ export default defineConfig([{
   outputOptions: { codeSplitting: false },
 }, {
   ...shared,
-  entry: { "board-gpu/page": "src/board-gpu/page.ts" },
+  entry: { "board-browser/page": "src/board-browser/page.ts" },
   platform: "browser",
   target: "chrome120",
   minify: true,

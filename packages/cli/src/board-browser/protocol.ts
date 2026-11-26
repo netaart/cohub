@@ -1,19 +1,20 @@
 import type { BoardDocument } from "@neta-art/cohub";
-import type { BoardScriptCamera, BoardScriptEnv, BoardScriptParameter, BoardScriptSnapshot, BoardShader } from "@neta-art/cohub/board";
+import type { BoardMediaState, BoardScriptCamera, BoardScriptParameter, BoardShader } from "@neta-art/cohub/board";
 import type { BoardExportRegion, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardExportWarning } from "@neta-art/cohub/board/export";
+import type { BoardSimulationResult, BoardSimulationSpec } from "../board-simulation.js";
 
-export type BoardGpuInit = {
+export type BoardBrowserInit = {
   document: BoardDocument;
   animation: string | null;
   theme: BoardThemeId;
-  snapshots?: Record<string, BoardScriptSnapshot>;
   inputs?: string;
-  env?: BoardScriptEnv;
-  resume?: boolean;
   keep?: boolean;
 };
-export type BoardGpuFrame = {
+
+export type BoardBrowserFormat = "png" | "jpeg" | "webp" | "rgba";
+
+export type BoardBrowserFrame = {
   time: number | null;
   region: BoardExportRegion;
   camera?: { width: number; height: number };
@@ -24,27 +25,40 @@ export type BoardGpuFrame = {
   scale: number;
   padding?: number;
   background: "paper" | "transparent";
-  format: "png" | "jpeg" | "webp";
+  format: BoardBrowserFormat;
   quality?: number;
   withImages: boolean;
   imageMemory: number;
   assetKeys?: Record<string, string>;
 };
-export type BoardGpuResult = {
-  data: string;
+
+export type BoardBrowserFrameInfo = {
+  time: number | null;
   width: number;
   height: number;
   scale: number;
   itemCount: number;
   warnings: BoardExportWarning[];
+  media: BoardMediaState[];
 };
-export type BoardGpuShader = { id: string; shader: BoardShader; parameters?: Record<string, BoardScriptParameter> };
-export type BoardGpuProfileInput = Pick<BoardGpuFrame, "time" | "region" | "camera" | "scale" | "withImages" | "imageMemory"> & {
+
+export type BoardBrowserShader = { id: string; shader: BoardShader; parameters?: Record<string, BoardScriptParameter> };
+
+export type BoardBrowserProfileInput = Pick<BoardBrowserFrame, "time" | "region" | "camera" | "scale" | "withImages" | "imageMemory"> & {
   frames: number;
   rounds: number;
   budgetMs: number;
 };
-export type BoardGpuProfile = {
+
+export type BoardBrowserScriptCost = {
+  id: string;
+  step: { p50: number; p95: number };
+  draw: { p50: number; p95: number };
+  width: number;
+  height: number;
+};
+
+export type BoardBrowserProfile = {
   renderer: string;
   gpu: "software" | "hardware";
   width: number;
@@ -63,6 +77,17 @@ export type BoardGpuProfile = {
     boxes: number;
     state: { width: number; height: number } | null;
   }>;
+  scripts: BoardBrowserScriptCost[];
   effects: number;
   items: number;
 };
+
+export type BoardBrowserSimulation = BoardSimulationSpec & {
+  document: BoardDocument;
+  theme: BoardThemeId;
+  timeoutMs: number;
+  recordings: Record<string, string>;
+  frame?: Omit<BoardBrowserFrame, "time" | "camera" | "view" | "viewport"> & { timeoutMs: number };
+};
+
+export type { BoardSimulationResult };

@@ -9,6 +9,7 @@ import { boardScriptTarget } from "../model/script-hit.js";
 import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../model/script-observers.js";
 import { boardScriptAttachments, isBoardRootScript } from "../model/script-index.js";
 import { BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit, boardScriptModelsLoaded } from "../model/script-events.js";
+import { buildBoardScene } from "../model/scene.js";
 import { composeBoardScriptCamera, composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
 import {
   BOARD_SCRIPT_EXPORT_ENV,
@@ -32,6 +33,7 @@ import {
   type BoardScriptSense,
   type BoardScriptSnapshot,
 } from "../model/script.js";
+import type { BoardScriptScreen } from "../render/renderers/board-renderer-registry.js";
 import type { BoardScriptHostCallbacks, BoardScriptRuntimeHost } from "../render/script-host.js";
 import { type BoardScriptTimer, createBoardScriptCommits } from "./script-commits.js";
 import {
@@ -566,6 +568,16 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       return current && !paused ? boardShaderOwners(scriptDocument(), outputs, (id) => current.clock(id)) : [];
     },
     error: (id: string) => host?.error(id) ?? null,
+    present(document: BoardDocument, screen?: BoardScriptScreen): BoardDocument {
+      if (!outputs.size) return document;
+      const items = { ...document.items };
+      for (const [id, item] of composeBoardScriptItems(document, buildBoardScene(document), outputs, new Map(), screen)) items[id] = item;
+      return { ...document, items };
+    },
+    bend: (id: string) => {
+      const output = outputs.get(id);
+      return output ? (output.bend ?? null) : undefined;
+    },
     emitFailures: emitFailures as ReadonlyMap<string, string>,
     async snapshot(): Promise<Record<string, BoardScriptSnapshot>> {
       const result: Record<string, BoardScriptSnapshot> = {};

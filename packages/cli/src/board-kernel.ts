@@ -1,15 +1,12 @@
 
 export {
   hasBoardScripts,
-  boardAnimatesScriptParams,
   boardAssetKey,
   boardAssetKeySource,
   boardAutoplayLoops,
   boardMediaRate,
   boardMediaSpans,
   boardTimedMedia,
-  boardScriptAttachments,
-  boardShaderParameters,
   boardFrameRegions,
   boardRegionStep,
   createBoardAnimationSampler,
@@ -27,6 +24,5 @@ export {
   selectBoardExportAssets,
 } from "@neta-art/cohub/board";
 export { describeBoardExportWarning, prepareBoardExport } from "@neta-art/cohub/board/export";
-export { boardRenderTheme, checkBoardShader, createBoardRenderSampler, inspectBoardScene, inspectBoardItems, measureBoardText } from "@neta-art/cohub/board/render";
-export { createNodeBoardRenderer, createNodeBoardScriptHost, describeBoardScriptLanes, exportBoardImageBytes } from "@neta-art/cohub/board/export/node";
-export { createBoardScriptHarness } from "@neta-art/cohub/board/testing";
+export { boardRenderTheme, createBoardRenderSampler, inspectBoardScene, inspectBoardItems, measureBoardText } from "@neta-art/cohub/board/render";
+export { createNodeBoardRenderer, exportBoardImageBytes } from "@neta-art/cohub/board/export/node";

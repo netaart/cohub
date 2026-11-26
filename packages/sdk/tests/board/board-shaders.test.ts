@@ -1,63 +1,44 @@
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
-import { createNodeBoardRenderer, type BoardNodeRenderer, exportBoardImageBytes } from "../../src/board/export/node/index.js";
+import { test } from "node:test";
+import { createNodeBoardRenderer, exportBoardImageBytes } from "../../src/board/export/node/index.js";
 import { boardScriptScope, validateBoardScriptCommit } from "../../src/board/model/script-scene.js";
 import { applyBoardPatchToDocument } from "@cohub/protocol";
 import { boardDocumentAt, withBoardScripts } from "../../src/board/model/animation.js";
 import { removeBoardScriptPatch } from "../../src/board/model/script-index.js";
 import { boardShaderSignature } from "../../src/board/model/shader.js";
 import { buildBoardShaderProgram, describeBoardShaderError, prepareBoardShaderSource } from "../../src/board/render/shader/program.js";
-import { createBoardScriptHarness } from "../../src/board/testing/index.js";
+import type { BoardScriptOutput } from "../../src/board/model/script.js";
+import type { BoardScriptHost } from "../../src/board/render/renderers/board-renderer-registry.js";
+import { boardShaderOwners } from "../../src/board/render/shader/layers.js";
 import { boardDocument } from "./fixtures.js";
 
-let renderer: BoardNodeRenderer;
-before(async () => {
-  renderer = await createNodeBoardRenderer();
-});
-after(() => renderer.destroy());
+const SHADER = { passes: [{ glsl: "vec4 effect(Fragment f) { return vec4(1.0); }" }] };
 
-const BOARD = `
-export default function (ctx) {
-  ctx.state.seen = Object.keys(ctx.items).sort();
-  ctx.on("change", ({ data }) => { ctx.state.changes = [...(ctx.state.changes ?? []), data]; });
-  ctx.onFrame(() => ctx.present("card", { opacity: 0.5 }));
-  ctx.scene({ drop: { type: "shape", position: { x: 10, y: 20 }, size: { width: 4, height: 4 } } });
-}`;
-
-function harness(modules: Record<string, string>, document = boardDocument({
-  board: { scripts: { weather: { src: "board.js" } } },
-  items: {
-    card: { type: "shape", position: { x: 100, y: 100 }, size: { width: 200, height: 100 } },
-    group: { type: "frame", position: { x: 400, y: 0 }, size: { width: 300, height: 300 } },
-    child: { type: "shape", parent: "group", position: { x: 20, y: 20 }, size: { width: 40, height: 40 } },
-  },
-})) {
-  return createBoardScriptHarness({
-    renderer,
-    document,
-    readModule: async (path) => {
-      const code = modules[path];
-      if (code === undefined) throw new Error(`${path} is not available.`);
-      return code;
-    },
-  });
+function ran(outputs: Record<string, Partial<BoardScriptOutput>>): BoardScriptHost {
+  const full = new Map(Object.entries(outputs).map(([id, output]) => [id, {
+    patches: {}, world: {}, screen: {}, hits: {}, listens: [], animated: false, version: 1, ...output,
+  } as BoardScriptOutput]));
+  return {
+    frame: () => null,
+    error: () => null,
+    release() {},
+    shaders: (document) => boardShaderOwners(document, full, () => 0),
+  };
 }
 
-test("a Board script reaches every item, presents any of them and may create top-level items", async () => {
-  const board = await harness({ "board.js": BOARD });
-  try {
-    await board.advance(50);
-    assert.equal(board.error("weather"), null);
-    assert.equal(board.editor.scene.get("card")?.opacity, 0.5);
-    assert.ok(board.editor.scene.items.some((item) => item.id.endsWith("drop")));
-    assert.deepEqual([...boardScriptScope(board.document, "weather")].sort(), ["card", "child", "group"]);
-    board.editor.commitPatch({ items: { note: { type: "text", props: { text: "Hi" } } } });
-    await board.advance(50);
-    assert.equal(board.error("weather"), null);
-    const created = validateBoardScriptCommit(board.document, "weather", { items: { puddle: { type: "shape" } } });
-    assert.ok(created.items.puddle);
-    assert.throws(() => validateBoardScriptCommit(board.document, "weather", { items: { card: { type: "text" } } }), /types or parent/);
-  } finally { board.destroy(); }
+test("a Board script reaches every item and may create top-level items", () => {
+  const document = boardDocument({
+    board: { scripts: { weather: { src: "board.js" } } },
+    items: {
+      card: { type: "shape", position: { x: 100, y: 100 }, size: { width: 200, height: 100 } },
+      group: { type: "frame", position: { x: 400, y: 0 }, size: { width: 300, height: 300 } },
+      child: { type: "shape", parent: "group", position: { x: 20, y: 20 }, size: { width: 40, height: 40 } },
+    },
+  });
+  assert.deepEqual([...boardScriptScope(document, "weather")].sort(), ["card", "child", "group"]);
+  const created = validateBoardScriptCommit(document, "weather", { items: { puddle: { type: "shape" } } });
+  assert.ok(created.items.puddle);
+  assert.throws(() => validateBoardScriptCommit(document, "weather", { items: { card: { type: "text" } } }), /types or parent/);
 });
 
 test("author GLSL gets bounded loops, Cohub includes and errors on its own lines", () => {
@@ -85,21 +66,16 @@ test("author GLSL gets bounded loops, Cohub includes and errors on its own lines
 });
 
 test("Canvas exports name the shaders they could not run", async () => {
-  const modules = {
-    "board.js": `export const shader = { passes: [{ glsl: "vec4 effect(Fragment f) { return vec4(1.0); }" }] };`,
-    "card.js": `export const shader = { passes: [{ glsl: "vec4 effect(Fragment f) { return vec4(1.0); }" }] };
-export function draw(ctx, { width, height }) { ctx.fillRect(0, 0, width, height); }`,
-  };
-  const board = await harness(modules, boardDocument({
-    board: { scripts: { weather: { src: "board.js" } } },
-    items: { card: { type: "custom", size: { width: 100, height: 60 }, script: { src: "card.js" } } },
-  }));
+  const renderer = await createNodeBoardRenderer();
   try {
-    await board.advance(50);
-    const { document, scripts } = await board.shown();
+    const document = boardDocument({
+      board: { scripts: { weather: { src: "board.js" } } },
+      items: { card: { type: "custom", size: { width: 100, height: 60 }, script: { src: "card.js" } } },
+    });
+    const scripts = ran({ weather: { shader: SHADER }, card: { shader: SHADER, draws: true } });
     const result = exportBoardImageBytes(renderer, document, { scripts });
     assert.deepEqual(result?.warnings.find((warning) => warning.kind === "shaders-unsupported"), { kind: "shaders-unsupported", drawn: ["card"], omitted: ["weather"] });
-  } finally { board.destroy(); }
+  } finally { renderer.destroy(); }
 });
 
 test("tracks animate a Board script's params, and go with the script", () => {

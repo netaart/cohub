@@ -23,6 +23,7 @@ const LABELS: Record<string, (locale: Locale) => string> = {
 	bearing: (locale) => m.board_camera_bearing({}, locale),
 	time: (locale) => m.board_prop_time({}, locale),
 	"props.time": (locale) => m.board_prop_time({}, locale),
+	"script.time": (locale) => m.board_prop_time({}, locale),
 	"props.volume": (locale) => m.board_prop_volume({}, locale),
 	"depth.lift": (locale) => m.board_prop_depth_lift({}, locale),
 	"depth.tilt": (locale) => m.board_prop_depth_tilt({}, locale),

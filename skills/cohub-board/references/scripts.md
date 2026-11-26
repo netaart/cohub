@@ -23,12 +23,22 @@ cohub boards examples custom | cohub boards apply <board> -i -
 - `parameters` declares params that people can tune in the app. Animate them with tracks on
   `script.params.<name>` for an item's script, or `params.<name>` targeting a Board
   script's id.
+- `script.time` drives `frame.t` from a timeline, for a film or anything that is a
+  function of time; `boards place --targets <item>` adds the track, and scrubbing or
+  seeking draws that moment at once.
 - Output is local: `present()` and `scene()` show temporary changes that are never saved,
   even when the user drags a presented card. Only `commit()` saves.
 - Input reaches a script only through its declared `hitRegions`. `change` and `gesture`
   events observe edits and pen strokes without taking input.
 - Prefer native text items for labels people read or edit; Canvas text can use `Geist`
-  or `Geist Mono`.
+  or `Geist Mono`. For any other font, import it and add it:
+  `import hand from "./hand.woff2" with { type: "bytes" }` then
+  `self.fonts.add(await new FontFace("Hand", hand).load())`. Images and `.bin` data
+  import the same way (32 MB in all). Subset fonts to the characters drawn: every viewer
+  downloads them.
+- Scripts run in a browser worker everywhere, CLI exports and simulations included, with
+  `OffscreenCanvas`, `Path2D`, `DOMMatrix`, `createImageBitmap`, `URL`, `TextDecoder` and
+  `atob`. Code bundled for the browser runs as is.
 - Exports replay from `onFrame`, `ctx.random()`, `ctx.state` and recorded input; timers,
   `Date.now()` and the network do not replay.
 

@@ -10,6 +10,7 @@ import {
 	type BoardSpan,
 	type BoardValueKind,
 	boardClipSpan,
+	boardPlayProperty,
 	getMediaResourceTitle,
 	listBoardProperties,
 	resolveBoardProperty,
@@ -59,6 +60,7 @@ const ORDER = [
 	"shake",
 	"time",
 	"props.time",
+	"script.time",
 	"props.volume",
 ];
 
@@ -175,9 +177,7 @@ export function boardTrackGroups(input: {
 		if (track.composite === "replace" && entry.kind !== "camera") {
 			const clip = clips.get(track.target) ?? {};
 			if (track.property === CLIP_PROPERTY) clip.visible ??= track;
-			else if (
-				track.property === (entry.kind === "animation" ? "time" : "props.time")
-			)
+			else if (track.property === boardPlayProperty(document, track.target))
 				clip.play ??= track;
 			clips.set(track.target, clip);
 		}
@@ -209,7 +209,7 @@ export function boardTrackGroups(input: {
 
 	for (const entry of groups.values()) {
 		const clip = clips.get(entry.target);
-		if (clip && (entry.kind === "item" || entry.kind === "animation"))
+		if (clip && entry.kind !== "camera")
 			entry.span = boardClipSpan(clip, animation.duration);
 		entry.rows.sort(
 			(a, b) =>

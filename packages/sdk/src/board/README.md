@@ -10,7 +10,7 @@ Each directory is one layer and one subpath. A layer imports only the layers
 below it; `tests/board/layers.test.ts` fails on anything else.
 
 ```
-testing  ──► stage, export/node, editor     (headless scripts on Node)
+testing  ──► stage, render, editor         (virtual-clock harness; scripts need a browser)
 client   ──► replica, model                 (space.board(id), part of the root entry)
 stage    ──► presence, editor, player, render, model  (pixi.js, DOM)
 presence ──► editor, model                  (others on the Board)
@@ -403,8 +403,9 @@ an editing tool is chosen. Camera exports merge the same two sources in
 The public authoring contract is in [`docs/board-scripts.md`](../../../../docs/board-scripts.md).
 `model/script.ts` defines the module context; `model/script-scene.ts` validates scope
 and composes local effects. `render/script-runtime.ts` is a self-contained kernel,
-serialized into browser workers and Node VM workers so execution semantics do not
-drift. Keep it free of imported runtime values and bundler-only helpers.
+serialized into browser workers. Scripts run nowhere else: the CLI runs them in a
+headless Chrome, so screens, exports, simulations and profiles share one engine. Keep
+the kernel free of imported runtime values and bundler-only helpers.
 
 A script belongs to an item or, under `board.scripts`, to the Board
 (`model/script-index.ts` lists both as attachments; `model/script-scope.ts` resolves
@@ -412,8 +413,8 @@ what each reaches). Hosts keep each worker's copy of its scope current by identi
 (`diffBoardScriptItems`), so an edit sends only what it changed.
 
 `render/script-modules.ts` resolves the ESM graph before code enters an isolated
-realm. Browser hosting lives in `render/script-host.ts`; Node hosting (export
-samples and the interactive runtime) in `export/node/scripts.ts`. Everything
+realm, with the assets modules import as bytes. Hosting lives in `render/script-host.ts`,
+which also hands workers the fonts every script may name (`fonts`). Everything
 between the editor and a host that needs no DOM lives in
 `stage/script-controller.ts`: host lifecycle, observed events (`change`, `gesture`,
 selection, view, transforms), input routing, commit routing
@@ -448,10 +449,9 @@ The module parser loads only when a script is actually read. Removing the last
 enabled script destroys its host and clears local output without interrupting an
 editor-owned pointer gesture.
 
-Node export uses at most four persistent workers, with a separate module graph and
-VM context per instance. Sequential samples advance the same state, while backwards
-seeks recreate the affected instance. Clearing output textures does not reset the
-simulation or reload modules.
+Exports reuse instances across sequential samples, while backwards seeks recreate
+them. Hosts that wait for scripts to settle (exports, the harness) count an answered
+capability call as work until the worker reports that what it set off has run.
 
 Temporary items are absent from editor selection, clipboard subtrees and writes.
 Explicit commits reuse the normal transaction and undo path. Future host capabilities
@@ -481,14 +481,17 @@ rebuilt only when the scene or the region changes. A Board script's field covers
 view with a margin, so panning and small zooms keep it.
 
 A Canvas renderer cannot run shaders: those exports draw `draw()` where a module has
-one and report the rest. The CLI's GPU exporter (`packages/cli/src/board-gpu`) runs
-this same export pipeline in local Chrome. A frame sequence keeps one
+one and report the rest. Scripts never run in Node: the CLI's Board page
+(`packages/cli/src/board-browser`) runs this same export pipeline, and simulations
+through `board/testing`, in a headless Chrome. A frame sequence keeps one
 `createBrowserBoardScriptExport()` and one shader layer set (`shaderLayers`) for the
 whole export, so scripts and state advance from frame to frame instead of replaying.
 
-Params are input, not configuration: instances survive param edits, and animation
-tracks may target a Board script's `params.*`. The evaluated values reach scripts
-through `BoardEvaluation.scripts`; the stored document keeps the authored ones.
+Params and time are input, not configuration: instances survive param edits, and
+animation tracks may target a Board script's `params.*` and `time`. The evaluated values
+reach scripts through `BoardEvaluation.scripts`; the stored document keeps the authored
+ones. `script.time` replaces the instance's clock; when it goes back, an instance
+stepping `onFrame()` restarts and replays.
 
 ## Adding an item type
 

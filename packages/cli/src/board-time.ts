@@ -17,6 +17,10 @@ export function parseBoardTimes(value: string, name = "--at", limit = 10_000, fp
   if (parts.length === 1) return [parseBoardTime(value, name)];
   if (parts.length === 2 && !fps) throw new Error(`${name}: start:end needs --fps, or write start:end:step`);
   if (parts.length !== 2 && parts.length !== 3) throw new Error(`${name}: expected a time or start:end:step`);
+  const bare = parts.slice(0, 2).map((part) => /^\s*[\d.]+\s*$/.test(part) && Number(part) !== 0);
+  const united = parts.slice(0, 2).map((part) => /[a-z]\s*$/i.test(part));
+  if ((bare[0] && united[1]) || (bare[1] && united[0]))
+    throw new Error(`${name}: ${value} mixes bare milliseconds with units; give both ends a unit, such as 33s:35s.`);
   const [start, end, written] = parts.map((part) => parseBoardTime(part, name)) as [number, number, number | undefined];
   const step = written ?? 1000 / (fps as number);
   if (!(step > 0)) throw new Error(`${name}: step must be greater than zero`);

@@ -1,6 +1,5 @@
 import type { BoardDocument, BoardPatch, BoardVec2 } from "@cohub/protocol";
 import { type BoardEditor, type BoardPointerEvent, type BoardToolId, createBoardEditor, selectionTransformControlAt } from "../editor/index.js";
-import type { BoardExportRegion } from "../model/export-plan.js";
 import { type BoardViewport, pointToWorld, screenPoint, worldPoint } from "../model/geometry.js";
 import { resolveBoardAnimationCamera } from "../model/sampling.js";
 import { boardProjection, isBoardViewLevel } from "../model/view-camera.js";
@@ -13,18 +12,17 @@ import type {
   BoardScriptPeer,
   BoardScriptSense,
 } from "../model/script.js";
+import { boardScriptAttachments } from "../model/script-index.js";
 import { BOARD_SCRIPT_EXPORT_ENV, type BoardScriptInputLog, boardScriptSenseStates } from "../model/script-senses.js";
 import type { BoardScriptHost } from "../render/renderers/board-renderer-registry.js";
-import { createNodeBoardRenderer, exportBoardImageBytes, type BoardNodeRenderer } from "../export/node/index.js";
-import { type BoardScriptLog, createNodeBoardScriptRuntime } from "../export/node/scripts.js";
+import { type BoardScriptFiles, type BoardScriptFont, type BoardScriptLog, type BrowserBoardScriptHost, createBoardScriptHost } from "../render/script-host.js";
 import { type BoardScriptDevice, createBoardScriptController } from "../stage/script-controller.js";
 
 export type BoardScriptHarnessMode = "edit" | "play" | "view";
 
 export type BoardScriptHarnessOptions = {
   document: BoardDocument;
-  readModule(path: string): Promise<string>;
-  renderer?: BoardNodeRenderer;
+  scripts?: { files: BoardScriptFiles; element: HTMLElement; fonts?: () => Promise<readonly BoardScriptFont[]> };
   mode?: BoardScriptHarnessMode;
   viewport?: { width: number; height: number };
   view?: BoardScriptCamera;
@@ -102,11 +100,18 @@ function describeInteraction(editor: BoardEditor): string | null {
 }
 
 export async function createBoardScriptHarness(options: BoardScriptHarnessOptions) {
-  const renderer = options.renderer ?? await createNodeBoardRenderer();
   const commits: BoardPatch[] = [];
   let clock = 0;
   let timers: Array<{ at: number; run: () => void }> = [];
-  let runtime: ReturnType<typeof createNodeBoardScriptRuntime> | null = null;
+  let host: BrowserBoardScriptHost | null = null;
+  let wake: (() => void) | null = null;
+  let drawScale = 0;
+  let stopped = false;
+  const awake = () => {
+    const resolve = wake;
+    wake = null;
+    resolve?.();
+  };
   let peers: readonly BoardScriptPeer[] = [];
   const broadcasts: BoardScriptHarnessBroadcast[] = [];
   const logs: BoardScriptHarnessLog[] = [];
@@ -141,13 +146,39 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
         timers = timers.filter((entry) => entry !== timer);
       };
     },
-    requestFrame() {},
-    requestScriptFrame() {},
+    requestFrame: awake,
+    requestScriptFrame: awake,
     createHost: (callbacks) => {
-      runtime = createNodeBoardScriptRuntime(renderer, { readModule: options.readModule, timeoutMs: options.timeoutMs, onLog: (log) => logs.push({ ...log, time: Math.round(clock) }), callbacks });
-      return runtime;
+      if (!options.scripts) throw new Error("Board scripts run in a browser.");
+      host = createBoardScriptHost({
+        ...callbacks,
+        files: options.scripts.files,
+        host: options.scripts.element,
+        ...(options.scripts.fonts ? { fonts: options.scripts.fonts } : {}),
+        timeoutMs: options.timeoutMs,
+        network: false,
+        isMaterialized: () => drawScale > 0,
+        scale: () => drawScale,
+        onLog: (log) => logs.push({ ...log, time: Math.round(clock) }),
+        onSettle: awake,
+      });
+      return host;
     },
   });
+
+  const running = () => boardScriptAttachments(editor.document, editor.scriptMode).map(({ id }) => id);
+  const settled = (id: string) => !host || host.error(id) !== null || host.settled(id);
+
+  async function settle() {
+    for (;;) {
+      if (stopped) throw new Error("The harness stopped.");
+      controller.sync({ camera: shown, surface, visibleIds: null });
+      if (running().every(settled)) return;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+  }
 
   function runTimers(): boolean {
     const due = timers.filter((timer) => timer.at <= clock);
@@ -176,10 +207,9 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
   async function frame() {
     controller.update();
     for (let round = 0; round < 16; round++) {
-      controller.sync({ camera: shown, surface, visibleIds: null });
-      await runtime?.settle();
+      await settle();
       compose(follow());
-      if (!runTimers() && !runtime?.queued) break;
+      if (!runTimers() && running().every(settled)) break;
     }
     await options.onFrame?.(clock);
   }
@@ -260,7 +290,7 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     get emitFailures(): ReadonlyMap<string, string> {
       return controller.emitFailures;
     },
-    status: () => runtime?.status() ?? [],
+    busy: (): string[] => running().flatMap((id) => (settled(id) ? [] : [`${id} ${host?.output(id) ? "is still running" : "has not started"}`])),
     get senses(): BoardScriptSense[] {
       return controller.senses;
     },
@@ -330,29 +360,31 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
       editor.tool = value;
     },
     async shown(scale = 1): Promise<{ document: BoardDocument; scripts?: BoardScriptHost }> {
-      const host = runtime;
       const document = editor.document;
-      if (!host) return { document };
-      await host.draw(scale);
-      const scene = editor.scene;
+      const current = host;
+      if (!current) return { document };
+      drawScale = scale;
+      try {
+        await settle();
+      } finally {
+        drawScale = 0;
+      }
       return {
         document,
         scripts: {
-          frame: host.frame, error: host.error, ready: host.ready, release() {}, shaders: () => controller.shaderOwners(),
-          document: (input, _time, screen) => host.document(input, input === document ? scene : undefined, screen),
+          frame: current.frame, error: current.error, ready: current.ready, revision: current.revision, release() {},
+          shaders: () => controller.shaderOwners(),
+          bend: (id) => controller.bend(id),
+          document: (input, _time, screen) => controller.present(input, screen),
         },
       };
     },
-    async render(region: BoardExportRegion = { kind: "all" }, scale = 1): Promise<Uint8Array> {
-      const { document, scripts } = await this.shown(scale);
-      const result = exportBoardImageBytes(renderer, document, { region, scale, colorScheme: "light", screen: true, ...(scripts ? { scripts } : {}) });
-      if (!result) throw new Error("Nothing to render.");
-      return result.bytes;
-    },
     destroy() {
+      if (stopped) return;
+      stopped = true;
+      awake();
       controller.destroy();
       editor.destroy();
-      if (!options.renderer) renderer.destroy();
     },
   };
 }

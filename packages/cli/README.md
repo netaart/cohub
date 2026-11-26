@@ -79,11 +79,12 @@ cohub boards export lesson.board --animation lecture --at 0:92s:40ms --camera --
 NODE_DEBUG=cohub:board-export cohub boards export lesson.board --animation lecture --at 0:92s:40ms -o lecture.mp4
 ```
 
-Boards whose scripts draw with shaders render in a local Chrome, Chromium or Edge (headless;
-software WebGL without a GPU) so frames match the web app; the rest render in Node.
-`--renderer canvas` keeps Node and warns about the shaders it could not run, `--renderer gpu`
-always uses the browser, and `COHUB_CHROME` picks the browser executable. `boards simulate`
-compiles the same shaders with that browser and reports their errors.
+Boards with scripts, shaders or 3D render in a headless Chrome, where scripts run as in the
+web app (software WebGL without a GPU); the rest render in Node. It uses `COHUB_CHROME`, an
+installed Chrome, Chromium or Edge, or downloads Chrome's headless shell once, the first time
+a Board needs it. `--renderer canvas` keeps Node and refuses Boards with scripts, and
+`--renderer gpu` always uses the browser. `boards simulate` and `boards profile` run scripts
+in the same browser. Videos stream raw frames to ffmpeg as they are drawn.
 
 Debug output reports render stages, RSS, heap, external buffers, reserved image bytes,
 and available/constrained process memory. Video encoding is reported separately.

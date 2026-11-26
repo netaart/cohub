@@ -56,11 +56,31 @@ Space modules first. A graph is limited to 64 modules and 2 MB of source.
 
 Keep large data, such as sprite sheets or level maps, in `.json` files imported with
 `with { type: "json" }`. Every instance shares one parsed, frozen copy, where a `.js`
-data module is parsed again by each instance that imports it:
+data module is parsed again by each instance that imports it. Fonts (`.woff2`, `.woff`,
+`.ttf`, `.otf`), images (`.png`, `.jpg`, `.webp`, `.gif`, `.avif`) and `.bin` files
+import as a `Uint8Array` with `with { type: "bytes" }`, up to 32 MB in all; publishing
+captures them with the modules. Scripts on one worker share each import, so treat it
+as read-only. Every viewer downloads them: subset a font to the characters it draws,
+which takes a CJK font from megabytes to kilobytes:
 
 ```js
 import sprites from "./sprites.json" with { type: "json" };
+import hand from "./fonts/hand.woff2" with { type: "bytes" };
+import ink from "./art/ink.webp" with { type: "bytes" };
+
+self.fonts.add(await new FontFace("Hand", hand).load());
+const art = await createImageBitmap(new Blob([ink]));
 ```
+
+## One runtime
+
+Modules run in a browser worker with no DOM, everywhere: on screens, in the web
+export, and in `cohub boards export`, `simulate` and `profile`, which run them in a
+headless Chrome. A module that works in one place works in the others. The worker has
+`OffscreenCanvas`, `Path2D`, `DOMMatrix`, `ImageData`, `createImageBitmap`, `FontFace`
+with `self.fonts`, `URL`, `TextEncoder`, `TextDecoder`, `atob` and `btoa`; Canvas
+text can name `Geist` and `Geist Mono` without loading them. Other fonts differ between
+devices: import the ones a drawing depends on.
 
 ## Draw without setup
 
@@ -104,9 +124,7 @@ different pixel density. Advance state in frame or event handlers. Use the frame
 `width` and `height` for logical dimensions; `ctx.canvas.width` and `height` are
 backing pixels and vary with rendering quality.
 
-Keep drawing inside `width` × `height`. Node script workers use the renderer's
-registered fonts; prefer `Geist` or `Geist Mono` for consistent Canvas text. Native
-text items remain editable and measurable by `boards inspect`; text and shapes
+Keep drawing inside `width` × `height`. Native text items remain editable and measurable by `boards inspect`; text and shapes
 painted inside a Canvas are not inspected. When combining them, set explicit `z`
 values (for example, custom graphics `0`, native labels `10`).
 
@@ -133,6 +151,21 @@ Every attachment has its own module instances and state. `onFrame()` handlers ar
 synchronous 60 Hz fixed steps; drawing follows the display schedule. The live clock
 pauses with the stage and bounds catch-up after a stalled tab. Use `ctx.random()` for seeded randomness.
 Native timers, wall-clock time and `Math.random()` are not replayable.
+
+### Play on a timeline
+
+`script.time` sets the script's clock: `frame.t` and the shader clock follow it, on
+screens, while scrubbing the timeline and in exports. Animate it like a video's
+`props.time`; `cohub boards place` does so for a scripted item, so the script plays
+its own time during its clip and holds outside it:
+
+```sh
+cohub boards place film.board --animation cut --targets film --at 0 --duration 2m18s | cohub boards apply film.board -i -
+```
+
+A drawing that is a function of time, such as a film, needs nothing more: seeking draws
+the frame at once. When the time goes back, a script stepping `onFrame()` starts over
+and replays from 0 to rebuild its state.
 
 `present()` replaces this instance's current patch for the target, merging that
 patch onto the author/animation values. Passing `null` clears it. It never saves.
@@ -775,22 +808,22 @@ until it is restarted. Where shaders cannot run, a module's `draw()` is its
 fallback: when shaders run, `draw()` is not called, and a shader that fails to
 compile reports its error rather than falling back.
 
-The web export draws shaders like the live Board. `cohub boards export` draws in
-Node and moves to a local Chrome, Chromium or Edge (headless, software WebGL when
-there is no GPU) once a script draws with a shader; `--renderer canvas` stays in
-Node and names the shaders it drew with `draw()` or left out, and `--renderer gpu`
-always uses the browser. Set `COHUB_CHROME` to choose the browser. The browser is
-shared by consecutive commands and exits after a few idle minutes, so only the first
-pays for starting it and compiling shaders; `COHUB_BOARD_GPU_DAEMON=0` starts one per
-command. Boards without shaders never start it.
-`cohub boards simulate <board>` compiles every shader the scripts declare with that
-browser before it runs the steps, and stops at once with the errors, such as a pass
-that reads a uniform its shader does not declare; without a browser it checks the
-source but cannot compile it. With `-o` it draws the shaders too, resumed from where
-the simulated scripts stand, and warns about any it did not draw, and why. Browser
-frames are capped at 16 megapixels; past it, scale goes down.
-`cohub boards profile <board>` times a frame, and what each shader owner adds to it,
-and says what to change. It says whether the browser draws with software WebGL or a
+The web export draws shaders like the live Board. `cohub boards export` runs the
+scripts of a Board in a headless Chrome (software WebGL when there is no GPU), and
+draws Boards without scripts, shaders or 3D in Node; `--renderer gpu` always uses the
+browser. It uses `COHUB_CHROME`, an installed Chrome, Chromium or Edge, or downloads
+Chrome's headless shell once, the first time a Board needs it. The browser is shared
+by consecutive commands and exits after a few idle minutes, so only the first pays for
+starting it and compiling shaders; `COHUB_BOARD_BROWSER_DAEMON=0` starts one per
+command. Videos stream raw frames to ffmpeg as they are drawn.
+`cohub boards simulate <board>` runs a Board with scripts in that browser too,
+compiles every shader the scripts declare before it runs the steps, and stops at once
+with the errors, such as a pass that reads a uniform its shader does not declare. With
+`-o` it draws what the simulated screen shows. Browser frames are capped at 16
+megapixels; past it, scale goes down.
+`cohub boards profile <board>` times a frame, what each shader owner adds to it, and
+what each script's updates and draws cost in its worker over a second of frames, and
+says what to change. It says whether the browser draws with software WebGL or a
 GPU, measures each owner over `--rounds` (3) and reports the median and range, and
 keeps within `--budget` (60 s): past it, it times fewer frames at a smaller size and
 says which.
@@ -804,7 +837,7 @@ HTML/JavaScript content; Board does not execute arbitrary module code in an ifra
 The shared broker iframe executes only the host's fixed routing code.
 
 Browser modules have no Space credentials. Live Boards may reach the network; exports
-cannot. The embedding host can provide typed application adapters through
+and simulations cannot, and `fetch()` there rejects saying so. The embedding host can provide typed application adapters through
 `scriptCapabilities`:
 
 ```js
@@ -828,11 +861,10 @@ Space. Publishing uses the runtime's module limits and import policy; unavailabl
 or invalid dependencies fail publication. Source changes between hashing and upload
 also fail publication, so the captured graph matches the uploaded code.
 
-Web and CLI exports share the runtime kernel, native ESM modules, seed and fixed
-time steps. Sequential CLI exports reuse isolated instances in a pool of at most
-four workers; seeking backwards or changing script configuration recreates the
-corresponding instance. Draw-only modules sample time directly. Side-effecting host
-capabilities are unavailable.
+Web and CLI exports run the same browser workers, native ESM modules, seed and fixed
+time steps as the live Board. Sequential exports reuse instances; seeking backwards
+or changing script configuration recreates the corresponding instance. Draw-only
+modules sample time directly. Side-effecting host capabilities are unavailable.
 Drawing modules export synchronous `draw()`; native scene output uses existing
 renderers. Failures are reported instead of silently exporting an empty result.
 
@@ -843,16 +875,15 @@ the drawing and native scene from those values. While script code runs, `Math.ra
 draws from the same seeded sequence as `ctx.random()`. When an animation drives script
 params, a timed sample replays them as they change along the way, so a counter or a
 threshold crossed by a param fires in a single-frame export as it does in a video.
+Only scripts stepping `onFrame()` need this; others draw from the params at the time.
 
 The runtime and browser host expose snapshot/restore interfaces. `await stage.snapshotScripts()`
 captures state on demand; frame messages do not stream complete state. Complete interaction
 recording, shared simulation sessions and historical source pinning are separate
 follow-up work. Source files are resolved from their current
-Space contents. Export times are limited to ten minutes, textures to a 2048 px edge,
-and concurrent Node samples to four workers.
+Space contents. Export times are limited to ten minutes and textures to a 2048 px edge.
 
-Node samples use bounded worker threads and VM contexts. They execute Space code
-locally; VM contexts are not an OS security boundary. A Board uses one opaque
+Scripts run only in the browser's sandbox, never in Node. A Board uses one opaque
 sandboxed iframe hosting a pool of up to four workers shared by all its instances;
 each instance imports its own copy of its modules, so module state stays isolated.
 Instances on one worker share its global object, so the scripts of a Board form one
@@ -865,19 +896,22 @@ behavior continues so visibility does not change simulation results.
 
 ## Test and simulate
 
-`@neta-art/cohub/board/testing` runs a Board's scripts headlessly with the app's
-editor, input routing, commit rules and runtime, on a virtual clock:
+`@neta-art/cohub/board/testing` runs a Board with the app's editor, input routing,
+commit rules and script host, on a virtual clock. Scripts run in the page's sandboxed
+workers, so the harness needs a browser once the Board has scripts:
 
 ```js
+import { boardScriptFiles } from "@neta-art/cohub/board/render";
 import { createBoardScriptHarness } from "@neta-art/cohub/board/testing";
 
-const board = await createBoardScriptHarness({ document, readModule, mode: "play", viewport: { width: 390, height: 844 } });
-board.tool = "draw";
-await board.drag(circle, { pointerType: "pen" });
-await board.advance(500);
-board.document;            // commits applied, never saved
-await board.render();      // PNG with screen UI
-board.destroy();
+const files = boardScriptFiles((path) => fetch(`/files/${path}`));
+const harness = await createBoardScriptHarness({ document: board, scripts: { files, element: document.body }, mode: "play", viewport: { width: 390, height: 844 } });
+harness.tool = "draw";
+await harness.drag(circle, { pointerType: "pen" });
+await harness.advance(500);
+harness.document;          // commits applied, never saved
+await harness.shown(2);    // the document and scripts as the screen shows them, to draw
+harness.destroy();
 ```
 
 `tap()` and `drag()` resolve to where the press landed (`down`: a script's hit region,
@@ -885,8 +919,8 @@ a selection `handle`, an `item`, or `empty` board) and what `taken` it: the scri
 what the editor did (`move`, `resize`, `rotate`, `select box`, `draw`, `pan`). Moving,
 resizing and rotating save the authored item: what a script presents, such as a lift
 on the selected card, never reaches the document or the undo history.
-`board.emitFailures` holds rejected emits by sender, and `board.status()` what each
-worker lane is running.
+`board.emitFailures` holds rejected emits by sender, `board.logs` the scripts' console
+lines, and `board.busy()` which scripts are still working.
 
 The harness starts in `mode` `edit` (select tool), `play` (play tool) or `view`
 (read-only) on a `viewport` (1280×800) fitted to the content, follows the camera

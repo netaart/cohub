@@ -20,6 +20,7 @@ import {
 	BOARD_PLAY_MEDIA,
 	type BoardLod,
 	type BoardRenderLabels,
+	boardScriptFiles,
 	resolveBoardBackdrop,
 	traceCardOutline,
 } from "@neta-art/cohub/board/render";
@@ -58,6 +59,7 @@ import {
 	boardFullscreen,
 	cancelBoardFullscreen,
 } from "#lib/board/board-present.ts";
+import { boardScriptFonts } from "#lib/board/board-script-fonts.ts";
 import { boardSessionDropSnapshot } from "#lib/board/board-session.ts";
 import {
 	type BoardThemeSnapshot,
@@ -459,6 +461,7 @@ onMount(() => {
 		prefetch,
 		drawViews,
 		scriptCapabilities,
+		scriptFonts: boardScriptFonts,
 		senseConsent: (sense) => senseConsent?.(sense) ?? false,
 		locale: () => locale,
 		uploadModelCover: untrack(() => uploadModelCover),
@@ -469,15 +472,11 @@ onMount(() => {
 		if (!ready || stage !== mounted) return;
 		onExportReady?.({
 			snapshotScripts: () => mounted.snapshotScripts(),
-			readModule: async (path) => {
+			scriptFiles: boardScriptFiles(async (path) => {
 				const url = (await assetSource.resolveFile(path))?.url;
-				if (!url) throw new Error("Script module is unavailable.");
-				const response = await fetch(url, {
-					signal: AbortSignal.timeout(15_000),
-				});
-				if (!response.ok) throw new Error(`Could not read ${path}.`);
-				return response.text();
-			},
+				if (!url) throw new Error(`${path} is unavailable.`);
+				return fetch(url, { signal: AbortSignal.timeout(15_000) });
+			}),
 			resolveMedia: (src) => resolveBoardMediaUrl(src, assetSource),
 			renderer: () => mounted.renderer,
 			viewTextures: () => mounted.viewTextures,

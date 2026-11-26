@@ -655,14 +655,16 @@ Board uses the same frames; videos elsewhere decode in the page there, and are d
 without a cover in Node exports. Previews beyond the image memory budget (`--image-memory`) are drawn as
 placeholders, with a warning.
 
-Exports draw in Node until a script draws with a shader, an item leaves the plane with
-`depth`, a 3D model shows, or the camera tips or turns; then `--renderer auto` (the default) renders every frame in a local Chrome,
-Chromium or Edge, headless and with
-software WebGL where there is no GPU, so the result matches the web app. Set
-`COHUB_CHROME` to pick the browser. Consecutive commands share that browser, which exits
-after a few idle minutes (`COHUB_BOARD_GPU_DAEMON=0` starts one per command). `--renderer
-canvas` stays in Node and warns which shaders fell back to `draw()` or were left out;
-`--renderer gpu` always uses the browser. A browser frame is at most 16 megapixels; past
+Exports draw in Node unless the Board has scripts, an item leaves the plane with
+`depth`, a 3D model shows, or the camera tips or turns; then `--renderer auto` (the
+default) renders every frame in a headless Chrome, where scripts run as in the web app,
+with software WebGL where there is no GPU. It uses `COHUB_CHROME`, an installed Chrome,
+Chromium or Edge, or downloads Chrome's headless shell once, the first time a Board
+needs it. Consecutive commands share that browser, which exits after a few idle minutes
+(`COHUB_BOARD_BROWSER_DAEMON=0` starts one per command). `--renderer canvas` stays in
+Node and refuses Boards with scripts; `--renderer gpu` always uses the browser. Videos
+stream raw frames to ffmpeg as they are drawn, and frames without shaders or 3D draw
+with Canvas 2D, several times faster than software WebGL. A browser frame is at most 16 megapixels; past
 it, scale goes down with a warning, since software WebGL holds every pass of a frame in
 memory. `--async` runs the export as a Task in the
 Space's sandbox and returns its id at once; paths are then Space paths.

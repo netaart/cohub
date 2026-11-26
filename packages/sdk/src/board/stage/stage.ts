@@ -72,6 +72,8 @@ import {
 	type BoardAtmosphereLayer,
 	boardRenderTheme,
 	createBoardAtmosphereLayer,
+	type BoardScriptFont,
+	boardScriptFiles,
 	createBoardScriptHost,
 	defaultBoardRenderStyle,
 	getBoardCardRenderer,
@@ -185,6 +187,7 @@ export type BoardStageOptions = {
 	autoplay?: (kind: BoardAutoplayKind) => boolean;
 	safeRect?: () => Rect;
 	scriptCapabilities?: Record<string, (id: string, input: unknown) => Promise<unknown>>;
+	scriptFonts?: () => Promise<readonly BoardScriptFont[]>;
 	scriptLeader?: (owner: string) => boolean;
 	senseConsent?: (sense: BoardConsentSense) => boolean;
 	locale?: () => string | null;
@@ -373,13 +376,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			host,
 			shaders: app?.renderer.type === RendererType.WEBGL,
 			isMaterialized: (id) => Boolean(scene?.getNode(id)),
-			readModule: async (src) => {
+			...(options.scriptFonts ? { fonts: options.scriptFonts } : {}),
+			files: boardScriptFiles(async (src) => {
 				const url = (await options.source.resolveFile(src))?.url;
 				if (!url) throw new Error(`${src} is not available.`);
-				const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-				if (!response.ok) throw new Error(`${src} could not be read.`);
-				return response.text();
-			},
+				return fetch(url, { signal: AbortSignal.timeout(15_000) });
+			}),
 		}),
 	});
 	let stopMaintenance: (() => void) | null = null;

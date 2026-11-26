@@ -6,7 +6,6 @@ import { composeBoardScriptItems, scriptTemporaryPrefix, validateBoardScriptComm
 import type { BoardScriptOutput } from "../../src/board/model/script.js";
 import { createScriptRuntime } from "../../src/board/render/script-runtime.js";
 import { createBoardScriptPointerRouter } from "../../src/board/stage/script-pointer.js";
-import { createNodeBoardRenderer, createNodeBoardScriptHost } from "../../src/board/export/node/index.js";
 import { loadBoardScriptSources } from "../../src/board/render/script-modules.js";
 import { boardDocument } from "./fixtures.js";
 
@@ -61,48 +60,27 @@ test("removing scripts still finishes editor gestures before the fast path resum
   assert.equal(router.route("move", 1, target, point).recipient, target);
 });
 
-test("Node exports isolate instances, reuse sequential samples, and reset backwards seeks", async () => {
-  const renderer = await createNodeBoardRenderer();
-  const document = boardDocument({ items: Object.fromEntries(["a", "b"].map(id => [id, {
-    type: "custom", size: { width: 4, height: 4 }, script: { src: "main.js" },
-  }])) });
-  const code = "let n=0;let context;export default function(ctx){context=ctx}export function draw(ctx){ctx.fillRect(0,0,4,4);context.self.present({opacity:++n/10})}";
-  const host = createNodeBoardScriptHost(renderer, { readModule: async () => code });
-  try {
-    const scene = buildBoardScene(document);
-    for (const [time, opacity] of [[100, 0.1], [200, 0.2], [50, 0.1]] as const) {
-      host.clearFrames();
-      await host.prepare(scene.items, [time], 1);
-      const sampled = host.document?.(document, time);
-      for (const item of scene.items) {
-        assert.equal(host.error(item.id), null);
-        assert.equal(sampled?.items[item.id]?.opacity, opacity);
-        assert.equal(host.ready?.(item.id), true);
-      }
-    }
-  } finally { host.destroy(); renderer.destroy(); }
-});
-
-test("JSON modules import read-only with type json", async () => {
+test("JSON imports with type json and assets with type bytes, each within its limit", async () => {
   const files: Record<string, string> = {
-    "main.js": `import data from "./data.json" with { type: "json" };
-export default function (ctx) {
-  let frozen = false;
-  try { data.levels.push(4); } catch { frozen = true; }
-  ctx.self.present({ opacity: frozen ? data.levels.length / 10 : 1 });
-}`,
+    "main.js": 'import data from "./data.json" with { type: "json" };\nimport font from "./fonts/hand.woff2" with { type: "bytes" };\nexport const load = () => import("./art.png", { with: { type: "bytes" } });',
     "data.json": '{"levels":[1,2,3]}',
+    "plain.js": 'import data from "./data.json";',
+    "typed.js": 'import x from "./x.js" with { type: "json" };',
+    "untyped.js": 'import font from "./fonts/hand.woff2";',
+    "wrong.js": 'import data from "./data.json" with { type: "bytes" };',
   };
-  const renderer = await createNodeBoardRenderer();
-  const document = boardDocument({ items: { a: { type: "custom", size: { width: 4, height: 4 }, script: { src: "main.js" } } } });
-  const host = createNodeBoardScriptHost(renderer, { readModule: async (path) => files[path] ?? "" });
-  try {
-    await host.prepare(buildBoardScene(document).items, [0], 1);
-    assert.equal(host.error("a"), null);
-    assert.equal(host.document?.(document, 0)?.items.a?.opacity, 0.3);
-  } finally { host.destroy(); renderer.destroy(); }
-  const read = async (path: string) => ({ ...files, "plain.js": 'import data from "./data.json";', "typed.js": 'import x from "./x.js" with { type: "json" };' })[path] ?? "";
-  await assert.rejects(loadBoardScriptSources("plain.js", read), /with \{ type: "json" \}/);
-  await assert.rejects(loadBoardScriptSources("typed.js", read), /Only \.json files/);
-  await assert.rejects(loadBoardScriptSources("main.js", async (path) => (path === "data.json" ? "{" : files[path] ?? "")), /not valid JSON/);
+  const assets: Record<string, Uint8Array> = { "fonts/hand.woff2": new Uint8Array([1, 2, 3]), "art.png": new Uint8Array(4) };
+  const readers = (module = async (path: string) => files[path] ?? "") => ({ module, asset: async (path: string) => assets[path] ?? new Uint8Array() });
+  const sources = await loadBoardScriptSources("main.js", readers());
+  assert.deepEqual(Object.keys(sources).sort(), ["art.png", "data.json", "fonts/hand.woff2", "main.js"]);
+  assert.deepEqual(sources["fonts/hand.woff2"]?.bytes, new Uint8Array([1, 2, 3]));
+  const code = sources["main.js"]?.code ?? "";
+  assert.deepEqual(sources["main.js"]?.imports.map(({ attributes }) => attributes && code.slice(...attributes)), [undefined, ' with { type: "bytes" }', ', { with: { type: "bytes" } }']);
+  await assert.rejects(loadBoardScriptSources("plain.js", readers()), /with \{ type: "json" \}/);
+  await assert.rejects(loadBoardScriptSources("typed.js", readers()), /Only \.json files/);
+  await assert.rejects(loadBoardScriptSources("untyped.js", readers()), /with \{ type: "bytes" \}/);
+  await assert.rejects(loadBoardScriptSources("wrong.js", readers()), /Only fonts, images and \.bin files/);
+  await assert.rejects(loadBoardScriptSources("main.js", readers(async (path) => (path === "data.json" ? "{" : files[path] ?? ""))), /not valid JSON/);
+  await assert.rejects(loadBoardScriptSources("main.js", { module: readers().module, asset: async () => new Uint8Array(32_000_001) }), /32 MB/);
+  await assert.rejects(loadBoardScriptSources("main.js", { module: readers().module }), /cannot load assets/);
 });

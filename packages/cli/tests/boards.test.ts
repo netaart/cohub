@@ -34,7 +34,7 @@ function capture(run: () => void | Promise<void>): Promise<string[]> {
 test("Board commands are one small, flat set and all expose -h", () => {
   const { boards } = createProgram();
   assert.deepEqual(boards.commands.map((command) => command.name()), [
-    "create", "get", "apply", "history", "diff", "schema", "preset", "examples", "export", "simulate", "profile", "gpu-daemon", "inspect", "frames", "sequence", "place", "path",
+    "create", "get", "apply", "history", "diff", "schema", "preset", "examples", "export", "simulate", "profile", "browser-daemon", "inspect", "frames", "sequence", "place", "path",
     "play", "pause", "resume", "seek", "next", "stop", "viewers", "watch",
   ]);
   for (const command of boards.commands) {
@@ -97,6 +97,7 @@ test("times accept milliseconds, seconds, minutes and ranges", () => {
   assert.throws(() => parseBoardTimes("1s,2s,3s", "--at", 2), /limit/);
   assert.throws(() => parseBoardTimes("0:1s:0"), /step/);
   assert.throws(() => parseBoardTimes("0:100s:1ms"), /exceed the limit/);
+  assert.throws(() => parseBoardTimes("33:35s", "--at", 100, 10), /mixes bare milliseconds/);
   assert.equal(formatBoardTime(250), "250ms");
   assert.equal(formatBoardTime(12_500), "12.5s");
 });

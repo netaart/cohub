@@ -53,7 +53,6 @@ export type BoardNodeTexture = {
 export type BoardNodeRenderer = {
   renderer: Renderer;
   canvasModule: NodeCanvasModule;
-  fonts?: readonly BoardNodeFont[];
   decodeImage: (bytes: Uint8Array, mimeType?: string) => Promise<BoardNodeTexture>;
   destroy: () => void;
 };
@@ -188,7 +187,6 @@ export async function createNodeBoardRenderer(
   return {
     renderer: renderer as unknown as Renderer,
     canvasModule,
-    fonts,
     decodeImage: async (bytes) => {
       const image = new canvasModule.Image() as {
         src: Uint8Array | string;
@@ -219,7 +217,7 @@ export async function createNodeBoardRenderer(
   };
 }
 
-export type BoardNodeExportFormat = "png" | "jpeg" | "webp";
+export type BoardNodeExportFormat = "png" | "jpeg" | "webp" | "rgba";
 
 export type BoardNodeExportOptions = Omit<BoardExportOptions, "textures" | "backgroundTexture"> & {
   textures?: Map<string, BoardNodeTexture>;
@@ -234,17 +232,12 @@ export type BoardNodeExportResult = Omit<BoardExportResult, "canvas"> & {
   format: BoardNodeExportFormat;
 };
 
-const MIME: Record<BoardNodeExportFormat, string> = {
+const MIME: Record<Exclude<BoardNodeExportFormat, "rgba">, string> = {
   png: "image/png",
   jpeg: "image/jpeg",
   webp: "image/webp",
 };
 
-export { type BoardScriptLaneStatus, type BoardScriptLog, createNodeBoardScriptHost, createNodeBoardScriptRuntime, describeBoardScriptLanes } from "./scripts.js";
-
-export function boardImageMimeType(format: BoardNodeExportFormat): string {
-  return MIME[format];
-}
 
 export function exportBoardImageBytes(
   renderer: BoardNodeRenderer,
@@ -263,8 +256,13 @@ export function exportBoardImageBytes(
     width: number;
     height: number;
     toBuffer: (mime: string, quality?: number) => Buffer;
+    getContext(kind: "2d"): { getImageData(x: number, y: number, width: number, height: number): { data: Uint8ClampedArray } };
   };
   try {
+    if (format === "rgba") {
+      const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+      return { bytes: new Uint8Array(data.buffer, data.byteOffset, data.byteLength), plan: result.plan, warnings: result.warnings, format };
+    }
     const bytes = format === "png" ? canvas.toBuffer(MIME.png) : canvas.toBuffer(MIME[format], Math.round(quality * 100));
     return { bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), plan: result.plan, warnings: result.warnings, format };
   } finally {

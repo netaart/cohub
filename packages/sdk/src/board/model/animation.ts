@@ -146,7 +146,7 @@ function parameterKind(track: BoardTrack): Kind {
 export function compileBoardTrack(animationId: string, id: string, track: BoardTrack, targetType: string): CompiledTrack | null {
 	const resolved = resolveBoardProperty(targetType, track.property);
 	if (!resolved.ok) return null;
-	const kind = targetType === "script" || track.property.startsWith("script.params.") ? parameterKind(track) : resolved.spec.kind;
+	const kind = /^(script\.)?params\./.test(track.property) ? parameterKind(track) : resolved.spec.kind;
 	const times = new Float64Array(track.keyframes.length);
 	const values: unknown[] = [];
 	const eases: BoardEaseFunction[] = [];
@@ -509,6 +509,8 @@ export function boardAnimatesScriptParams(document: BoardDocument): boolean {
 		Object.values(animation.tracks).some((track) => /^(script\.)?params\./.test(track.property)));
 }
 
+const timed = ({ params, time }: BoardScript): Pick<BoardScript, "params" | "time"> => (time === undefined ? { params } : { params, time });
+
 export function withBoardScripts(document: BoardDocument, scripts: ReadonlyMap<string, BoardScript>): BoardDocument {
 	if (scripts.size === 0) return document;
 	const stored = document.board.scripts;
@@ -518,13 +520,13 @@ export function withBoardScripts(document: BoardDocument, scripts: ReadonlyMap<s
 		const root = stored?.[id];
 		if (root) {
 			if (board === document.board) board = { ...board, scripts: { ...stored } };
-			(board.scripts as Record<string, BoardScript>)[id] = { ...root, params: script.params };
+			(board.scripts as Record<string, BoardScript>)[id] = { ...root, ...timed(script) };
 			continue;
 		}
 		const item = items[id];
 		if (!item?.script) continue;
 		if (items === document.items) items = { ...items };
-		items[id] = { ...item, script: { ...item.script, params: script.params } } as BoardItem;
+		items[id] = { ...item, script: { ...item.script, ...timed(script) } } as BoardItem;
 	}
 	return board === document.board && items === document.items ? document : { ...document, board, items };
 }

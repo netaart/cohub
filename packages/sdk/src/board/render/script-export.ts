@@ -13,7 +13,7 @@ import type {
 import { boardScriptAttachments } from "../model/script-index.js";
 import { BOARD_SCRIPT_EMIT_DEPTH, BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit, boardScriptModelsLoaded, createBoardScriptOutbox } from "../model/script-events.js";
 import { type BoardScriptInputLog, boardScriptInputsBetween } from "../model/script-senses.js";
-import { type BrowserBoardScriptHost, createBoardScriptHost } from "./script-host.js";
+import { type BoardScriptFiles, type BoardScriptHostOptions, type BrowserBoardScriptHost, createBoardScriptHost } from "./script-host.js";
 import { boardShaderOwners } from "./shader/layers.js";
 import type { BoardScriptHost } from "./renderers/board-renderer-registry.js";
 
@@ -38,7 +38,7 @@ type Run = {
 };
 
 export function createBrowserBoardScriptExport(
-  readModule: (path: string) => Promise<string>,
+  files: BoardScriptFiles,
   options: {
     snapshots?: Readonly<Record<string, BoardScriptSnapshot>>;
     shaders?: boolean;
@@ -46,6 +46,8 @@ export function createBrowserBoardScriptExport(
     inputs?: BoardScriptInputLog;
     env?: BoardScriptEnv;
     resume?: boolean;
+    onCost?: BoardScriptHostOptions["onCost"];
+    fonts?: BoardScriptHostOptions["fonts"];
   } = {},
 ): BrowserBoardScriptExport {
   let run: Run | null = null;
@@ -72,12 +74,14 @@ export function createBrowserBoardScriptExport(
       wake: () => {},
       host: createBoardScriptHost({
         host: element,
-        readModule,
+        files,
         export: true,
         shaders: options.shaders ?? true,
         snapshots: options.snapshots,
         ...(options.resume ? { resume: true } : {}),
         ...(options.env ? { env: () => options.env as BoardScriptEnv } : {}),
+        ...(options.onCost ? { onCost: options.onCost } : {}),
+        ...(options.fonts ? { fonts: options.fonts } : {}),
         timeoutMs: 15_000,
         capabilities: {
           ...Object.fromEntries(Object.entries(BOARD_SCRIPT_EXPORT_CALLS).map(([name, call]) => [name, async (_id: string, input: unknown) => call(input)])),
@@ -95,6 +99,7 @@ export function createBrowserBoardScriptExport(
           },
         },
         onFrame: () => started.wake(),
+        onSettle: () => started.wake(),
         onOutput(id, output) {
           if (output) outputs.set(id, output);
           else {
@@ -221,7 +226,9 @@ export function createBrowserBoardScriptExport(
         let previous = boardScriptParamsKey(before.document);
         let ran = current.time;
         if (fresh) await settle(current, before.document, before.at);
-        for (let at = current.time + BOARD_SCRIPT_HISTORY_MS; at < time; at += BOARD_SCRIPT_HISTORY_MS) {
+        // Only onFrame() builds state from the params it ran with; other scripts draw from the latest.
+        const stepping = [...outputs.values()].some((output) => output.updating);
+        for (let at = current.time + BOARD_SCRIPT_HISTORY_MS; stepping && at < time; at += BOARD_SCRIPT_HISTORY_MS) {
           const sample = options.documentAt(at);
           const key = boardScriptParamsKey(sample);
           if (key !== previous) {
@@ -232,7 +239,7 @@ export function createBrowserBoardScriptExport(
           }
           before = { at, document: sample };
         }
-        if (boardScriptParamsKey(document) !== previous && before.at > ran) await settle(current, before.document, before.at);
+        if (stepping && boardScriptParamsKey(document) !== previous && before.at > ran) await settle(current, before.document, before.at);
       }
       await settle(current, document, time, view);
       return {
@@ -258,11 +265,11 @@ export function createBrowserBoardScriptExport(
 export async function prepareBrowserBoardScripts(
   document: BoardDocument,
   time: number,
-  readModule: (path: string) => Promise<string>,
+  files: BoardScriptFiles,
   snapshots?: Readonly<Record<string, BoardScriptSnapshot>>,
-  options: { shaders?: boolean; documentAt?: (time: number) => BoardDocument; inputs?: BoardScriptInputLog } = {},
+  options: { shaders?: boolean; documentAt?: (time: number) => BoardDocument; inputs?: BoardScriptInputLog; fonts?: BoardScriptHostOptions["fonts"] } = {},
 ): Promise<{ host: BoardScriptHost; dispose(): void }> {
-  const session = createBrowserBoardScriptExport(readModule, { snapshots, ...options });
+  const session = createBrowserBoardScriptExport(files, { snapshots, ...options });
   try {
     return { host: await session.at(document, time), dispose: session.dispose };
   } catch (error) {

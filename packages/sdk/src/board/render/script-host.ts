@@ -18,12 +18,15 @@ import type {
 } from "../model/script.js";
 import type { BoardScriptHost } from "./renderers/board-renderer-registry.js";
 import {
+  BOARD_SCRIPT_ASSET_MAX_BYTES,
   loadBoardScriptSources,
   createBoardScriptModuleReader,
   type BoardScriptSources,
 } from "./script-modules.js";
-import { boardScriptFrameSource } from "./script-sandbox.js";
+import { type BoardScriptFont, boardScriptFrameSource } from "./script-sandbox.js";
 import type { ScriptRuntimeInput, ScriptRuntimeInputDelta } from "./script-runtime.js";
+
+export type { BoardScriptFont } from "./script-sandbox.js";
 
 type Graph = { key: string; sources: BoardScriptSources };
 
@@ -56,8 +59,10 @@ type Entry = {
   dirty: boolean;
   request: number;
   pending: boolean;
+  answering: Set<number>;
   timer?: ReturnType<typeof setTimeout>;
   time: number;
+  elapsed: number;
   tick: number;
   visible: boolean;
   draw: boolean;
@@ -65,8 +70,37 @@ type Entry = {
   calledAt?: number;
 };
 
+export type BoardScriptFiles = {
+  module(path: string): Promise<string>;
+  asset(path: string): Promise<Uint8Array>;
+};
+
+export function boardScriptFiles(open: (path: string) => Promise<Response>): BoardScriptFiles {
+  const read = async (path: string) => {
+    const response = await open(path);
+    if (!response.ok) throw new Error(`${path} could not be read.`);
+    return response;
+  };
+  return {
+    module: async (path) => (await read(path)).text(),
+    async asset(path) {
+      const response = await read(path);
+      if (Number(response.headers.get("content-length")) > BOARD_SCRIPT_ASSET_MAX_BYTES) throw new Error(`${path} is larger than script assets may be (32 MB).`);
+      return new Uint8Array(await response.arrayBuffer());
+    },
+  };
+}
+
+export type BoardScriptLog = { id: string; level: "log" | "warn" | "error"; text: string };
+
+export type BoardScriptCost = { step: number; draw: number; width: number; height: number };
+
 export type BoardScriptHostOptions = {
-  readModule(path: string): Promise<string>;
+  files: BoardScriptFiles;
+  onCost?(id: string, cost: BoardScriptCost): void;
+  fonts?: () => Promise<readonly BoardScriptFont[]>;
+  onSettle?(): void;
+  onLog?(log: BoardScriptLog): void;
   shaders?: boolean;
   host: HTMLElement;
   onFrame(): void;
@@ -81,6 +115,8 @@ export type BoardScriptHostOptions = {
   >;
   timeoutMs?: number;
   export?: boolean;
+  network?: boolean;
+  scale?: () => number;
   snapshots?: Readonly<Record<string, BoardScriptSnapshot>>;
   resume?: boolean;
   poolSize?: number;
@@ -146,18 +182,19 @@ export function createBoardScriptHost(
   const dependencies = new Map<string, Set<string>>();
   const limited = new Set<string>();
   const unsent = new Map<string, BoardScriptSources>();
-  const modules = createBoardScriptModuleReader(options.readModule);
+  const modules = createBoardScriptModuleReader(options.files.module);
+  const assets = createBoardScriptModuleReader(options.files.asset);
   const tokens = new Map<number, Entry>();
   let nextToken = 0;
   let nextGraph = 0;
   let brokerReady = false;
   let broker: HTMLIFrameElement | null = null;
   const signatures = new WeakMap<BoardScript, string>();
-  // Params reach a running instance as input, so tuning or animating them keeps its state.
+  // Params and time reach a running instance as input, so tuning or animating them keeps its state.
   function entrySignature(script: BoardScript): string {
     let value = signatures.get(script);
     if (value === undefined) {
-      value = JSON.stringify({ ...script, params: undefined });
+      value = JSON.stringify({ ...script, params: undefined, time: undefined });
       signatures.set(script, value);
     }
     return value;
@@ -171,6 +208,7 @@ export function createBoardScriptHost(
     }
     if (entry.script !== script) {
       if (!sameJson(entry.script.params, script.params)) delta.script = script;
+      else if (entry.script.time !== script.time) entry.dirty = true;
       entry.script = script;
     }
     if (entry.items !== board.items) {
@@ -245,7 +283,7 @@ export function createBoardScriptHost(
     broker.tabIndex = -1;
     broker.style.cssText =
       "position:absolute;visibility:hidden;width:0;height:0;border:0";
-    broker.srcdoc = boardScriptFrameSource({ timeoutMs: options.timeoutMs, poolSize: options.poolSize, network: !options.export });
+    broker.srcdoc = boardScriptFrameSource({ timeoutMs: options.timeoutMs, poolSize: options.poolSize, network: !options.export && options.network !== false, logs: Boolean(options.onLog) });
     layer.appendChild(broker);
   }
   function toBroker(data: unknown, token?: number, transfer: Transferable[] = []) {
@@ -281,6 +319,7 @@ export function createBoardScriptHost(
     removeFrame(entry);
     options.onOutput(entry.id, null);
     options.onFrame();
+    options.onSettle?.();
   }
   function loadGraph(src: string): Promise<Graph> {
     let loading = graphs.get(src);
@@ -288,10 +327,11 @@ export function createBoardScriptHost(
       const paths = new Set([src]);
       dependencies.set(src, paths);
       const key = `${++nextGraph}:${src}`;
-      loading = loadBoardScriptSources(src, (path) => {
+      const read = <T>(reader: { read(path: string): Promise<T> }) => (path: string) => {
         paths.add(path);
-        return modules.read(path);
-      }).then((sources) => {
+        return reader.read(path);
+      };
+      loading = loadBoardScriptSources(src, { module: read(modules), asset: read(assets) }).then((sources) => {
         unsent.set(key, sources);
         return { key, sources };
       });
@@ -315,8 +355,13 @@ export function createBoardScriptHost(
     const data = event.data;
     if (!data || typeof data !== "object" || !broker || event.source !== broker.contentWindow) return;
     if (data.kind === "ready" && data.token === undefined) {
-      brokerReady = true;
-      options.onFrame();
+      const ready = () => {
+        if (disposed) return;
+        brokerReady = true;
+        options.onFrame();
+      };
+      if (!options.fonts) return ready();
+      void options.fonts().then((fonts) => toBroker({ kind: "fonts", fonts }), (error: unknown) => console.error("Board fonts:", error)).finally(ready);
       return;
     }
     const entry = tokens.get(data.token);
@@ -346,6 +391,10 @@ export function createBoardScriptHost(
       schedule();
       return;
     }
+    if (data.kind === "log") {
+      options.onLog?.({ id: entry.id, level: data.level, text: String(data.text) });
+      return;
+    }
     if (data.kind === "call") {
       entry.calledAt = performance.now();
       const capability =
@@ -354,6 +403,10 @@ export function createBoardScriptHost(
         Object.hasOwn(options.capabilities, data.name)
           ? options.capabilities[data.name]
           : undefined;
+      const answer = (reply: { value?: unknown; error?: string }) => {
+        entry.answering.add(data.call);
+        toBroker({ kind: "result", call: data.call, ...reply }, entry.token);
+      };
       void Promise.resolve()
         .then(() => {
           if (!capability)
@@ -361,14 +414,14 @@ export function createBoardScriptHost(
           return capability(entry.id, data.input);
         })
         .then(
-          (value) => toBroker({ kind: "result", call: data.call, value }, entry.token),
-          (error: unknown) =>
-            toBroker({
-              kind: "result",
-              call: data.call,
-              error: error instanceof Error ? error.message : String(error),
-            }, entry.token),
+          (value) => answer({ value }),
+          (error: unknown) => answer({ error: error instanceof Error ? error.message : String(error) }),
         );
+      return;
+    }
+    if (data.kind === "answered") {
+      entry.answering.delete(data.call);
+      options.onSettle?.();
       return;
     }
     if (data.kind === "snapshot") {
@@ -394,6 +447,7 @@ export function createBoardScriptHost(
       return;
     }
     entry.pending = false;
+    if (data.cost) options.onCost?.(entry.id, { ...data.cost, width: data.bitmap?.width ?? 0, height: data.bitmap?.height ?? 0 });
     const output = data.output as BoardScriptOutput | undefined;
     const acceptsBitmap = Boolean(data.bitmap) && (options.export || !options.isMaterialized || options.isMaterialized(entry.id)) && entry.draw;
     if (acceptsBitmap) entry.texture.update(data.bitmap, (output ?? entry.output)?.pixelated === true);
@@ -416,6 +470,7 @@ export function createBoardScriptHost(
     }
     if (changed || options.export) options.onFrame();
     else if (output || needsTick(entry)) schedule();
+    options.onSettle?.();
   };
   window.addEventListener("message", onMessage);
 
@@ -450,7 +505,7 @@ export function createBoardScriptHost(
       entries.get(id)?.output !== null && entries.get(id)?.output !== undefined,
     settled: (id) => {
       const entry = entries.get(id);
-      return Boolean(entry?.output && !entry.pending && !entry.dirty);
+      return Boolean(entry?.output && !entry.pending && !entry.dirty && !entry.answering.size);
     },
     frame: (item) => entries.get(item.id)?.texture.current ?? null,
     error: (id) => entries.get(id)?.error ?? (limited.has(id) ? `A Board runs at most ${BOARD_SCRIPT_INSTANCE_LIMIT} scripts.` : null),
@@ -507,7 +562,10 @@ export function createBoardScriptHost(
       for (const entry of entries.values()) if (needsTick(entry)) return true;
       return false;
     },
-    clock: (id) => syncedAt - (entries.get(id)?.startedAt ?? syncedAt),
+    clock: (id) => {
+      const entry = entries.get(id);
+      return entry?.script.time ?? syncedAt - (entry?.startedAt ?? syncedAt);
+    },
     sync(board, scene, camera, time, inputEnabled, visibleIds) {
       if (disposed) return;
       syncedAt = time;
@@ -564,7 +622,9 @@ export function createBoardScriptHost(
             dirty: true,
             request: 0,
             pending: false,
+            answering: new Set(),
             time: -1,
+            elapsed: -1,
             tick: -1,
             visible: true,
             draw: false,
@@ -614,7 +674,7 @@ export function createBoardScriptHost(
           : options.export
             ? Math.min(2, 2048 / Math.max(1, box.width, box.height))
             : boardBitmapResolution(box.width, box.height,
-                now < settledAt && entry.scale > 0 ? entry.scale : camera.zoom * getBoardResolution() * itemScale, entry.scale);
+                options.scale?.() ?? (now < settledAt && entry.scale > 0 ? entry.scale : camera.zoom * getBoardResolution() * itemScale), entry.scale);
         if (scale !== entry.scale) {
           entry.scale = scale;
           if (draw) entry.dirty = true;
@@ -642,13 +702,20 @@ export function createBoardScriptHost(
           }
         }
         if (!brokerReady || !entry.graph || entry.pending) continue;
-        const elapsed = time - entry.startedAt;
+        const elapsed = entry.script.time ?? time - entry.startedAt;
+        if (elapsed < entry.elapsed && entry.output?.updating) {
+          restored.delete(id);
+          release(entry);
+          options.onFrame();
+          continue;
+        }
         const rate = entry.visible || !selfContained(entry, now) ? entry.output?.frameRate : Math.min(entry.output?.frameRate ?? OFFSCREEN_FRAME_RATE, OFFSCREEN_FRAME_RATE);
         const tick = rate ? Math.floor((elapsed * rate) / 1000) : elapsed;
         if (!entry.dirty && (!moving(entry) || entry.tick === tick)) continue;
         entry.pending = true;
         entry.dirty = false;
         entry.time = time;
+        entry.elapsed = elapsed;
         entry.tick = tick;
         entry.request++;
         const sources = unsent.get(entry.graph);
@@ -693,6 +760,7 @@ export function createBoardScriptHost(
     },
     invalidate(path) {
       modules.invalidate(path);
+      assets.invalidate(path);
       const affected = new Set(
         [...dependencies].filter(([src, paths]) => !path || src === path || paths.has(path)).map(([src]) => src),
       );
@@ -718,6 +786,7 @@ export function createBoardScriptHost(
       dependencies.clear();
       unsent.clear();
       modules.destroy();
+      assets.destroy();
       focusTargets.clear();
       restored.clear();
       tokens.clear();

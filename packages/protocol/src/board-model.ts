@@ -158,6 +158,7 @@ export const BoardMediaSourceSchema = z.string().max(4096).refine(
 export const BoardScriptSchema = z.object({
 	src: srcSchema.refine((path) => /\.m?js$/.test(path), "script src must be a .js or .mjs module").describe("A .js or .mjs Space file."),
 	params: z.record(z.string(), z.json()).default({}).describe("Values the module reads as params."),
+	time: nonNegative.optional().describe("Position in the script's time in milliseconds, for a timeline to drive: frame.t follows it, and a script stepping onFrame() replays from 0 when it goes back. Without it the script runs on its own clock."),
 	targets: z.record(z.string().min(1).max(80), BoardIdSchema).default({}).describe("Named items the module can reach, as ctx.targets."),
 	seed: z.string().min(1).max(160).optional().describe("Seed for ctx.random() and shaders; defaults to the owner's id."),
 	enabled: z.boolean().default(true),

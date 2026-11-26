@@ -75,7 +75,11 @@ export async function collectBoardPublishReferences(
     }
     return pending;
   };
-  for (const entry of references.scripts) await loadBoardScriptSources(entry, module);
+  const asset = async (path: string) => {
+    add([path]);
+    return new Uint8Array();
+  };
+  for (const entry of references.scripts) await loadBoardScriptSources(entry, { module, asset });
   for (const path of references.files) await addModelSidecars(path, read, add);
   return { files: [...files].sort(), urls: references.urls };
 }

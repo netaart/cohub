@@ -2,29 +2,82 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { isSafeBoardSourcePath } from "@neta-art/cohub/board";
-import type { BoardGpuFrame, BoardGpuInit, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
+import type {
+  BoardBrowserFrame,
+  BoardBrowserFrameInfo,
+  BoardBrowserInit,
+  BoardBrowserProfile,
+  BoardBrowserProfileInput,
+  BoardBrowserShader,
+  BoardBrowserSimulation,
+  BoardSimulationResult,
+} from "./protocol.js";
 import { packagePath } from "../package-paths.js";
 
-export type { BoardGpuFrame, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
-
-export function findBoardGpuBrowser(env: NodeJS.ProcessEnv = process.env): string | null {
-  const named = env.COHUB_CHROME?.trim();
-  if (named) return existsSync(named) ? named : null;
-  const candidates = process.platform === "darwin"
-    ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
-    : process.platform === "win32"
-      ? [env.PROGRAMFILES, env["PROGRAMFILES(X86)"], env.LOCALAPPDATA].flatMap((root) => root ? [join(root, "Google/Chrome/Application/chrome.exe"), join(root, "Microsoft/Edge/Application/msedge.exe")] : [])
-      : ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge"].flatMap((name) =>
-          (env.PATH ?? "").split(":").filter(Boolean).map((dir) => join(dir, name)));
-  return candidates.find((path) => existsSync(path)) ?? null;
-}
+export type * from "./protocol.js";
 
 const CALL_TIMEOUT_MS = 120_000;
+
+export type BoardBrowserFont = { family: string; path: string; script?: string };
+export type BoardBrowserPicture = { bytes: Uint8Array; mimeType: string };
+export type BoardBrowserPictureRequest = { key: string; edge: number } | { background: true };
+export type BoardBrowserFrameHandler = (info: BoardBrowserFrameInfo, bytes: Uint8Array) => Promise<void>;
+
+export type BoardBrowserResources = {
+  readFile(path: string): Promise<Uint8Array>;
+  readPicture(request: BoardBrowserPictureRequest): Promise<BoardBrowserPicture | null>;
+  frame: BoardBrowserFrameHandler;
+  fonts: readonly BoardBrowserFont[];
+};
+
+export type BoardBrowserMethod = "init" | "render" | "compile" | "profile" | "simulate" | "release";
+
+export type BoardBrowserPage = {
+  readonly browser: string;
+  call<T>(method: BoardBrowserMethod, params?: unknown, timeoutMs?: number): Promise<T>;
+  close(): Promise<void>;
+};
+
+export type BoardBrowser = {
+  readonly browser: string;
+  init(init: BoardBrowserInit): Promise<void>;
+  render(frame: BoardBrowserFrame): Promise<BoardBrowserFrameInfo & { bytes: Uint8Array }>;
+  simulate(input: BoardBrowserSimulation, onFrame: BoardBrowserFrameHandler): Promise<BoardSimulationResult>;
+  compile(shaders: BoardBrowserShader[]): Promise<Record<string, string>>;
+  profile(input: BoardBrowserProfileInput): Promise<BoardBrowserProfile>;
+  close(): Promise<void>;
+};
+
+export function boardBrowserCalls(page: BoardBrowserPage, receiver: { current: BoardBrowserFrameHandler | null }): BoardBrowser {
+  const receiving = async <T>(handler: BoardBrowserFrameHandler, work: () => Promise<T>): Promise<T> => {
+    receiver.current = handler;
+    try {
+      return await work();
+    } finally {
+      receiver.current = null;
+    }
+  };
+  return {
+    browser: page.browser,
+    init: (init) => page.call("init", init),
+    async render(frame) {
+      let bytes: Uint8Array | null = null;
+      const info = await receiving(async (_info, received) => { bytes = received; }, () => page.call<BoardBrowserFrameInfo>("render", frame));
+      if (!bytes) throw new Error("The browser drew no frame.");
+      return { ...info, bytes };
+    },
+    simulate: (input, onFrame) => receiving(onFrame, () => page.call<BoardSimulationResult>("simulate", input,
+      input.timeoutMs + 30_000 + (input.frame ? (input.render?.times?.length ?? 1) * input.frame.timeoutMs : 0))),
+    compile: (shaders) => page.call("compile", shaders),
+    profile: (input) => page.call("profile", input, Math.max(CALL_TIMEOUT_MS, input.budgetMs * 2 + 60_000)),
+    close: () => page.close(),
+  };
+}
 
 type Message = { id?: number; method?: string; sessionId?: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: { message: string } };
 
@@ -76,67 +129,63 @@ function devtools(input: Writable, output: Readable) {
   };
 }
 
-const PAGE = (fonts: readonly { family: string; file: string }[]) => `<!doctype html><meta charset="utf-8"><style>${fonts
+const PAGE = (fonts: readonly { family: string; file: string; script?: string }[]) => `<!doctype html><meta charset="utf-8"><meta name="cohub-fonts" content="${JSON.stringify(fonts).replaceAll("&", "&amp;").replaceAll('"', "&quot;")}"><style>${fonts
   .map(({ family, file }) => `@font-face{font-family:"${family}";src:url("fonts/${file}") format("woff2");font-weight:100 900}`)
   .join("")}</style><body>${fonts.map(({ family }) => `<span style="font-family:'${family}'">.</span>`).join("")}<script type="module" src="page.js"></script>`;
 
-export type BoardGpuResources = {
-  readModule(path: string): Promise<string>;
-  readFile(path: string): Promise<Uint8Array>;
-  readPicture(request: { key: string; edge: number } | { background: true }): Promise<{ bytes: Uint8Array; mimeType: string } | null>;
-  fonts: readonly { family: string; path: string }[];
-};
+async function body(request: IncomingMessage): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(chunk as Buffer);
+  const data = Buffer.concat(chunks);
+  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+}
 
-export type BoardGpuExporter = {
-  readonly browser: string;
-  init(init: BoardGpuInit): Promise<void>;
-  render(frame: BoardGpuFrame): Promise<Omit<BoardGpuResult, "data"> & { bytes: Uint8Array }>;
-  compile(shaders: BoardGpuShader[]): Promise<Record<string, string>>;
-  profile(input: BoardGpuProfileInput): Promise<BoardGpuProfile>;
-  release(): Promise<void>;
-  close(): Promise<void>;
-};
-
-export async function launchBoardGpuExporter(resources: BoardGpuResources, options: { browser: string; signal?: AbortSignal }): Promise<BoardGpuExporter> {
-  const bundle = packagePath("dist", "board-gpu", "page.js");
-  if (!existsSync(bundle)) throw new Error("This CLI build has no GPU exporter; reinstall @neta-art/cohub-cli.");
+export async function launchBoardBrowser(resources: BoardBrowserResources, options: { browser: string; signal?: AbortSignal }): Promise<BoardBrowserPage> {
+  const bundle = packagePath("dist", "board-browser", "page.js");
+  if (!existsSync(bundle)) throw new Error("This CLI build has no Board browser page; reinstall @neta-art/cohub-cli.");
   const token = randomBytes(16).toString("hex");
-  const fonts = resources.fonts.map(({ family, path }) => ({ family, path, file: basename(path) }));
+  const fonts = resources.fonts.map(({ family, path, script }) => ({ family, path, file: basename(path), ...(script ? { script } : {}) }));
   const server: Server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     const [, prefix, ...rest] = url.pathname.split("/");
     const route = rest.join("/");
     try {
       if (prefix !== token) throw Object.assign(new Error("Not found"), { status: 404 });
-      if (route === "") return void response.writeHead(200, { "content-type": "text/html" }).end(PAGE(fonts));
-      if (route === "page.js") return void response.writeHead(200, { "content-type": "text/javascript" }).end(await readFile(bundle));
+      if (route === "") return void response.writeHead(200, { "content-type": "text/html" }).end(PAGE(fonts.map(({ path: _path, ...font }) => font)));
+      const send = (type: string, data: Uint8Array) => void response.writeHead(200, { "content-type": type }).end(data);
+      if (route === "page.js") return send("text/javascript", await readFile(bundle));
       const font = route.startsWith("fonts/") && fonts.find(({ file }) => file === route.slice(6));
-      if (font) return void response.writeHead(200, { "content-type": "font/woff2" }).end(await readFile(font.path));
-      if (route === "module") {
-        const code = await resources.readModule(url.searchParams.get("path") ?? "");
-        return void response.writeHead(200, { "content-type": "text/javascript" }).end(code);
-      }
+      if (font) return send("font/woff2", await readFile(font.path));
       if (route === "file") {
         const path = url.searchParams.get("path") ?? "";
         if (!isSafeBoardSourcePath(path)) throw Object.assign(new Error("Not found"), { status: 404 });
-        return void response.writeHead(200, { "content-type": "application/octet-stream" }).end(await resources.readFile(path));
+        return send("application/octet-stream", await resources.readFile(path));
       }
       if (route === "asset") {
         const picture = await resources.readPicture(url.searchParams.has("background")
           ? { background: true }
           : { key: url.searchParams.get("key") ?? "", edge: Number(url.searchParams.get("edge")) || 4096 });
         if (!picture) throw Object.assign(new Error("Not found"), { status: 404 });
-        return void response.writeHead(200, { "content-type": picture.mimeType }).end(picture.bytes);
+        return send(picture.mimeType, picture.bytes);
+      }
+      if (route === "upload" && request.method === "POST") {
+        const data = await body(request);
+        const length = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, true);
+        const info = JSON.parse(new TextDecoder().decode(data.subarray(4, 4 + length))) as BoardBrowserFrameInfo;
+        await resources.frame(info, data.subarray(4 + length));
+        return void response.writeHead(204).end();
       }
       throw Object.assign(new Error("Not found"), { status: 404 });
     } catch (error) {
-      response.writeHead((error as { status?: number }).status ?? 500).end(error instanceof Error ? error.message : String(error));
+      if (!response.headersSent) response.writeHead((error as { status?: number }).status ?? 500);
+      response.end(error instanceof Error ? error.message : String(error));
     }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
-  const profile = await mkdtemp(join(tmpdir(), "cohub-board-gpu-"));
+  const profile = await mkdtemp(join(tmpdir(), "cohub-board-browser-"));
   let chrome: ChildProcess | null = null;
+  let stderr = "";
   const close = async () => {
     const child = chrome;
     chrome = null;
@@ -152,14 +201,19 @@ export async function launchBoardGpuExporter(resources: BoardGpuResources, optio
     await rm(profile, { recursive: true, force: true }).catch(() => {});
   };
   const start = async (sandbox: boolean) => {
+    stderr = "";
     const child = spawn(options.browser, [
       "--headless=new", "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
       "--disable-extensions", "--disable-background-networking", "--mute-audio", "--hide-scrollbars", "--enable-unsafe-swiftshader",
       ...(sandbox ? [] : ["--no-sandbox"]), "about:blank",
-    ], { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
-    const [, , , input, output] = child.stdio as [null, null, null, Writable, Readable];
+    ], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
+    const [, , errors, input, output] = child.stdio as [null, null, Readable, Writable, Readable];
+    errors.setEncoding("utf8");
+    errors.on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(-2000);
+    });
     const protocol = devtools(input, output);
-    child.once("exit", () => protocol.fail(new Error("The browser stopped.")));
+    child.once("exit", () => protocol.fail(new Error(`The browser stopped.${stderr.trim() ? `\n${stderr.trim().split("\n").slice(-4).join("\n")}` : ""}`)));
     child.once("error", (error) => protocol.fail(error));
     chrome = child;
     return { protocol, created: await protocol.send("Target.createTarget", { url: "about:blank" }) };
@@ -176,41 +230,32 @@ export async function launchBoardGpuExporter(resources: BoardGpuResources, optio
     let crashed: string | null = null;
     protocol.listen((message) => {
       if (message.sessionId === sessionId && message.method === "Runtime.exceptionThrown")
-        crashed ??= String((message.params?.exceptionDetails as { exception?: { description?: string } })?.exception?.description ?? "The export page failed.");
+        crashed ??= String((message.params?.exceptionDetails as { exception?: { description?: string } })?.exception?.description ?? "The Board page failed.");
     });
     await page("Runtime.enable");
     await page("Page.enable");
     await page("Page.navigate", { url: `http://127.0.0.1:${port}/${token}/` });
-    const call = async <T>(expression: string, timeoutMs = CALL_TIMEOUT_MS): Promise<T> => {
+    const evaluate = async <T>(expression: string, timeoutMs = CALL_TIMEOUT_MS): Promise<T> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const expired = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error("The GPU exporter stopped responding; a shader may be too heavy to render.")), timeoutMs);
+        timer = setTimeout(() => reject(new Error("The browser stopped responding; a script or shader may be too heavy.")), Math.min(timeoutMs, 2 ** 31 - 1));
       });
       const reply = await Promise.race([page("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }), expired])
         .finally(() => clearTimeout(timer)) as {
         result?: { value?: T };
         exceptionDetails?: { exception?: { description?: string }; text?: string };
       };
-      if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description?.split("\n")[0] ?? reply.exceptionDetails.text ?? "The export page failed.");
+      if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description?.replace(/^Error: /, "").split("\n    at ")[0] ?? reply.exceptionDetails.text ?? "The Board page failed.");
       return reply.result?.value as T;
     };
-    const loaded = () => call<boolean>("Boolean(globalThis.cohubBoardGpu)", 5_000).catch(() => false);
+    const loaded = () => evaluate<boolean>("Boolean(globalThis.cohubBoard)", 5_000).catch(() => false);
     for (const started = Date.now(); !(await loaded());) {
-      if (crashed || Date.now() - started > 20_000) throw new Error(crashed ?? "The GPU exporter did not start.");
+      if (crashed || Date.now() - started > 20_000) throw new Error(crashed ?? "The Board page did not start.");
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     return {
       browser: options.browser,
-      async init(init) {
-        await call(`cohubBoardGpu.init(${JSON.stringify(init)})`);
-      },
-      compile: (shaders) => call<Record<string, string>>(`cohubBoardGpu.compile(${JSON.stringify(shaders)})`),
-      profile: (input) => call<BoardGpuProfile>(`cohubBoardGpu.profile(${JSON.stringify(input)})`, Math.max(CALL_TIMEOUT_MS, input.budgetMs * 2 + 60_000)),
-      async render(frame) {
-        const { data, ...rest } = await call<BoardGpuResult>(`cohubBoardGpu.render(${JSON.stringify(frame)})`);
-        return { ...rest, bytes: new Uint8Array(Buffer.from(data, "base64")) };
-      },
-      release: () => call("cohubBoardGpu.release()"),
+      call: (method, params, timeoutMs) => evaluate(`cohubBoard.${method}(${params === undefined ? "" : JSON.stringify(params)})`, timeoutMs),
       close,
     };
   } catch (error) {

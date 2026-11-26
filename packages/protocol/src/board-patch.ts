@@ -161,6 +161,11 @@ const SCRIPT_PARAMETER: BoardPropertySpec = {
 	schema: z.json().describe("Numbers blend and colors mix between keyframes; other values step."),
 };
 
+const SCRIPT_TIME: BoardPropertySpec = {
+	kind: "number",
+	schema: z.number().finite().nonnegative().describe("The script's time in milliseconds; frame.t follows it."),
+};
+
 function kindOf(schema: unknown, path: readonly string[]): BoardValueKind {
 	const leaf = path[path.length - 1];
 	if (path.length === 1 && leaf === "scale") return "scale";
@@ -185,10 +190,12 @@ export function resolveBoardProperty(
 		return spec ? { ok: true, spec } : { ok: false, message: `animations are driven through time` };
 	}
 	if (targetType === "script") {
+		if (property === "time") return { ok: true, spec: SCRIPT_TIME };
 		return /^params\.[^.]+$/.test(property)
 			? { ok: true, spec: SCRIPT_PARAMETER }
-			: { ok: false, message: `Board scripts animate params.<name>, not ${property}` };
+			: { ok: false, message: `Board scripts animate time or params.<name>, not ${property}` };
 	}
+	if (property === "script.time") return { ok: true, spec: SCRIPT_TIME };
 	if (/^script\.params\.[^.]+$/.test(property)) return { ok: true, spec: SCRIPT_PARAMETER };
 	const path = property.split(".");
 	if (path.some((segment) => !segment) || NOT_ANIMATABLE.has(path[0] as string)) {

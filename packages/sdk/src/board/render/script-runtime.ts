@@ -287,7 +287,7 @@ export function createScriptRuntime(
     },
     step(t: number) {
       if (disposed) return;
-      if (!Number.isFinite(t) || t < time - 0.001)
+      if (!Number.isFinite(t) || (t < time - 0.001 && frames.size))
         throw new Error("Reset the instance before seeking backwards.");
       const update = (at: number, dt: number) => {
         frame = {
