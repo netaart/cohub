@@ -1,4 +1,8 @@
-import type { SessionTurnRecord } from "@cohub/protocol/model";
+import type {
+	SessionTurnIndexItem,
+	SessionTurnRecord,
+} from "@cohub/protocol/model";
+import { turnPhase } from "#lib/session-record-merge.ts";
 
 export function mergeTurnsById(
 	existing: SessionTurnRecord[],
@@ -16,6 +20,23 @@ export function mergeTurnsById(
 		byId.set(turn.id, mergeTurnRecord(current, turn, preferIncoming));
 	}
 	return Array.from(byId.values()).sort((a, b) => a.sequence - b.sequence);
+}
+
+/**
+ * Ids of cached turns the index already shows in a later phase. Index items
+ * lack the final record (stop reason, summary, meta), so callers refetch them.
+ */
+export function turnsBehindIndex(
+	turns: SessionTurnRecord[],
+	index: SessionTurnIndexItem[],
+) {
+	const indexStatus = new Map(index.map((item) => [item.id, item.status]));
+	return turns
+		.filter((turn) => {
+			const status = indexStatus.get(turn.id);
+			return status !== undefined && turnPhase(status) > turnPhase(turn.status);
+		})
+		.map((turn) => turn.id);
 }
 
 function isTerminal(status: SessionTurnRecord["status"]) {

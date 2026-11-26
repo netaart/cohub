@@ -5,6 +5,7 @@ import { sdk } from "#lib/sdk.ts";
 
 export function createSessionTurnLoadingController(options: {
 	getSpaceId: () => string;
+	onIndexLoaded: (sessionId: string) => void;
 }) {
 	let turnIndexBySessionId = $state<Record<string, SessionTurnIndexItem[]>>({});
 	let turnIndexLoadingBySessionId = $state<Record<string, boolean>>({});
@@ -62,6 +63,7 @@ export function createSessionTurnLoadingController(options: {
 					delete nextRetryAfterBySessionId[sessionId];
 					turnIndexRetryAfterBySessionId = nextRetryAfterBySessionId;
 				}
+				options.onIndexLoaded(sessionId);
 			} catch (error) {
 				if (options.getSpaceId() !== requestSpaceId) return;
 				const retryDelayMs =

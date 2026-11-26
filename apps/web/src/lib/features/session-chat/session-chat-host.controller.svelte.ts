@@ -148,7 +148,7 @@ import {
 } from "#lib/stores/session-list-cache.ts";
 import { unreadTracker } from "#lib/stores/session-state.svelte.ts";
 import { sessionStore } from "#lib/stores/session-store.ts";
-import { mergeTurnsById } from "#lib/stores/turn-cache.ts";
+import { mergeTurnsById, turnsBehindIndex } from "#lib/stores/turn-cache.ts";
 import {
 	loadMessageToolCalls,
 	loadTurnIntermediate,
@@ -302,6 +302,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	}
 	const turnLoading = createSessionTurnLoadingController({
 		getSpaceId: () => spaceId,
+		onIndexLoaded: settleTurnsFromIndex,
 	});
 	const tasks = createSessionTaskController();
 	const generationPolicy = createSessionGenerationPolicyController({
@@ -1481,9 +1482,13 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		});
 	}
 
-	async function refreshSessionAfterStaleFollowupAction(sessionId: string) {
+	async function refreshSessionAfterStaleFollowupAction(
+		sessionId: string,
+		turnId: string,
+	) {
 		clearComposerError();
 		await syncSessionNewer(sessionId, null).catch(() => undefined);
+		await hydrateTurnOnce({ sessionId, turnId, reason: "stale-followup" });
 	}
 
 	async function handleSteerFollowup(turnId: string) {
@@ -1517,7 +1522,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			}
 		} catch (error) {
 			if (error instanceof HttpError && error.status === 409) {
-				await refreshSessionAfterStaleFollowupAction(sessionId);
+				await refreshSessionAfterStaleFollowupAction(sessionId, turnId);
 				return;
 			}
 			setComposerError(
@@ -1559,7 +1564,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			}
 		} catch (error) {
 			if (error instanceof HttpError && error.status === 409) {
-				await refreshSessionAfterStaleFollowupAction(sessionId);
+				await refreshSessionAfterStaleFollowupAction(sessionId, turnId);
 				return;
 			}
 			setComposerError(
@@ -2126,6 +2131,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						oldestCursor: cached.oldestSequence ?? undefined,
 					},
 				};
+				settleTurnsFromIndex(sessionId);
 			}
 			workspace.loadingSessionIds = {
 				...loadingSessionIds,
@@ -2256,6 +2262,15 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 
 	async function loadTurnIndex(sessionId: string, force = false) {
 		await turnLoading.loadTurnIndex(sessionId, force);
+	}
+
+	function settleTurnsFromIndex(sessionId: string) {
+		const index = turnLoading.turnIndexBySessionId[sessionId];
+		const turns = sessionStateById[sessionId]?.turns;
+		if (!index || !turns) return;
+		for (const turnId of turnsBehindIndex(turns, index)) {
+			void hydrateTurnOnce({ sessionId, turnId, reason: "turn-index" });
+		}
 	}
 
 	function getTurnAnchorNode(sequence: number) {
@@ -2685,7 +2700,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					[input.sessionId]: {
 						...latest,
 						session: snapshot.session ?? latest.session,
-						turns: snapshot.turns,
+						turns: normalizeTurnDuplicates(
+							mergeTurnsById(latest.turns, snapshot.turns),
+						),
 					},
 				};
 				input.onHydrated?.();
