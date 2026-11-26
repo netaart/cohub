@@ -208,7 +208,7 @@ cohub runtime detach --harness codex
 
 **Data plane.** A harness's own session file is the durable record and the outbox. The Runtime
 watches every harness's session tree (the bound folder and its subdirectories, except a subdirectory
-bound to a Space of its own) and sends Turns over
+bound to a Space of its own, even one bound while it runs) and sends Turns over
 its Runtime WebSocket. Persistence is event-driven and separate from realtime: a transcript is parsed
 only when a Turn begins or ends in it — reported by the control plane (Pi's prompt and settle, Codex's
 `turn/completed`) or found as a boundary record in the bytes the harness just appended. Between those

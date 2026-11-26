@@ -218,7 +218,11 @@ export class NativeIngest {
   }
 
   exclude(nested: string[]): void {
-    this.nested = nested.filter((root) => !containsNativePath(root, this.options.cwd) && containsNativePath(this.options.cwd, root));
+    const next = nested.filter((root) => !containsNativePath(root, this.options.cwd) && containsNativePath(this.options.cwd, root)).sort();
+    if (next.join("\0") === this.nested.join("\0")) return;
+    this.nested = next;
+    // Files skipped as outside the scope are judged again on their next write.
+    this.foreign.clear();
   }
 
   configure(harnesses: Harness[], enabledAt: string): void {

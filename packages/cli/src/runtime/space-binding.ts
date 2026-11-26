@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import { watch, type FSWatcher } from "node:fs";
 import { chmod, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir, stat, utimes, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 const CONFIG_DIR_NAME = ".config";
@@ -105,6 +106,18 @@ export async function readRuntimeSpaceBindings(
     if (missing(error)) return { version: 1, bindings: [] };
     throw error;
   }
+}
+
+/** Call `onChange` whenever the bindings file is written; it is replaced by rename, so its directory is watched. */
+export async function watchRuntimeSpaceBindings(
+  onChange: () => void,
+  path = runtimeSpaceBindingsPath(),
+): Promise<FSWatcher> {
+  const name = basename(path);
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  return watch(dirname(path), (_event, file) => {
+    if (!file || file.toString() === name) onChange();
+  });
 }
 
 export function findRuntimeSpaceBinding(
