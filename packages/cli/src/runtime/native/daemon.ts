@@ -18,7 +18,7 @@ import { ExecutionResults } from "./results.js";
 import { NativeSessions } from "./sessions.js";
 import { codexTranslator, LiveProgress, piTranslator, type Translator } from "./translate.js";
 import { nativeWebSocketTransport } from "./transport.js";
-import { readRuntimeSpaceBindings } from "../space-binding.js";
+import { readRuntimeSpaceBindings, watchRuntimeSpaceBindings } from "../space-binding.js";
 import { WarmHosts } from "../harnesses/warm-hosts.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
@@ -28,6 +28,8 @@ const STREAM_INTERVAL_MS = 250;
 const FILE_PREVIEW_INTERVAL_MS = 2_000;
 /** A file preview waits at least this many times as long as its last read took. */
 const FILE_PREVIEW_COST_FACTOR = 20;
+/** A rewrite of the bindings file settles before the scope is read again. */
+const SCOPE_DEBOUNCE_MS = 100;
 
 export type NativeStatus = {
   synced: Harness[];
@@ -56,6 +58,8 @@ export class NativeRuntime {
   private send: ((event: NativeRuntimeEvent) => Promise<unknown>) | null = null;
   private readonly approvals = new ApprovalBroker();
   private extension: PiExtensionState = "missing";
+  private scope: Promise<void> = Promise.resolve();
+  private scopeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: {
     spaceId: string;
@@ -147,6 +151,11 @@ export class NativeRuntime {
     const degraded = (event: string) => (error: unknown) => this.options.diagnostics.log("warn", event, { error: serializeDiagnosticError(error) }, { component: "native" });
     await this.ingest.load().catch(degraded("native.ledger_unreadable"));
     await this.refreshScope();
+    // A subdirectory bound to its own Space while this Runtime runs leaves its scope at once.
+    await watchRuntimeSpaceBindings(() => this.scheduleScopeRefresh()).then((watcher) => {
+      watcher.on("error", degraded("native.bindings_watch_failed"));
+      signal.addEventListener("abort", () => watcher.close(), { once: true });
+    }, degraded("native.bindings_watch_unavailable"));
     if (this.options.harnesses.includes("pi")) {
       const version = await harnessVersion(this.options.executables.pi || "pi");
       if (!atLeast(version, PI_MIN_VERSION)) this.pi.unavailable = `Pi ${formatVersion(version)} is older than Cohub supports for live control (${PI_MIN_VERSION.join(".")}+); upgrade Pi, then restart the Runtime`;
@@ -213,12 +222,26 @@ export class NativeRuntime {
     return this.status();
   }
 
-  private async refreshScope(): Promise<void> {
-    const { bindings } = await readRuntimeSpaceBindings().catch(() => ({ bindings: [] }));
-    this.ingest.exclude(bindings.filter((binding) => binding.key === this.options.identity && binding.spaceId !== this.options.spaceId).map((binding) => binding.root));
+  private scheduleScopeRefresh(): void {
+    this.scopeTimer ??= setTimeout(() => { this.scopeTimer = null; void this.refreshScope(); }, SCOPE_DEBOUNCE_MS);
+    this.scopeTimer.unref?.();
+  }
+
+  /** Subdirectories bound to other Spaces are theirs; an unreadable bindings file keeps the current scope. */
+  private refreshScope(): Promise<void> {
+    this.scope = this.scope.then(async () => {
+      try {
+        const { bindings } = await readRuntimeSpaceBindings();
+        this.ingest.exclude(bindings.filter((binding) => binding.key === this.options.identity && binding.spaceId !== this.options.spaceId).map((binding) => binding.root));
+      } catch (error) {
+        this.options.diagnostics.log("warn", "native.bindings_unreadable", { error: serializeDiagnosticError(error) }, { component: "native" });
+      }
+    });
+    return this.scope;
   }
 
   async close(signal: AbortSignal): Promise<void> {
+    if (this.scopeTimer) clearTimeout(this.scopeTimer);
     for (const stream of this.streams.values()) stream.progress.dispose();
     for (const preview of this.filePreviews.values()) { preview.progress.dispose(); if (preview.timer) clearTimeout(preview.timer); }
     await Promise.allSettled([this.pi.close(), this.codex.close(), this.executor.warm.close(), this.ingest.close(signal)]);
