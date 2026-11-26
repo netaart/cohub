@@ -3369,14 +3369,14 @@ function webhookPayment(event: VerifiedOutboundWebhookEvent, businessKey: string
   const payment =
     event.type === "order.paid"
       ? ["checkout", "provider_payment"].includes(event.data.object.fulfillment_source) && event.data.object
-      : event.type === "subscription.activated"
+      : event.type === "subscription.activated" || event.type === "subscription.renewed"
         ? event.data.paid_period.fulfillment_source === "provider" && event.data.paid_period
         : null;
   if (!payment || payment.paid_amount_snapshot <= 0) return null;
   return { userId: event.customer.external_user_id, paidAt: new Date(payment.paid_at) };
 }
 
-export function parseWebhook(input: { rawBody: string; headers: Headers; secret: string; businessKey: string }): BillingWebhookEvent {
+export function parseWebhook(input: { rawBody: Uint8Array; headers: Headers; secret: string; businessKey: string }): BillingWebhookEvent {
   let event: VerifiedOutboundWebhookEvent;
   try {
     event = constructEvent(input.rawBody, input.headers, input.secret);

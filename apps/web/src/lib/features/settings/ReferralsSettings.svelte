@@ -118,7 +118,10 @@ async function shareLink() {
 	try {
 		await share({
 			title: m.referral_try_title({}, { locale }),
-			text: m.referral_share_text({ amount: inviteeAmount }, { locale }),
+			text: m.referral_share_text(
+				{ amount: inviteeAmount, days: dashboard.reward.paymentWindowDays },
+				{ locale },
+			),
 			url: referralUrl,
 		});
 	} catch {

@@ -13,9 +13,9 @@ const queue = createBullmqQueue<SessionMessagePostprocessJobData>(COHUB_SYSTEM_Q
 });
 
 /**
- * Enqueue LLM-message side effects (billing, referral, hourly usage).
+ * Enqueue LLM-message side effects (billing, hourly usage).
  *
- * No fixed jobId: steps are idempotent (llm op id, referral lease, usageAggregatedAt CAS),
+ * No fixed jobId: steps are idempotent (llm op id, usageAggregatedAt CAS),
  * and a stable jobId would block re-drive while a failed/completed job still exists.
  */
 export const enqueueSessionMessagePostprocess = async (input: {

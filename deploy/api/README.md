@@ -137,7 +137,7 @@ API 支持可插拔 Talesofai Billing。`secrets.yaml` 中以下三项全部非�
 
 禁用时 API 仍可启动，业务侧会跳过 LLM billing preflight 和 usage record，前端余额入口会隐藏。
 
-可选的 `TALESOFAI_BILLING_WEBHOOK_SECRET` 是 billing 出站 webhook endpoint 的签名密钥（`whsec_...`），只需配置在 API 上。endpoint 指向 `https://<API 域名>/api/billing/webhooks`，只挂个人 billing business，订阅 `order.paid` 与 `subscription.activated`；邀请奖励在被邀请人首次付费时由它触发。未配置时该接口返回 503，billing 会按退避重投约 3 天，因此先建 endpoint、再部署密钥不会丢事件。
+可选的 `TALESOFAI_BILLING_WEBHOOK_SECRET` 是 billing 出站 webhook endpoint 的签名密钥（`whsec_...`），只需配置在 API 上。endpoint 指向 `https://<API 域名>/api/billing/webhooks`，只挂个人 billing business，订阅 `order.paid`、`subscription.activated` 与 `subscription.renewed`；邀请奖励在被邀请人首次付费时由它触发。未配置时该接口返回 503，billing 会按退避重投约 3 天，因此先建 endpoint、再部署密钥不会丢事件。
 
 可选的 `TALESOFAI_BILLING_SPACE_WALLET_BUSINESS_KEY` 仅启用 Space 钱包，必须与个人 billing business 不同，并在 API、task worker、system worker 中保持一致。未配置或与个人 business 相同时，个人扣费照常，钱包充值关闭。钱包 business 不配置默认套餐，并使用自己的公开一次性充值商品（`meta.appName = "cohub"`、`business / purchased / usd_micro_cent`）。不要通过关闭个人默认套餐来规避免费额度。完整配置、迁移与验收边界见 [`docs/space-wallet.md`](../../docs/space-wallet.md)。
 

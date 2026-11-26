@@ -50,9 +50,13 @@ const orderPaid = (overrides: { paid?: number; source?: string; businessKey?: st
     overrides.businessKey,
   );
 
-const subscriptionActivated = (source: string) => {
+const subscriptionPaid = (source: string, type = "subscription.activated") => {
   const period = { start: paidAt, end: "2026-12-26T08:00:00.000Z" };
-  return envelope("subscription.activated", "subscription", {
+  const renewal =
+    type === "subscription.renewed"
+      ? { previous_attributes: { status: "active", current_period_start: "2026-10-26T08:00:00.000Z", current_period_end: paidAt } }
+      : {};
+  const event = envelope(type, "subscription", {
     object: {
       id: randomUUID(),
       status: "active",
@@ -83,6 +87,7 @@ const subscriptionActivated = (source: string) => {
       fulfillment_source: source,
     },
   });
+  return { ...event, ...renewal };
 };
 
 const deliver = (event: { id: string }, signingKey = key) => {
@@ -90,11 +95,16 @@ const deliver = (event: { id: string }, signingKey = key) => {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = createHmac("sha256", signingKey).update(`${event.id}.${timestamp}.${rawBody}`).digest("base64");
   const headers = new Headers({ "webhook-id": event.id, "webhook-timestamp": timestamp, "webhook-signature": `v1,${signature}` });
-  return parseBillingWebhook({ rawBody, headers });
+  return parseBillingWebhook({ rawBody: new TextEncoder().encode(rawBody), headers });
 };
 
 test("real payments carry the payer and payment time", async () => {
-  for (const event of [orderPaid(), orderPaid({ source: "provider_payment" }), subscriptionActivated("provider")]) {
+  for (const event of [
+    orderPaid(),
+    orderPaid({ source: "provider_payment" }),
+    subscriptionPaid("provider"),
+    subscriptionPaid("provider", "subscription.renewed"),
+  ]) {
     const parsed = await deliver(event);
     assert.equal(parsed.id, event.id);
     assert.deepEqual(parsed.payment, { userId: "user-1", paidAt: new Date(paidAt) });
@@ -107,7 +117,8 @@ test("redemptions, manual grants, free orders and other businesses are not payme
     orderPaid({ source: "manual" }),
     orderPaid({ paid: 0 }),
     orderPaid({ businessKey: "cohub-space-wallet" }),
-    subscriptionActivated("manual"),
+    subscriptionPaid("manual"),
+    subscriptionPaid("redemption", "subscription.renewed"),
   ]) {
     assert.equal((await deliver(event)).payment, null);
   }

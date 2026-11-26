@@ -26,7 +26,7 @@ router.post(
   async (c) => {
     let event: BillingWebhookEvent;
     try {
-      event = await parseBillingWebhook({ rawBody: await c.req.text(), headers: c.req.raw.headers });
+      event = await parseBillingWebhook({ rawBody: new Uint8Array(await c.req.arrayBuffer()), headers: c.req.raw.headers });
     } catch (error) {
       if (error instanceof BillingConfigurationError) return c.json({ message: error.message }, 503);
       if (error instanceof BillingWebhookVerificationError) {
