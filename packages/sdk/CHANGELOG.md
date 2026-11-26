@@ -1,5 +1,14 @@
 # @neta-art/cohub
 
+## 13.30.1
+
+### Patch Changes
+
+- 32c3617: Fork a Chat from any settled turn, whichever runtime ran it: `cohub spaces sessions turns fork <sessionId> <turnId>` and the SDK's `canForkTurn`. History handed to a new Claude Code file keeps thinking that Cohub-run Turns recorded from the same named endpoint, redacted reasoning included; Claude Code's own `redacted_thinking` is now kept when its transcripts sync. The Runtime logs what a handoff could not carry (`native.projection_loss`).
+- dea2dbf: A Turn a lost Runtime never started now fails without asking for a stop confirmation; a confirmed stop also ends a harness the lost Runtime left running. Claude Code, WorkBuddy and Codex report usage limits with their reset time, and discovery probes no longer let mise shims install tools or hang past their timeout.
+  
+  Claude Code keeps its process between clean Turns of a Session, so a follow-up starts without a cold start.
+
 ## 13.30.0
 
 ### Minor Changes
