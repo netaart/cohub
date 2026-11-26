@@ -139,7 +139,7 @@ test("unknown fields remain absent and zero remains a valid observed value", () 
 const tool = (id: string, start?: number, end?: number): ContentBlock => ({ type: "tool_use", id, name: "bash", input: {}, _meta: { timing: { ...(start != null ? { startedAt: new Date(start).toISOString() } : {}), ...(end != null ? { completedAt: new Date(end).toISOString() } : {}) } } });
 test("tool intervals union parallel and nested tools and deduplicate result blocks", () => {
   const metrics = collectToolMetrics([[tool("wrapper", 1000, 10000), tool("a", 2000, 5000), tool("b", 3000, 8000)], [{ type: "tool_result", tool_use_id: "a", content: "failed", is_error: true }, tool("c", 11000, 12000)]]);
-  assert.deepEqual(metrics, { calls: 4, errors: 1, timedCalls: 4, activeMs: 10000 });
+  assert.deepEqual(metrics, { calls: 4, errors: 1, timedCalls: 4, activeMs: 10000, intervals: [[1000, 10000], [11000, 12000]] });
 });
 
 test("missing or reversed tool intervals are not treated as zero-duration observations", () => {

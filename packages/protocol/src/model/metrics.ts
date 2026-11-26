@@ -22,7 +22,12 @@ export const requestMetricSchema = z.object({
 });
 export type RequestMetric = z.infer<typeof requestMetricSchema>;
 
-const toolMetricsSchema = z.object({ calls: count, errors: count, timedCalls: count, activeMs: count.nullable() });
+/** Merged wall-clock tool intervals kept for timelines; the closest are coalesced beyond this many on write. */
+const TOOL_TIMELINE_INTERVALS = 64;
+const toolMetricsSchema = z.object({
+  calls: count, errors: count, timedCalls: count, activeMs: count.nullable(),
+  intervals: z.array(z.tuple([count, count])).optional(),
+});
 export type ToolMetrics = z.infer<typeof toolMetricsSchema>;
 export const turnMetricsSchema = z.object({
   version: z.literal(1),
@@ -308,8 +313,23 @@ export function collectToolMetrics(contents: readonly (readonly ContentBlock[])[
     tools.set(id, { error: previous?.error === true || (block.type === "tool_result" && block.is_error === true), start: start ?? previous?.start ?? null, end: end ?? previous?.end ?? null });
   }
   const intervals = [...tools.values()].flatMap(({ start, end }) => start != null && end != null && end >= start ? [[start, end] as const] : []).sort((a, b) => a[0] - b[0]);
-  let activeMs = 0;
-  let through = 0;
-  for (const [start, end] of intervals) { activeMs += Math.max(0, end - Math.max(start, through)); through = Math.max(through, end); }
-  return { calls: tools.size, errors: [...tools.values()].filter((tool) => tool.error).length, timedCalls: intervals.length, activeMs: intervals.length ? activeMs : tools.size ? null : 0 };
+  const merged: [number, number][] = [];
+  for (const [start, end] of intervals) {
+    const last = merged.at(-1);
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+  const activeMs = merged.reduce((total, [start, end]) => total + end - start, 0);
+  const gap = (index: number) => merged[index]![0] - merged[index - 1]![1];
+  while (merged.length > TOOL_TIMELINE_INTERVALS) {
+    let at = 1;
+    for (let index = 2; index < merged.length; index++) if (gap(index) < gap(at)) at = index;
+    merged[at - 1]![1] = merged[at]![1];
+    merged.splice(at, 1);
+  }
+  return {
+    calls: tools.size, errors: [...tools.values()].filter((tool) => tool.error).length, timedCalls: intervals.length,
+    activeMs: intervals.length ? activeMs : tools.size ? null : 0,
+    ...(merged.length ? { intervals: merged } : {}),
+  };
 }

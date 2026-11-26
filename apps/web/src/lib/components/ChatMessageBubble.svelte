@@ -68,7 +68,7 @@ import { m } from "#lib/paraglide/messages.js";
 import { readSentFrom } from "#lib/sent-turns.ts";
 import type { ChatMessage } from "#lib/session-tree.ts";
 import { createSpaceWorkspaceAssetResolver } from "#lib/space-workspace-assets.ts";
-import type { StatsContext } from "#lib/stats-view-model.ts";
+import { buildTurnTimeline, type StatsContext } from "#lib/stats-view-model.ts";
 import { sessionInitiatorName } from "#lib/stores/chats-filter.ts";
 import {
 	formatCompactAbsoluteTime,
@@ -420,14 +420,23 @@ const footerStats = $derived.by(() => {
 	});
 	return { ...stats, turns: 0 };
 });
+const turnMetrics = $derived(
+	message.meta?.turn ? readTurnMetrics(message.meta.turn.meta) : null,
+);
 const footerRequests = $derived.by(() => {
-	if (message.meta?.turn) {
-		const metrics = readTurnMetrics(message.meta.turn.meta);
-		return metrics ? Object.values(metrics.requests ?? {}) : [];
-	}
+	if (message.meta?.turn) return Object.values(turnMetrics?.requests ?? {});
 	const receipt = requestMetricSchema.safeParse(message.meta?.llmTiming);
 	return receipt.success ? [receipt.data] : [];
 });
+const footerTimeline = $derived(
+	turnMetrics
+		? buildTurnTimeline(
+				footerRequests,
+				turnMetrics.tools?.intervals ?? [],
+				locale,
+			)
+		: null,
+);
 const hasDuration = $derived.by(() => {
 	const durationMs = message.meta?.durationMs;
 	return (
@@ -809,7 +818,7 @@ function handleCopy() {
                 {#if hasDuration}<span class="shrink-0 whitespace-nowrap tabular-nums text-text-placeholder/65">{durationDisplay}</span>{/if}
                 {#if !tokenDisplay && !hasDuration}<span class="text-text-placeholder/65">{m.stats_turn({}, { locale })}</span>{/if}
               {/snippet}
-              <StatsContent stats={footerStats} scope="turn" requests={footerRequests} identity={statsIdentity} context={statsContext} modelName={statsModelName} />
+              <StatsContent stats={footerStats} scope="turn" requests={footerRequests} timeline={footerTimeline} identity={statsIdentity} context={statsContext} modelName={statsModelName} />
             </StatsPopover>
           {:else}
             {#if hasUsage && tokenDisplay}<span class={getTokenDisplayClass(inputContextPercent)} title={tokenDetailText}>{tokenDisplay}</span>{/if}

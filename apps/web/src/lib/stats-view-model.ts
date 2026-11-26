@@ -1,4 +1,9 @@
-import type { ExecutionStats, RequestMetric } from "@cohub/protocol/model";
+import {
+	type ExecutionStats,
+	type RequestMetric,
+	readTurnStats,
+	type StatsTurn,
+} from "@cohub/protocol/model";
 import { formatDurationMs } from "#lib/format-duration.ts";
 import { formatTokenCount, getDisplayInputTokens } from "#lib/format-usage.ts";
 import { formatCurrency } from "#lib/i18n/format.ts";
@@ -56,10 +61,23 @@ export type StatsViewModel = {
 	tokens: StatsBreakdown | null;
 	models: StatsModelRow[];
 	extra: StatsItem[];
-	partial: boolean;
 };
 
 export type StatsContext = { tokens: number; window: number | null };
+
+export function statsToneClass(tone: StatsSegment["tone"]) {
+	if (tone === "brand") return "bg-brand";
+	if (tone === "strong") return "bg-text-tertiary";
+	if (tone === "muted") return "bg-text-placeholder/60";
+	return "bg-text-placeholder/30";
+}
+
+export const statsTimeTone = {
+	queue: "faint",
+	modelTime: "brand",
+	toolTime: "strong",
+	otherTime: "muted",
+} as const satisfies Record<string, StatsSegment["tone"]>;
 
 const finite = (value: number | null | undefined): value is number =>
 	typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -199,16 +217,16 @@ export function buildStatsViewModel(
 		);
 	const time = breakdown(
 		[
-			{ key: "queue", value: stats.queueMs, tone: "faint" },
-			{ key: "modelTime", value: stats.modelMs, tone: "brand" },
-			{ key: "toolTime", value: toolMs, tone: "strong" },
+			{ key: "queue", value: stats.queueMs, tone: statsTimeTone.queue },
+			{ key: "modelTime", value: stats.modelMs, tone: statsTimeTone.modelTime },
+			{ key: "toolTime", value: toolMs, tone: statsTimeTone.toolTime },
 			{
 				key: "otherTime",
 				value:
 					otherMs != null && otherMs > (stats.elapsedMs ?? 0) * 0.01
 						? otherMs
 						: null,
-				tone: "muted",
+				tone: statsTimeTone.otherTime,
 			},
 		],
 		duration,
@@ -275,75 +293,183 @@ export function buildStatsViewModel(
 		tokens: tokenBreakdown,
 		models: buildStatsModels(options.requests ?? [], locale),
 		extra,
-		partial: stats.partial,
 	};
 }
 
-export type TimelineRequest = {
-	id: string;
-	provider: string;
-	model: string;
-	status: RequestMetric["status"];
+export type StatsTimelinePart = {
+	key: "queue" | "modelTime" | "toolTime" | "otherTime";
 	left: number;
 	width: number;
-	firstToken: number;
-	output: number;
-	startMs: number;
+	failed?: boolean;
+};
+
+export type StatsTimelineRow = {
+	key: string;
+	label: string;
 	durationMs: number;
+	width: number;
+	parts: StatsTimelinePart[];
+	breakdown: StatsItem[];
+	request?: RequestMetric;
+	failed?: boolean;
 };
 
 export type StatsTimelineModel = {
-	requests: TimelineRequest[];
+	rows: StatsTimelineRow[];
 	durationMs: number;
 };
 
-function finiteTimestamp(value: number | undefined) {
-	return typeof value === "number" && Number.isFinite(value) ? value : null;
+const timestamp = (value: number | undefined) =>
+	typeof value === "number" && Number.isFinite(value) ? value : null;
+
+function timeline(
+	rows: Omit<StatsTimelineRow, "width">[],
+	locale: Locale,
+): StatsTimelineModel | null {
+	if (rows.length < 2) return null;
+	const durationMs = Math.max(1, ...rows.map((row) => row.durationMs));
+	return {
+		durationMs,
+		rows: rows.map((row) => ({
+			...row,
+			width: (row.durationMs / durationMs) * 100,
+			breakdown: [
+				...row.breakdown,
+				{ key: "elapsed", value: formatDurationMs(row.durationMs, locale) },
+			],
+		})),
+	};
 }
 
-export function buildStatsTimeline(
+function measure(
+	durationMs: number,
+	spans: Array<{
+		key: StatsTimelinePart["key"];
+		start: number;
+		end: number;
+		failed?: boolean;
+	}>,
+	locale: Locale,
+) {
+	const filled: typeof spans = [];
+	let cursor = 0;
+	const gap = (until: number) => {
+		if (until - cursor > durationMs * 0.01)
+			filled.push({ key: "otherTime", start: cursor, end: until });
+	};
+	for (const span of spans
+		.filter((span) => span.end > span.start)
+		.sort((a, b) => a.start - b.start)) {
+		gap(span.start);
+		filled.push(span);
+		cursor = Math.max(cursor, span.end);
+	}
+	gap(durationMs);
+	const totals = new Map<StatsLabelKey, number>();
+	for (const { key, start, end } of filled)
+		totals.set(key, (totals.get(key) ?? 0) + end - start);
+	return {
+		parts: filled.map(({ key, start, end, failed }) => ({
+			key,
+			left: (start / durationMs) * 100,
+			width: ((end - start) / durationMs) * 100,
+			...(failed ? { failed } : {}),
+		})),
+		breakdown: [...totals].map(([key, ms]) => ({
+			key,
+			value: formatDurationMs(ms, locale),
+		})),
+	};
+}
+
+export function buildTurnTimeline(
 	requests: readonly RequestMetric[],
+	tools: readonly (readonly [number, number])[],
+	locale: Locale,
 ): StatsTimelineModel | null {
-	if (requests.length < 2) return null;
-	const starts = requests
-		.map((request) => finiteTimestamp(request.startedAt))
-		.filter((value): value is number => value != null);
-	if (starts.length < 2) return null;
-	const origin = Math.min(...starts);
-	const raw = requests.map((request, index) => {
-		const start = finiteTimestamp(request.startedAt) ?? origin;
-		const duration = finite(request.durationMs) ? request.durationMs : 0;
-		const completed = finiteTimestamp(request.completedAt);
-		const end =
-			completed != null
-				? Math.max(completed, start + duration)
-				: start + duration;
-		return { request, index, start, end };
-	});
-	const end = Math.max(...raw.map((item) => item.end), origin + 1);
-	const window = Math.max(1, end - origin);
-	const timeline = raw.map(({ request, index, start, end: requestEnd }) => {
-		const requestDuration = Math.max(1, requestEnd - start);
-		const firstTokenMs = Math.min(
-			requestDuration,
-			Math.max(0, request.firstTokenMs ?? 0),
+	const spans = requests
+		.flatMap((request) => {
+			const start = timestamp(request.startedAt);
+			if (start == null) return [];
+			const end = Math.max(
+				timestamp(request.completedAt) ?? start,
+				start + (finite(request.durationMs) ? request.durationMs : 0),
+			);
+			return [{ request, start, end }];
+		})
+		.sort((a, b) => a.start - b.start);
+	const rows = spans.map(({ request, start, end }, index) => {
+		const next = spans[index + 1]?.start;
+		const stepEnd = Math.max(
+			end,
+			next ??
+				Math.max(end, ...tools.filter(([s]) => s >= start).map(([, e]) => e)),
 		);
-		const outputMs = Math.min(
-			requestDuration - firstTokenMs,
-			Math.max(0, request.outputDurationMs ?? 0),
+		const durationMs = Math.max(1, stepEnd - start);
+		const failed =
+			request.status === "failed" || request.status === "interrupted";
+		const { parts, breakdown } = measure(
+			durationMs,
+			[
+				{ key: "modelTime", start: 0, end: end - start, failed },
+				...tools.map(([s, e]) => ({
+					key: "toolTime" as const,
+					start: Math.max(s, end) - start,
+					end: Math.min(e, stepEnd) - start,
+				})),
+			],
+			locale,
 		);
 		return {
-			id: request.id || `request-${index}`,
-			provider: request.provider,
-			model: request.model,
-			status: request.status,
-			left: Math.max(0, ((start - origin) / window) * 100),
-			width: Math.max(0.8, (requestDuration / window) * 100),
-			firstToken: (firstTokenMs / requestDuration) * 100,
-			output: (outputMs / requestDuration) * 100,
-			startMs: start - origin,
-			durationMs: requestDuration,
+			key: request.id || `request-${index}`,
+			label: String(index + 1),
+			durationMs,
+			parts,
+			breakdown,
+			request,
+			...(failed ? { failed } : {}),
 		};
 	});
-	return { requests: timeline, durationMs: window };
+	return timeline(rows, locale);
+}
+
+const SESSION_TIMELINE_TURNS = 50;
+
+export function buildSessionTimeline(
+	turns: readonly (StatsTurn & { sequence: number })[],
+	locale: Locale,
+): StatsTimelineModel | null {
+	const rows = [...turns]
+		.sort((a, b) => a.sequence - b.sequence)
+		.flatMap((turn) => {
+			const stats = readTurnStats(turn);
+			if (!stats.turns || !finite(stats.elapsedMs)) return [];
+			const queue = stats.queueMs ?? 0;
+			const durationMs = Math.max(1, queue + stats.elapsedMs);
+			const tool = Math.min(stats.toolMs ?? 0, durationMs - queue);
+			const modelEnd = Math.min(
+				queue + (stats.modelMs ?? 0),
+				durationMs - tool,
+			);
+			const { parts, breakdown } = measure(
+				durationMs,
+				[
+					{ key: "queue", start: 0, end: queue },
+					{ key: "modelTime", start: queue, end: modelEnd },
+					{ key: "toolTime", start: modelEnd, end: modelEnd + tool },
+				],
+				locale,
+			);
+			return [
+				{
+					key: String(turn.sequence),
+					label: String(turn.sequence),
+					durationMs,
+					parts,
+					breakdown,
+					...(turn.status === "completed" ? {} : { failed: true }),
+				},
+			];
+		});
+	return timeline(rows.slice(-SESSION_TIMELINE_TURNS), locale);
 }

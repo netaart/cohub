@@ -1,25 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { emptyExecutionStats, type RequestMetric } from "@cohub/protocol/model";
-import {
-	buildStatsTimeline,
-	buildStatsViewModel,
-} from "../lib/stats-view-model.ts";
-
-function request(overrides: Partial<RequestMetric> = {}): RequestMetric {
-	return {
-		id: "request",
-		provider: "provider",
-		model: "model",
-		startedAt: 1_000,
-		completedAt: 2_000,
-		durationMs: 1_000,
-		firstTokenMs: 200,
-		outputDurationMs: 700,
-		status: "completed",
-		...overrides,
-	};
-}
+import { emptyExecutionStats } from "@cohub/protocol/model";
+import { buildStatsViewModel } from "../lib/stats-view-model.ts";
 
 test("buildStatsViewModel shows each total once and explains it in breakdowns", () => {
 	const stats = {
@@ -75,33 +57,4 @@ test("buildStatsViewModel shows each total once and explains it in breakdowns", 
 		],
 	);
 	assert.deepEqual(turn.tokens?.facts, [{ key: "cache", value: "80%" }]);
-});
-
-test("buildStatsTimeline normalizes overlapping requests into one shared window", () => {
-	const timeline = buildStatsTimeline([
-		request({ id: "a", startedAt: 1_000, completedAt: 2_000 }),
-		request({
-			id: "b",
-			startedAt: 1_500,
-			completedAt: 3_000,
-			durationMs: 1_500,
-		}),
-	]);
-
-	assert.ok(timeline);
-	assert.equal(timeline.durationMs, 2_000);
-	assert.equal(timeline.requests[0]?.left, 0);
-	assert.equal(timeline.requests[1]?.left, 25);
-	assert.equal(timeline.requests[1]?.width, 75);
-});
-
-test("buildStatsTimeline stays hidden without at least two timestamped requests", () => {
-	assert.equal(buildStatsTimeline([request()]), null);
-	assert.equal(
-		buildStatsTimeline([
-			request(),
-			request({ id: "b", startedAt: Number.NaN }),
-		]),
-		null,
-	);
 });

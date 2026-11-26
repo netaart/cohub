@@ -1,11 +1,17 @@
 <script lang="ts">
 import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
-import type { SessionRecord } from "@neta-art/cohub";
+import type { SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
+import { ChevronDown } from "lucide-svelte";
 import { onMount } from "svelte";
+import {
+	type SessionTurnsSnapshot,
+	sessionTurnsRepo,
+} from "#lib/cache/repositories/session-turns-repo.ts";
 import StatsContent from "#lib/components/StatsContent.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { sdk } from "#lib/sdk.ts";
+import { buildSessionTimeline } from "#lib/stats-view-model.ts";
 import { sessionStore } from "#lib/stores/session-store.ts";
 
 let { session }: { session: SessionRecord } = $props();
@@ -13,6 +19,13 @@ const locale = $derived(getLocale());
 let fresh = $state<SessionStats | null>(null);
 let loading = $state(false);
 let failed = $state(false);
+let turns = $state.raw<SessionTurnRecord[]>([]);
+const timeline = $derived(
+	buildSessionTimeline(
+		turns.filter((turn) => (turn.sourceSessionId ?? session.id) === session.id),
+		locale,
+	),
+);
 const cached = $derived(readSessionStats(session.meta));
 const stats = $derived(
 	fresh && (!cached || fresh.revision > cached.revision) ? fresh : cached,
@@ -46,18 +59,32 @@ async function refresh() {
 		if (!controller.signal.aborted) loading = false;
 	}
 }
+const tail = (snapshot: SessionTurnsSnapshot) =>
+	snapshot.hasMoreNewer ? [] : snapshot.turns;
 onMount(() => {
 	void refresh();
-	return () => request?.abort();
+	const { spaceId, id } = session;
+	let live = false;
+	const unsubscribe = sessionTurnsRepo.subscribe(spaceId, id, (snapshot) => {
+		live = true;
+		turns = tail(snapshot);
+	});
+	void sessionTurnsRepo.getCached(spaceId, id).then((snapshot) => {
+		if (snapshot && !live) turns = tail(snapshot);
+	});
+	return () => {
+		request?.abort();
+		unsubscribe();
+	};
 });
 </script>
 
 {#if stats}
-  <StatsContent stats={stats.own} scope="session" />
+  <StatsContent stats={stats.own} scope="session" {timeline} />
   {#if stats.inherited.turns || stats.inherited.compactions}
-    <details class="mt-4 border-t border-border-subtle pt-3">
+    <details class="group mt-4 border-t border-border-subtle pt-3">
       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-[11px] text-text-secondary marker:hidden">
-        <span class="font-medium">{m.stats_inherited({}, { locale })}</span>
+        <span class="inline-flex items-center gap-1 font-medium"><ChevronDown aria-hidden="true" class="h-3 w-3 -rotate-90 transition-transform group-open:rotate-0" />{m.stats_inherited({}, { locale })}</span>
         {#if stats.inherited.turns}<span class="shrink-0 tabular-nums text-text-placeholder">{m.stats_turns({}, { locale })} {stats.inherited.turns.toLocaleString(locale)}</span>{/if}
       </summary>
       <div class="mt-3"><StatsContent stats={stats.inherited} scope="session" /></div>

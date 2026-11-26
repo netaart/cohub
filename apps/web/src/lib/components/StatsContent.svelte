@@ -11,7 +11,6 @@ export type StatsIdentity = {
 
 <script lang="ts">
 import type { ExecutionStats, RequestMetric } from "@cohub/protocol/model";
-import { Info } from "lucide-svelte";
 import HarnessIcon from "#lib/components/composer/HarnessIcon.svelte";
 import StatsTimeline from "#lib/components/StatsTimeline.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -22,13 +21,15 @@ import {
 	type StatsContext,
 	type StatsLabelKey,
 	type StatsScope,
-	type StatsSegment,
+	type StatsTimelineModel,
+	statsToneClass as toneClass,
 } from "#lib/stats-view-model.ts";
 
 let {
 	stats,
 	scope = "turn",
 	requests = [],
+	timeline = null,
 	identity = null,
 	context = null,
 	modelName = (_provider: string, model: string) => model,
@@ -36,6 +37,7 @@ let {
 	stats: ExecutionStats;
 	scope?: StatsScope;
 	requests?: readonly RequestMetric[];
+	timeline?: StatsTimelineModel | null;
 	identity?: StatsIdentity | null;
 	context?: StatsContext | null;
 	modelName?: (provider: string, model: string) => string;
@@ -43,8 +45,20 @@ let {
 
 const locale = $derived(getLocale());
 const view = $derived(
-	buildStatsViewModel(stats, { scope, locale, requests, context }),
+	buildStatsViewModel(stats, {
+		scope,
+		locale,
+		requests,
+		context,
+	}),
 );
+const timelineCount = $derived.by(() => {
+	const count = timeline?.rows.length ?? 0;
+	if (scope === "turn") return `${m.stats_calls({}, { locale })} ${count}`;
+	return count < stats.turns
+		? m.stats_recent_turns({ count }, { locale })
+		: `${m.stats_turns({}, { locale })} ${count}`;
+});
 const modelCostColumn = $derived(view.models.some((row) => row.cost));
 
 function label(key: StatsLabelKey) {
@@ -101,12 +115,6 @@ function label(key: StatsLabelKey) {
 	}
 }
 
-function toneClass(tone: StatsSegment["tone"]) {
-	if (tone === "brand") return "bg-brand";
-	if (tone === "strong") return "bg-text-tertiary";
-	if (tone === "muted") return "bg-text-placeholder/60";
-	return "bg-text-placeholder/30";
-}
 </script>
 
 {#snippet breakdownSection(title: string, section: StatsBreakdown)}
@@ -189,7 +197,7 @@ function toneClass(tone: StatsSegment["tone"]) {
 		</table>
 	{/if}
 
-	<StatsTimeline {requests} {modelName} />
+	{#if timeline}<StatsTimeline {timeline} count={timelineCount} {label} {modelName} />{/if}
 
 	{#if view.extra.length}
 		<dl class="space-y-1.5 border-t border-border-subtle pt-3">
@@ -202,7 +210,4 @@ function toneClass(tone: StatsSegment["tone"]) {
 		</dl>
 	{/if}
 
-	{#if view.partial}
-		<p class="flex items-start gap-1.5 text-[11px] text-text-placeholder"><Info size={12} class="mt-px shrink-0" aria-hidden="true" />{m.stats_partial({}, { locale })}</p>
-	{/if}
 </div>

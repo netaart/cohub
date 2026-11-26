@@ -1,93 +1,96 @@
+<script lang="ts" module>
+const COLLAPSED_KEY = "cohub:stats-timeline-collapsed";
+
+function readCollapsed() {
+	try {
+		return localStorage.getItem(COLLAPSED_KEY) === "1";
+	} catch {
+		return false;
+	}
+}
+
+let collapsed = $state(typeof window !== "undefined" && readCollapsed());
+
+function toggle(event: Event & { currentTarget: HTMLDetailsElement }) {
+	collapsed = !event.currentTarget.open;
+	try {
+		if (collapsed) localStorage.setItem(COLLAPSED_KEY, "1");
+		else localStorage.removeItem(COLLAPSED_KEY);
+	} catch {}
+}
+</script>
+
 <script lang="ts">
-import type { RequestMetric } from "@cohub/protocol/model";
+import { ChevronDown } from "lucide-svelte";
 import { formatDurationMs } from "#lib/format-duration.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 import {
-	buildStatsTimeline,
+	type StatsLabelKey,
 	type StatsTimelineModel,
+	type StatsTimelinePart,
+	type StatsTimelineRow,
+	statsTimeTone,
+	statsToneClass,
 } from "#lib/stats-view-model.ts";
 
 let {
-	requests = [],
+	timeline,
+	count,
+	label,
 	modelName = (_provider: string, model: string) => model,
 }: {
-	requests?: readonly RequestMetric[];
+	timeline: StatsTimelineModel;
+	count: string;
+	label: (key: StatsLabelKey) => string;
 	modelName?: (provider: string, model: string) => string;
 } = $props();
 const locale = $derived(getLocale());
-const timeline = $derived<StatsTimelineModel | null>(
-	buildStatsTimeline(requests),
+const legend = $derived(
+	(["queue", "modelTime", "toolTime", "otherTime"] as const).filter((key) =>
+		timeline.rows.some((row) => row.parts.some((part) => part.key === key)),
+	),
 );
 
-function statusClass(status: RequestMetric["status"]) {
-	if (status === "failed") return "bg-error-soft";
-	if (status === "interrupted") return "bg-warning-soft";
-	if (status === "running") return "bg-info-soft";
-	return "bg-brand";
+function partClass(part: StatsTimelinePart) {
+	if (part.failed) return "bg-error-soft";
+	return statsToneClass(statsTimeTone[part.key]);
 }
 
-function statusTextClass(status: RequestMetric["status"]) {
-	if (status === "failed") return "text-error-soft";
-	if (status === "interrupted") return "text-warning-soft";
-	if (status === "running") return "text-info-soft";
-	return "text-text-tertiary";
-}
-
-function requestName(provider: string, model: string, id: string) {
-	return (model && modelName(provider, model)) || provider || id.slice(0, 8);
+function rowTitle(row: StatsTimelineRow) {
+	const request = row.request;
+	return [
+		request?.model ? modelName(request.provider, request.model) : "",
+		...row.breakdown.map((item) => `${label(item.key)} ${item.value}`),
+	]
+		.filter(Boolean)
+		.join(" · ");
 }
 </script>
 
-{#if timeline}
-	<details class="border-t border-border-subtle pt-3">
-		<summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-[11px] text-text-secondary marker:hidden">
-			<span class="font-medium">{m.stats_request_timeline({}, { locale })}</span>
-			<span class="shrink-0 tabular-nums text-text-placeholder">{timeline.requests.length} · {formatDurationMs(timeline.durationMs, locale)}</span>
-		</summary>
-		<div class="mt-3 space-y-2.5" role="list" aria-label={m.stats_request_timeline({}, { locale })}>
-			{#each timeline.requests as request (request.id)}
-				{@const name = requestName(request.provider, request.model, request.id)}
-				<div class="min-w-0" role="listitem">
-					<div class="mb-1 flex min-w-0 items-center justify-between gap-2 text-[10px]">
-						<span class="min-w-0 truncate text-text-secondary" title={`${request.provider} · ${request.model}`}>{name}</span>
-						<span class={`shrink-0 tabular-nums ${statusTextClass(request.status)}`}>
-							{formatDurationMs(request.durationMs, locale)}
-						</span>
-					</div>
-					<div class="relative h-2 overflow-hidden rounded-full bg-border-subtle" aria-label={`${name}: ${formatDurationMs(request.durationMs, locale)}`}>
-						<div
-							class="absolute inset-y-0 rounded-full bg-text-placeholder/25"
-							style={`left: ${request.left}%; width: ${request.width}%;`}
-						></div>
-						{#if request.firstToken > 0}
-							<div
-								class="absolute inset-y-0 bg-text-placeholder/40"
-								style={`left: ${request.left}%; width: ${(request.width * request.firstToken) / 100}%;`}
-							></div>
-						{/if}
-						{#if request.output > 0}
-							<div
-								class={`absolute inset-y-0 rounded-r-full ${statusClass(request.status)}`}
-								style={`left: ${request.left + (request.width * request.firstToken) / 100}%; width: ${(request.width * request.output) / 100}%;`}
-							></div>
-						{:else}
-							<div
-								class={`absolute inset-y-0 rounded-full ${statusClass(request.status)}`}
-								style={`left: ${request.left}%; width: ${request.width}%; opacity: 0.65;`}
-							></div>
-						{/if}
+<details class="group border-t border-border-subtle pt-3" open={!collapsed} ontoggle={toggle}>
+	<summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-[11px] text-text-secondary marker:hidden">
+		<span class="inline-flex items-center gap-1 font-medium"><ChevronDown aria-hidden="true" class="h-3 w-3 -rotate-90 transition-transform group-open:rotate-0" />{m.stats_timeline({}, { locale })}</span>
+		<span class="shrink-0 tabular-nums text-text-placeholder">{count}</span>
+	</summary>
+	<ol class="mt-3 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-[10px] tabular-nums">
+		{#each timeline.rows as row (row.key)}
+			<li class="contents" title={rowTitle(row)}>
+				<span class={`text-right ${row.failed ? "text-error-soft" : "text-text-placeholder"}`}>{row.label}</span>
+				<div class="h-1.5">
+					<div class="relative h-full min-w-0.5 overflow-hidden rounded-full" style={`width: ${row.width}%;`}>
+						{#each row.parts as part, index (index)}
+							<div class={`absolute inset-y-0 ${partClass(part)}`} style={`left: ${part.left}%; width: ${part.width}%;`}></div>
+						{/each}
 					</div>
 				</div>
-			{/each}
-		</div>
-		<div class="mt-2.5 flex items-center justify-between gap-2 text-[10px] text-text-placeholder">
-			<span>0</span>
-			<span>{formatDurationMs(timeline.durationMs, locale)}</span>
-		</div>
-		<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-placeholder">
-			<span class="inline-flex items-center gap-1"><i aria-hidden="true" class="h-1.5 w-1.5 rounded-full bg-text-placeholder/50"></i>{m.stats_ttft({}, { locale })}</span>
-			<span class="inline-flex items-center gap-1"><i aria-hidden="true" class="h-1.5 w-1.5 rounded-full bg-brand"></i>{m.stats_output({}, { locale })}</span>
-		</div>
-	</details>
-{/if}
+				<span class="text-right text-text-tertiary">{formatDurationMs(row.durationMs, locale)}</span>
+			</li>
+		{/each}
+	</ol>
+	<div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-text-placeholder">
+		{#each legend as key (key)}
+			<span class="inline-flex items-center gap-1"><i aria-hidden="true" class={`h-1.5 w-1.5 rounded-full ${statsToneClass(statsTimeTone[key])}`}></i>{label(key)}</span>
+		{/each}
+	</div>
+</details>
