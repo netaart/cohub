@@ -1,5 +1,21 @@
 # @neta-art/cohub-cli
 
+## 10.37.1
+
+### Patch Changes
+
+- 882d2bd: Claude Code Turns on the Default model keep the model Claude Code resolved when a reply ends with a locally built error message.
+- d482cf2: Overwriting a file no longer fails with "file changed while copying" or "file changed since it was opened" when its modification time sits just below a millisecond, as files copied with `cp -p` often do.
+- 32c3617: Fork a Chat from any settled turn, whichever runtime ran it: `cohub spaces sessions turns fork <sessionId> <turnId>` and the SDK's `canForkTurn`. History handed to a new Claude Code file keeps thinking that Cohub-run Turns recorded from the same named endpoint, redacted reasoning included; Claude Code's own `redacted_thinking` is now kept when its transcripts sync. The Runtime logs what a handoff could not carry (`native.projection_loss`).
+- 7b52c32: Report local tool calls as they run: Claude Code, WorkBuddy and Cursor calls show as executing with their duration once done, and a running Codex command streams its output instead of showing as finished.
+- dea2dbf: Fit the history handed to Cursor and Antigravity to a budget: whole Turns, the opening one and the newest that fit, with a note where earlier Turns were left out and how to read them.
+- dea2dbf: A Turn a lost Runtime never started now fails without asking for a stop confirmation; a confirmed stop also ends a harness the lost Runtime left running. Claude Code, WorkBuddy and Codex report usage limits with their reset time, and discovery probes no longer let mise shims install tools or hang past their timeout.
+  
+  Claude Code keeps its process between clean Turns of a Session, so a follow-up starts without a cold start.
+- Updated dependencies [32c3617]
+- Updated dependencies [dea2dbf]
+  - @neta-art/cohub@13.30.1
+
 ## 10.37.0
 
 ### Minor Changes
