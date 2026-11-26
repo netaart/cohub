@@ -35,7 +35,7 @@ export function billingActivity(filter: BillingActivityFilter) {
 	return feed;
 }
 
-export const referrals = new AccountResource("referrals-v2", () =>
+export const referrals = new AccountResource("referrals-v3", () =>
 	sdk.referrals.getMine(),
 );
 

@@ -24,6 +24,14 @@ export class BillingUsageGateUnavailableError extends Error {
   }
 }
 
+/** A webhook delivery that failed signature or payload verification. */
+export class BillingWebhookVerificationError extends Error {
+  constructor(public readonly code: string) {
+    super(`Billing webhook verification failed: ${code}`);
+    this.name = "BillingWebhookVerificationError";
+  }
+}
+
 export function isBillingAccessBlockedError(error: unknown): error is BillingAccessBlockedError {
   return error instanceof BillingAccessBlockedError;
 }

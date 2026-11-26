@@ -56,7 +56,7 @@ const stats = $derived(
 				},
 				{
 					label: m.referral_cycle_pending({}, { locale }),
-					value: String(dashboard.quota.reserved),
+					value: String(dashboard.summary.pending),
 				},
 				{
 					label: m.referral_cycle_available({}, { locale }),
@@ -211,7 +211,7 @@ async function rotateLink() {
 						{/each}
 					</div>
 				{/if}
-				<p class="mt-4 text-[10px] leading-4 text-text-placeholder">{m.referral_footnote({ limit: dashboard.quota.limit, days: dashboard.quota.cycleDays, hours: dashboard.quota.claimHours }, { locale })}</p>
+				<p class="mt-4 text-[10px] leading-4 text-text-placeholder">{m.referral_footnote({ limit: dashboard.quota.limit, days: dashboard.quota.cycleDays, windowDays: dashboard.quota.paymentWindowDays }, { locale })}</p>
 			</section>
 		{/if}
 	</section>

@@ -1,10 +1,14 @@
 import { randomBytes } from "node:crypto";
+import { billingOperations } from "@cohub/billing";
 import {
   isNewReferralAccount,
+  loadReferralQuota,
+  qualifyReferral,
   referralClaimExpiresAt,
-  REFERRAL_QUOTA_STATUSES,
   resolveReferralQuota,
+  rewardQualifiedReferral,
 } from "@cohub/core/referrals";
+import { createLogger } from "@cohub/infra/logging";
 import {
   referralCodes,
   referrals,
@@ -12,12 +16,14 @@ import {
   userProfiles,
   type ReferralStatus,
 } from "@cohub/db";
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "./db/index.js";
 import type { AuthUser } from "./lib/middleware.js";
 import { ensureCurrentUserProfile } from "./user-profiles.js";
 
 export const REFERRAL_REWARD_USD = 5;
+
+const logger = createLogger({ serviceName: "cohub-api" });
 
 function generateReferralCode() {
   return randomBytes(9).toString("base64url");
@@ -93,27 +99,6 @@ export async function getPublicReferral(code: string) {
   return result ?? null;
 }
 
-type ReferralExecutor = Pick<typeof db, "select">;
-
-async function loadReferralQuota(executor: ReferralExecutor, inviterUserId: string, now = new Date()) {
-  const rows = await executor
-    .select({
-      status: referrals.status,
-      quotaCycle: referrals.quotaCycle,
-      qualifiedAt: referrals.qualifiedAt,
-      expiresAt: referrals.expiresAt,
-    })
-    .from(referrals)
-    .where(
-      and(
-        eq(referrals.inviterUserId, inviterUserId),
-        isNotNull(referrals.quotaCycle),
-        inArray(referrals.status, [...REFERRAL_QUOTA_STATUSES]),
-      ),
-    );
-  return resolveReferralQuota(rows, now);
-}
-
 export async function isReferralRewardAvailable(inviterUserId: string) {
   return (await loadReferralQuota(db, inviterUserId)).available > 0;
 }
@@ -183,33 +168,41 @@ export async function claimReferral(code: string, invitee: AuthUser): Promise<Cl
     return { referralId: null, status: "existing_user" };
   }
 
-  // Serialize claims per inviter so concurrent sign-ups cannot overbook the cycle.
-  const created = await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`referral-quota:${inviterUserId}`}))`);
-    const claimedAt = new Date();
-    const quota = await loadReferralQuota(tx, inviterUserId, claimedAt);
-    const rewarded = quota.available > 0;
-    const amountUsd = String(rewarded ? REFERRAL_REWARD_USD : 0);
-    const [row] = await tx
-      .insert(referrals)
-      .values({
-        referralCodeId: codeId,
-        inviterUserId,
-        inviteeUserId: invitee.uuid,
-        status: rewarded ? "pending" : "capped",
-        quotaCycle: quota.cycle,
-        claimedAt,
-        expiresAt: rewarded ? referralClaimExpiresAt(claimedAt) : null,
-        inviterRewardAmountUsd: amountUsd,
-        inviteeRewardAmountUsd: amountUsd,
-      })
-      .onConflictDoNothing({ target: referrals.inviteeUserId })
-      .returning({ id: referrals.id, status: referrals.status });
-    return row;
-  });
+  const claimedAt = new Date();
+  const amountUsd = String(REFERRAL_REWARD_USD);
+  const [created] = await db
+    .insert(referrals)
+    .values({
+      referralCodeId: codeId,
+      inviterUserId,
+      inviteeUserId: invitee.uuid,
+      status: "pending",
+      claimedAt,
+      expiresAt: referralClaimExpiresAt(claimedAt),
+      inviterRewardAmountUsd: amountUsd,
+      inviteeRewardAmountUsd: amountUsd,
+    })
+    .onConflictDoNothing({ target: referrals.inviteeUserId })
+    .returning({ id: referrals.id, status: referrals.status });
 
   if (created) return { referralId: created.id, status: created.status, created: true };
   return loadInviteeReferral(invitee.uuid, codeId);
+}
+
+/** Persist qualification before acknowledging the webhook; the grant runs after it, with the system worker retrying failures. */
+export async function qualifyReferralPayment(payment: { userId: string; paidAt: Date }) {
+  const referral = await qualifyReferral({ db, inviteeUserId: payment.userId, paidAt: payment.paidAt });
+  if (referral?.status !== "qualified") return referral;
+  void rewardQualifiedReferral({
+    db,
+    billing: billingOperations,
+    referral,
+    logger: {
+      warn: (message, meta) => logger.warn(message, meta),
+      info: (message, meta) => logger.info(message, meta),
+    },
+  }).catch((error: unknown) => logger.warn("[Referrals] reward grant failed", { referralId: referral.id, error }));
+  return referral;
 }
 
 const displayStatus = (row: { status: ReferralStatus; expiresAt: Date | null }, now: Date): ReferralStatus =>
@@ -279,9 +272,8 @@ export async function getReferralDashboard(userId: string) {
     quota: {
       limit: quota.limit,
       cycleDays: quota.cycleDays,
-      claimHours: quota.claimHours,
+      paymentWindowDays: quota.paymentWindowDays,
       used: quota.used,
-      reserved: quota.reserved,
       available: quota.available,
       cycleStartsAt: toIso(quota.cycleStartsAt),
       cycleEndsAt: toIso(quota.cycleEndsAt),

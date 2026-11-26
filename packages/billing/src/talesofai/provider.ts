@@ -37,6 +37,11 @@ import {
   subscriptionsFeature,
 } from "@talesofai-billing/sdk/admin/subscriptions";
 import { ApiError, createSdk } from "@talesofai-billing/sdk/base";
+import {
+  constructEvent,
+  WebhookVerificationError,
+  type VerifiedOutboundWebhookEvent,
+} from "@talesofai-billing/sdk/webhooks";
 import { createHash, randomUUID } from "node:crypto";
 import { readLedger, type LedgerRow, type LedgerSource } from "../balance-ledger.js";
 import {
@@ -84,8 +89,10 @@ import {
   type BillingUsageRecordInput,
   type BillingUsageRecordResult,
   type BillingUserRef,
+  type BillingWebhookEvent,
 } from "../interfaces.js";
 import type { TalesofaiProviderModule } from "../client.js";
+import { BillingWebhookVerificationError } from "../errors.js";
 import type { CommerceSdk } from "../commerce.js";
 import type { BillingClientConfig } from "../types.js";
 import { checkoutLockRedisRef } from "../runtime.js";
@@ -3356,8 +3363,33 @@ export function createBusinessBillingOperations(input: {
   };
 }
 
+/** Real-money payments only: redemptions, manual grants and fully discounted orders are excluded. */
+function webhookPayment(event: VerifiedOutboundWebhookEvent, businessKey: string): BillingWebhookEvent["payment"] {
+  if (event.business.key !== businessKey) return null;
+  const payment =
+    event.type === "order.paid"
+      ? ["checkout", "provider_payment"].includes(event.data.object.fulfillment_source) && event.data.object
+      : event.type === "subscription.activated"
+        ? event.data.paid_period.fulfillment_source === "provider" && event.data.paid_period
+        : null;
+  if (!payment || payment.paid_amount_snapshot <= 0) return null;
+  return { userId: event.customer.external_user_id, paidAt: new Date(payment.paid_at) };
+}
+
+export function parseWebhook(input: { rawBody: string; headers: Headers; secret: string; businessKey: string }): BillingWebhookEvent {
+  let event: VerifiedOutboundWebhookEvent;
+  try {
+    event = constructEvent(input.rawBody, input.headers, input.secret);
+  } catch (error) {
+    if (error instanceof WebhookVerificationError) throw new BillingWebhookVerificationError(error.code);
+    throw error;
+  }
+  return { id: event.id, type: event.type, payment: webhookPayment(event, input.businessKey) };
+}
+
 ({
   createTalesofaiBillingOperations,
   createBusinessBillingOperations,
   createCommerceSdk,
+  parseWebhook,
 }) satisfies TalesofaiProviderModule;

@@ -2013,9 +2013,9 @@ export type ReferralListItem = {
 export type ReferralQuota = {
   limit: number;
   cycleDays: number;
-  claimHours: number;
+  /** Days after claiming within which the invitee's first payment qualifies the referral. */
+  paymentWindowDays: number;
   used: number;
-  reserved: number;
   available: number;
   cycleStartsAt: string | null;
   cycleEndsAt: string | null;
