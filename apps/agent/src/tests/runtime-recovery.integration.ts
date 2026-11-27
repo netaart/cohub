@@ -141,6 +141,15 @@ test("Session confirmation terminalizes the owner without reading a late local r
   assert.deepEqual(persistedBatches[0]?.executionBatch.turnIds, [owner.id]);
 });
 
+test("a confirmation for a Turn that reported in since leaves it running", async () => {
+  rows.clear(); recoveredBatches.length = 0;
+  const owner = makeTurn(); owner.meta.runtimeRecovery = { state: "executing", ownerUserId: "owner" }; rows.set(owner.id, owner);
+  assert.deepEqual(await recoverRuntime(job(owner, { actorUserId: "manager", revision: "snapshot" })), { recovered: 0, attention: 0 });
+  assert.equal(owner.status, "running");
+  assert.equal(readRuntimeRecovery(owner.meta)?.state, "executing");
+  assert.equal(recoveredBatches.length, 0, "no orphan recovery of a live Turn");
+});
+
 test("Session recovery waits for the existing Session lock", async () => {
   rows.clear(); locked.clear();
   const owner = makeTurn(); rows.set(owner.id, owner); locked.add(owner.sessionId);

@@ -224,7 +224,7 @@
 	"runtime_watcher_unknown": "未知",
 	"runtime_online": "在线",
 	"runtime_offline": "离线",
-	"runtime_session_attention": "本地执行已断开，结果暂时未知。请重新连接 Runtime 恢复，或确认执行已停止。",
+	"runtime_session_attention": "本地执行已停止响应，结果暂时未知。请重新连接 Runtime 恢复，或确认执行已停止。",
 	"runtime_confirm_stopped": "我确认本次执行已停止。",
 	"runtime_end_unknown": "结束执行",
 	"runtime_confirmation_queued": "已提交确认",

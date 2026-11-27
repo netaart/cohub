@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
-import { APPROVAL_MODES, harnessSchema, isApprovalMode, isModelThinkingLevel, MODEL_THINKING_LEVELS, readSentTurns, readSessionTurnOrigin, readTurnSpeech, resolveCohubEnvironment, type HarnessKind } from "@neta-art/cohub";
+import { APPROVAL_MODES, harnessSchema, NATIVE_STOP_CONFIRMATION_REQUIRED, isApprovalMode, isModelThinkingLevel, MODEL_THINKING_LEVELS, readSentTurns, readSessionTurnOrigin, readTurnSpeech, resolveCohubEnvironment, type HarnessKind } from "@neta-art/cohub";
 import type {
   CohubHttpClient,
   ContentBlock,
@@ -2096,6 +2096,37 @@ function registerTurns(sessionsCmd: Command): void {
         const result = await client.space(spaceId).session(sessionId).steerTurn(turnId);
         if (jsonRequested(opts)) return outJson(result);
         ok(`Turn steered: ${result.turn.id}`);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  turnsCmd
+    .command("stop <sessionId> <turnId>")
+    .description("Stop a running turn")
+    .option("--confirm-stopped", "Settle a terminal run Cohub cannot reach, once it has stopped there")
+    .option("--json", "Output as JSON")
+    .action(async (sessionId: string, turnId: string, opts: { confirmStopped?: boolean; json?: boolean }) => {
+      const spaceId = await resolveSpace(sessionsCmd);
+      const client = createClient();
+      try {
+        await client.space(spaceId).session(sessionId).abort({ turnId });
+        if (jsonRequested(opts)) return outJson({ ok: true, turnId });
+        return ok(`Stop requested: ${turnId}`);
+      } catch (e: unknown) {
+        if ((e as { code?: unknown }).code !== NATIVE_STOP_CONFIRMATION_REQUIRED) handleHttp(e);
+        if (!opts.confirmStopped) {
+          if (jsonRequested(opts)) handleHttp(e);
+          error("this run cannot be reached from Cohub", "stop it in its terminal, or rerun with --confirm-stopped once it has stopped");
+        }
+      }
+      try {
+        const space = client.space(spaceId);
+        const status = await space.getSessionRuntime(sessionId);
+        if (!status.pending || status.turnId !== turnId) return error("the turn no longer awaits a stop confirmation", `check it with \`cohub spaces sessions turns get ${sessionId} ${turnId}\``);
+        await space.confirmRuntimeStopped(sessionId, { confirmed: true, expectedTurnId: turnId, revision: status.revision });
+        if (jsonRequested(opts)) return outJson({ ok: true, turnId, stopConfirmed: true });
+        ok(`Stop confirmation accepted: ${turnId}`);
       } catch (e: unknown) {
         handleHttp(e);
       }
