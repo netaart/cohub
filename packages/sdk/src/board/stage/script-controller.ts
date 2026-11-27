@@ -449,10 +449,11 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     get hovering() { return hover !== null; },
     get hovered(): BoardScriptPointerTarget | null { return hover; },
     get paused() { return paused; },
-    booting(): number {
+    booting(visible?: ReadonlySet<string>): number {
       if (!host) return 0;
       let booting = 0;
-      for (const { id } of boardScriptAttachments(scriptDocument(), editor.scriptMode)) if (!host.ready?.(id) && !host.error(id)) booting += 1;
+      for (const { id, item } of boardScriptAttachments(scriptDocument(), editor.scriptMode))
+        if ((!visible || !item || visible.has(id)) && !host.ready?.(id) && !host.error(id)) booting += 1;
       return booting;
     },
     setPaused(next: boolean) {

@@ -1441,7 +1441,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			openingTimer = setTimeout(scheduleTick, FIRST_SCREEN_MS);
 		}
 		const ids = visibleIds();
-		if (now < opening && (!ids || depth?.loading(editor.scene, ids))) {
+		if (now < opening && (!ids || depth?.loading(editor.scene, ids) || scripts.booting(ids) > 0)) {
 			player.hold();
 			return true;
 		}
@@ -1453,8 +1453,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	function sync() {
 		if (!app || !world || !scene || !overlay) return;
 		const current = theme();
-		scripts.hold(holdFirstScreen());
+		// The script host has to exist before the first screen asks which scripts are still booting.
 		scripts.update();
+		scripts.hold(holdFirstScreen());
 		player.enter(editor.consumeRecentlyAdded(), editor.document);
 		const playback = options.playback?.() ?? null;
 		if (playback && playback.playbackId !== playbackId) {

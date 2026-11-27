@@ -25,7 +25,7 @@ export const BOARD_SCRIPT_API = {
     frameRate: "Updates and redraws at most this many times a second (1–60); onFrame still steps at 60 Hz.",
     pixelated: "true draws one canvas pixel per board unit and scales without smoothing, for crisp pixel art.",
     parameters: "Declares params as { name: { type: number | boolean | string | color, label?, default?, min?, max?, step? } }.",
-    default: "Setup function (ctx) for behavior; may return a cleanup function.",
+    default: "Setup function (ctx) for behavior; may return a cleanup function. Do one-time heavy work here or at module top level, not on a later frame: an opening view waits for the first frame.",
     shader: "GPU passes drawn with the owner: { layer?, inputs?, uniforms?, state?, passes: [{ glsl, sprites?, texel?, blend? }] }. See shader.",
     bend: "{ glsl } defining vec3 bend(vec2 uv, vec2 size, float amount, float phase): the offset in board units (x right, y down, z toward the viewer) of each point of the owner while depth.bend.kind is custom; uv runs 0–1 across the item, size is its box, amount and phase come from depth.bend. Same rules and includes as shader passes; drawn on the GPU, so hit tests and shadows use the surface before it bends.",
   } satisfies Record<keyof BoardScriptModule, string>,
@@ -112,7 +112,7 @@ export const BOARD_SCRIPT_API = {
     reducedMotion: "The viewer asks for less motion.",
     locale: "The viewer's BCP 47 locale, or null.",
     senses: "{ motion, gamepad, microphone, camera, location }: on delivers while a script listens; ask waits for a tap (motion on iOS) or the viewer's consent (microphone, camera, location); denied; unavailable on this device and in exports. Listening is what turns a source on and off.",
-    ready: "false while a play or read-only view that just opened waits, at most 1.5 s, for the model objects in view to load, with the script clock and auto-play animations held at their start; true otherwise. envchange reports when it turns true.",
+    ready: "false while a play or read-only view that just opened waits, at most 1.5 s, for the model objects in view to load and the scripts in view to draw their first frame, with the script clock and auto-play animations held at their start; true otherwise. envchange reports when it turns true.",
   } satisfies Record<keyof BoardScriptEnv, string>,
   view: {
     camera: "x, y and zoom of the level camera with the same middle, plus pitch and bearing in degrees when the camera tips or turns.",

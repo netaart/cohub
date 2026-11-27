@@ -19,10 +19,11 @@ const isMediaMime = (mime: string | null) =>
         mime.startsWith("video/") ||
         mime.startsWith("audio/") ||
         mime.startsWith("model/") ||
+        mime.startsWith("font/") ||
         mime === "application/pdf"),
   );
 
-/** Media, documents and 3D models are served from the CDN regardless of size. */
+/** Media, documents, 3D models and fonts are served from the CDN regardless of size. */
 export function isFsCdnMediaLike(path: string, mimeType: string | null) {
   return isMediaMime(normalizeMime(mimeType)) || isMediaMime(mimeTypeForPath(path));
 }

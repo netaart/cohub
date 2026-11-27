@@ -400,9 +400,11 @@ ctx.on("envchange", ({ data }) => layout(data.orientation));
 `script.modes` decides which ones run the script at all.
 Exports and profiles report `export`, a fine pointer and every source `unavailable`.
 `ready` is false while a play or read-only view that just opened waits, at most 1.5 s,
-for the model objects in view to load; meanwhile the script clock, `onFrame` and
-`auto` animations hold at their start. It turns true, with an `envchange`, once they
-have loaded, and is always true while editing and in exports.
+for the model objects in view to load and the scripts in view to draw their first frame;
+meanwhile the script clock, `onFrame` and `auto` animations hold at their start. It turns
+true, with an `envchange`, once they are done, and is always true while editing and in
+exports. Do one-time heavy work, such as building textures, at module top level or in
+setup rather than on a later frame, so it lands inside this wait.
 
 `boards simulate` reports its `--mode` (a tool step switches between `edit` and `play`),
 its `--pointer`, the orientation of its `--viewport`, and every source `on`; exports

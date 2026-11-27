@@ -69,6 +69,8 @@ const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".wasm": "application/wasm",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
   ".zip": "application/zip",
   ".gz": "application/gzip",
   ".tar": "application/x-tar",
