@@ -4,7 +4,7 @@ import { getCohubContext, HttpError, isUserAppFilter, type CohubHttpClient, type
 import type { Command } from "commander";
 import { createClient, createClientWithAccessToken } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
-import { explicitSpaceFlag, failSpaceTarget, resolveSpace, resolveSpaceRef } from "../space.js";
+import { explicitSpaceFlag, failSpaceTarget, resolveSpace, resolveSpacePath, resolveSpaceRef } from "../space.js";
 import { downloadApp } from "../app-download.js";
 import { getAppByRef, parseAppRef } from "../app-ref.js";
 import { checkAppTarget } from "../app-target.js";
@@ -147,6 +147,10 @@ function resolveTarget(opts: { file?: string; dir?: string; port?: string }): Re
   if (targets.length === 0) return null;
   if (targets.length > 1) return error("Conflicting target", "Use only one of --file, --dir, or --port");
   return targets[0] ?? null;
+}
+
+async function appTargetRef(spaceId: string, ref: string): Promise<string> {
+  return (await resolveSpacePath(spaceId, ref).catch(handleHttp)) || ".";
 }
 
 function resolveStatus(opts: { disabled?: boolean; status?: string }): AppStatus {
@@ -506,6 +510,7 @@ export function registerApps(program: Command): void {
         targetRef = uploaded.targetRef;
         sourceRef = uploaded.sourceRef;
       } else if (targetType !== "port") {
+        targetRef = await appTargetRef(spaceId, targetRef);
         await guardAppTarget(client, spaceId, { targetType, targetRef });
       }
       const status = resolveStatus(opts);
@@ -588,16 +593,10 @@ export function registerApps(program: Command): void {
       if (opts.clearViewerScopes && opts.viewerScope?.length) return error("Conflicting viewer scopes", "Use either --viewer-scope or --clear-viewer-scopes.");
       const hasMetaUpdate = opts.meta !== undefined || opts.hideCohubBar || opts.showCohubBar;
       const client = createClient();
-      if (target) {
-        // Resolve the app's home Space so the preflight checks the same
-        // workspace the publish worker will read from.
-        try {
-          const current = await client.apps.get(id);
-          const { targetType, targetRef } = target;
-          if (targetType !== "port") await guardAppTarget(client, current.app.spaceId, { targetType, targetRef });
-        } catch {
-          // The update request below surfaces errors for unknown apps.
-        }
+      if (target && target.targetType !== "port") {
+        const current = await client.apps.get(id).catch(handleHttp);
+        target.targetRef = await appTargetRef(current.app.spaceId, target.targetRef);
+        await guardAppTarget(client, current.app.spaceId, { targetType: target.targetType, targetRef: target.targetRef });
       }
       let meta: AppMeta | null | undefined;
       if (hasMetaUpdate) {

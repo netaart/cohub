@@ -90,13 +90,6 @@ function scriptAgent(
     Object.freeze(value);
     for (const child of Object.values(value)) freeze(child);
   };
-  // Kept out of the worker source so engines without import attributes still run other scripts.
-  let jsonReader: Promise<(url: string) => Promise<{ default: unknown }>> | null = null;
-  const readJson = async (url: string) => {
-    jsonReader ??= load(URL.createObjectURL(new Blob(['export default (url) => import(url, { with: { type: "json" } });'], { type: "text/javascript" })))
-      .then((module) => (module as unknown as { default: (url: string) => Promise<{ default: unknown }> }).default);
-    return (await (await jsonReader)(url)).default;
-  };
   const describe = (error: unknown) =>
     error instanceof Error ? (error.stack ?? error.message) : String(error);
   function destroy(token: number) {
@@ -130,7 +123,7 @@ function scriptAgent(
         const url = src ? instance.urls.urls[src] : undefined;
         if (!url) throw new Error("Missing entry module.");
         for (const [path, url] of Object.entries(instance.urls.urls))
-          if (path.endsWith(".json")) freeze(await readJson(url));
+          if (path.endsWith(".json")) freeze((await load(url) as unknown as { default: unknown }).default);
         instance.module = await load(url);
         if (instances.get(token) !== instance) throw new Error("Script stopped.");
         current = token;

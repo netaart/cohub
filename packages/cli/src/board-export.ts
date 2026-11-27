@@ -423,7 +423,7 @@ export async function runBoardExport(
     };
     if (usesBrowser) await launch();
     let backgroundLoaded = false;
-    const renderFrame = async (time: number | null, source: BoardExportSource) => {
+    const renderFrame = async (time: number | null, source: BoardExportSource, next?: number) => {
       options.signal?.throwIfAborted();
       shown = source;
       const frameSampler = source.document === document ? sampler : createBoardRenderSampler(source.document, options.animation ?? null, theme);
@@ -477,6 +477,7 @@ export async function runBoardExport(
         }
         const result = await page.render({
           time,
+          ...(next === undefined ? {} : { next }),
           region,
           ...frameFraming,
           scale: options.scale,
@@ -537,13 +538,13 @@ export async function runBoardExport(
       });
       trace("rendered", completed, result.plan);
     };
-    const renderAt = async (time: number | null, source: BoardExportSource = { document }) => {
+    const renderAt = async (time: number | null, source: BoardExportSource = { document }, next?: number) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const stalled = new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error(describeStall(time, timeoutMs, doing))), timeoutMs);
       });
       try {
-        await Promise.race([renderFrame(time, source), stalled]);
+        await Promise.race([renderFrame(time, source, next), stalled]);
       } finally {
         clearTimeout(timer);
       }
@@ -556,7 +557,7 @@ export async function runBoardExport(
         if (signal.aborted) reject(signal.reason);
         signal.addEventListener("abort", () => reject(signal.reason), { once: true });
       })]) : driving);
-    } else for (const time of times) await renderAt(time);
+    } else for (const [index, time] of times.entries()) await renderAt(time, undefined, times[index + 1] ?? undefined);
     return completed ? { frames, warnings, media } : null;
   } finally {
     await (browser as BoardBrowser | null)?.close();

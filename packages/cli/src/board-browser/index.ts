@@ -205,6 +205,8 @@ export async function launchBoardBrowser(resources: BoardBrowserResources, optio
     const child = spawn(options.browser, [
       "--headless=new", "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
       "--disable-extensions", "--disable-background-networking", "--mute-audio", "--hide-scrollbars", "--enable-unsafe-swiftshader",
+      // An out-of-process script sandbox costs ~40 ms per 1080p frame; its sandbox and CSP still apply.
+      "--disable-features=IsolateSandboxedIframes",
       ...(sandbox ? [] : ["--no-sandbox"]), "about:blank",
     ], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
     const [, , errors, input, output] = child.stdio as [null, null, Readable, Writable, Readable];

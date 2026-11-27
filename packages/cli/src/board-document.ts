@@ -1,5 +1,6 @@
-import { type BoardDocument, parseBoardDocument } from "@neta-art/cohub/board";
+import { type BoardDocument, isBoardPath, parseBoardDocument } from "@neta-art/cohub/board";
 import { createClient } from "./client.js";
+import { resolveSpacePath } from "./space.js";
 
 export type BoardSource = {
   document: BoardDocument;
@@ -7,8 +8,12 @@ export type BoardSource = {
   title: string | null;
 };
 
+export async function boardTarget(spaceId: string, target: string): Promise<string> {
+  return isBoardPath(target) ? resolveSpacePath(spaceId, target) : target;
+}
+
 export async function loadBoardDocument(spaceId: string, target: string): Promise<BoardSource> {
-  const board = await createClient().space(spaceId).boards.open(target);
+  const board = await createClient().space(spaceId).boards.open(await boardTarget(spaceId, target));
   let result = await board.get();
   const snapshot = result;
   const items = { ...result.items };

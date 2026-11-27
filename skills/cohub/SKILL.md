@@ -158,6 +158,8 @@ Prefer file tools for normal inspection and edits. For cross-space work, prefer 
 
 Use CLI file commands when tools are unavailable, or for platform-side upload, copy, move, rename, delete, or diff.
 
+Space path arguments are relative to the current directory, like shell paths, when it is inside the Space's workspace (`/workspace` in its sandbox, or a Runtime directory); an omitted path means the Space root. Paths in command output and inside documents, such as `ls --json` entries or a Board's `src`, are from the Space root; pass an output path back as `/workspace/<path>` to mean the same file from any directory.
+
 To copy files, use `spaces files cp`; it works like `scp`. Inside a sandbox, bare paths are the current Space, `<space>:<path>` is another Space, and absolute paths outside `/workspace` (such as `/tmp`) are local. Copies between Spaces never leave Cohub storage. Never copy by reading content and writing it back.
 
 ```bash

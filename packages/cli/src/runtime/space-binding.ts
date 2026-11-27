@@ -137,13 +137,12 @@ export function findRuntimeSpaceBinding(
  */
 function findContainingRuntimeSpaceBinding(
   bindings: RuntimeSpaceBinding[] | RuntimeSpaceBindingsFile,
-  input: { cwd: string; key: string },
+  input: { cwd: string; accept(binding: RuntimeSpaceBinding): boolean },
 ): RuntimeSpaceBinding | null {
   const entries = Array.isArray(bindings) ? bindings : bindings.bindings;
-  const key = input.key.trim();
   const byRoot = new Map<string, RuntimeSpaceBinding>();
   for (const binding of entries) {
-    if (binding.key === key) byRoot.set(binding.root, binding);
+    if (input.accept(binding)) byRoot.set(binding.root, binding);
   }
 
   let current = normalizeRuntimeRoot(input.cwd);
@@ -347,7 +346,13 @@ export async function findNearestRuntimeSpaceBinding(
   if (!nonEmptyString(key)) return null;
   const canonicalCwd = await canonicalRuntimeRoot(cwd);
   const file = await readRuntimeSpaceBindings(path);
-  return findContainingRuntimeSpaceBinding(file, { cwd: canonicalCwd, key });
+  const identity = key.trim();
+  return findContainingRuntimeSpaceBinding(file, { cwd: canonicalCwd, accept: (binding) => binding.key === identity });
+}
+
+export async function findRuntimeSpaceRoot(cwd: string, spaceId: string, path = runtimeSpaceBindingsPath()): Promise<string | null> {
+  const file = await readRuntimeSpaceBindings(path);
+  return findContainingRuntimeSpaceBinding(file, { cwd: await canonicalRuntimeRoot(cwd), accept: (binding) => binding.spaceId === spaceId })?.root ?? null;
 }
 
 /**

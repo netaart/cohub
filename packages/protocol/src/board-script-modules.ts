@@ -162,18 +162,16 @@ export async function loadBoardScriptSources(src: string, readers: BoardScriptRe
         const dynamic = entry.type === "dynamic";
         const typed = dynamic
           ? entry.attributesStart >= 0
-            ? (/\btype\s*:\s*["'](json|bytes)["']/.exec(code.slice(entry.attributesStart, entry.importEnd))?.[1] ?? null)
+            ? (/\btype\s*:\s*["']([^"']*)["']/.exec(code.slice(entry.attributesStart, entry.importEnd))?.[1] ?? null)
             : null
           : (entry.attributes?.find(([key]) => key === "type")?.[1] ?? null);
-        const expected = importType(specifier);
-        if (typed !== expected)
+        if (typed && typed !== importType(specifier))
           throw new Error(typed === "json" ? `Only .json files import with type "json": ${specifier}`
             : typed === "bytes" ? `Only fonts, images and .bin files import with type "bytes": ${specifier}`
-            : typed ? `Unknown import type "${typed}": ${specifier}`
-            : `Import ${specifier} with { type: "${expected}" }.`);
+            : `Unknown import type "${typed}": ${specifier}`);
         resolved.push({
           start: entry.start, end: entry.end, path: resolveScriptImport(path, specifier), dynamic,
-          ...(typed === "bytes" ? { attributes: (dynamic ? [entry.end, entry.importEnd - 1] : [entry.end + 1, entry.importEnd]) as [number, number] } : {}),
+          ...(typed ? { attributes: (dynamic ? [entry.end, entry.importEnd - 1] : [entry.end + 1, entry.importEnd]) as [number, number] } : {}),
         });
       }
       // Waiting on a module that imports this one would never settle, so cycles fail here.
@@ -224,7 +222,8 @@ export function scriptModuleUrls(
       const key = `${path}\n${source.code}`;
       let json = shared.get(key);
       if (!json) {
-        json = { url: URL.createObjectURL(new Blob([source.code], { type: "application/json" })), users: 0 };
+        const module = `export default JSON.parse(${JSON.stringify(source.code)});`;
+        json = { url: URL.createObjectURL(new Blob([module], { type: "text/javascript" })), users: 0 };
         shared.set(key, json);
       }
       json.users++;

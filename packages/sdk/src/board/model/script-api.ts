@@ -15,7 +15,7 @@ import { BOARD_SHADER_API } from "./shader-api.js";
  */
 export const BOARD_SCRIPT_API = {
   runtime: [
-    "Modules are .js or .mjs Space files that import only literal relative paths (at most 64 modules, 2 MB). Fonts, images and .bin files import as a Uint8Array with { type: \"bytes\" } (32 MB in all), shared by the scripts that import them.",
+    "Modules are .js or .mjs Space files that import only literal relative paths (at most 64 modules, 2 MB). Fonts, images and .bin files import as a Uint8Array (32 MB in all), shared by the scripts that import them; the extension picks the type, so with { type } is optional.",
     "They run in a browser worker with no DOM, the same on screens, in exports, simulations and profiles: OffscreenCanvas, Path2D, DOMMatrix, ImageData, createImageBitmap, FontFace with self.fonts, URL, TextEncoder, TextDecoder, atob and btoa are there. Load a font with self.fonts.add(new FontFace(family, bytes)). Live Boards may fetch() and open WebSockets; exports and simulations have no network. Use Apps for HTML content.",
     "Exports replay deterministically from ctx.onFrame, the frame clock, ctx.random(), Math.random() (seeded like ctx.random while script code runs), ctx.state and a recording of browser input (--inputs); timers, Date.now() and the network do not.",
   ],

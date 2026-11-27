@@ -18,7 +18,7 @@ export type AppTargetCheckError = {
 
 /** Normalize a user-supplied Space path for comparison with fs entries. */
 function normalizeSpacePath(path: string): string {
-  return path.replace(/^\.\//, "").replace(/\/+$/, "");
+  return path.replace(/^\.(\/|$)/, "").replace(/\/+$/, "");
 }
 
 function posixDirname(path: string): string {
@@ -28,7 +28,7 @@ function posixDirname(path: string): string {
 
 /**
  * Verify a Space-relative publish target exists with the expected node type.
- * Empty targetRef (the Space workspace root, directory publishes only) passes.
+ * An empty or "." targetRef (the Space workspace root, directory publishes only) passes.
  * Returns null when the target is valid or the check itself cannot run —
  * the preflight is advisory and must never block a publish the worker can do.
  */

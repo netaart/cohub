@@ -15,7 +15,7 @@ import {
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok } from "../output.js";
-import { explicitSpace, failSpaceTarget, resolveBoundSpace, resolveSpaceRef } from "../space.js";
+import { explicitSpace, failSpaceTarget, resolveBoundSpace, resolveSpacePath, resolveSpaceRef } from "../space.js";
 import { getAppByRef } from "../app-ref.js";
 
 export { resolveOpenSurface };
@@ -139,10 +139,11 @@ async function resolveOpenTarget(
   if (hasAppScheme(value)) return resolveAppTarget(client, value);
 
   const spaceId = await resolveOptionalSpaceId(command);
-  if (spaceId) {
+  const path = spaceId && (await resolveSpacePath(spaceId, value).catch(() => null));
+  if (spaceId && path) {
     try {
-      await client.space(spaceId).files.read(value);
-      return { kind: "file", path: value };
+      await client.space(spaceId).files.read(path);
+      return { kind: "file", path };
     } catch (cause: unknown) {
       if (!(cause instanceof HttpError) || cause.status !== 404) throw cause;
     }

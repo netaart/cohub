@@ -30,7 +30,7 @@ cohub boards examples custom | cohub boards apply <board> -i -
 - Input reaches a script only through its declared `hitRegions`. `change` and `gesture`
   events observe edits and pen strokes without taking input.
 - Prefer native text items for labels people read or edit; Canvas text can use `Geist`
-  or `Geist Mono`. For any other font, `import hand from "./hand.woff2" with { type: "bytes" }`
+  or `Geist Mono`. For any other font, `import hand from "./hand.woff2"` (a `Uint8Array`)
   and `self.fonts.add(await new FontFace("Hand", hand).load())`. Subset fonts to the
   characters drawn: every viewer downloads them.
 - Scripts run in the same browser worker live, in exports and in simulations, so code

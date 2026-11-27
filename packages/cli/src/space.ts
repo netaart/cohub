@@ -1,11 +1,13 @@
 import type { Command } from "commander";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { COHUB_ENVIRONMENTS, HOME_SPACE_SLUG, normalizeBaseUrl, parseSpaceRef, resolveApiBaseUrl, resolveCohubEnvironment } from "@neta-art/cohub";
 import { readAuthSession } from "./auth.js";
 import { createClient } from "./client.js";
-import { findNearestRuntimeSpaceBinding } from "./runtime/space-binding.js";
+import { findNearestRuntimeSpaceBinding, findRuntimeSpaceRoot } from "./runtime/space-binding.js";
+import { spacePath, WORKSPACE_ROOT } from "./space-files/operands.js";
 import { error, handleHttp } from "./output.js";
 
 const CONFIG_DIR = join(homedir(), ".config", "cohub");
@@ -195,6 +197,25 @@ export async function resolveBoundSpace(
     options.bindingsPath,
   ).catch(handleHttp);
   return bound?.spaceId ?? null;
+}
+
+export async function spaceCwd(spaceId: string, cwd = process.cwd(), bindingsPath?: string): Promise<string> {
+  const here = await realpath(cwd).catch(() => cwd);
+  const inside = (root: string) => {
+    const path = relative(root, here);
+    return path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path) ? null : path.split(sep).join("/");
+  };
+  const sandbox = process.env.COHUB_SPACE_ID?.trim();
+  if (sandbox && (await resolveSpaceRef(sandbox).catch(() => null)) === spaceId) {
+    const path = inside(await realpath(WORKSPACE_ROOT).catch(() => WORKSPACE_ROOT));
+    if (path !== null) return path;
+  }
+  const root = await findRuntimeSpaceRoot(here, spaceId, bindingsPath).catch(() => null);
+  return root === null ? "" : (inside(root) ?? "");
+}
+
+export async function resolveSpacePath(spaceId: string, raw: string): Promise<string> {
+  return spacePath(raw, await spaceCwd(spaceId));
 }
 
 export type SpaceTargetOptions = {

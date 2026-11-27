@@ -31,8 +31,7 @@ cohub boards export <board> -o /tmp/rain.png
   Present shadows or filters only while they change.
 - Give a box pass `texel` when its picture changes only every few units, as with pixel
   art and maps.
-- Keep shared data such as sprite sheets in a `.json` module imported
-  `with { type: "json" }`.
+- Keep shared data such as sprite sheets in an imported `.json` module.
 - Measure with `cohub boards profile <board>`. It times each shader owner (median and
   range over rounds), says whether it ran on software WebGL, and names what to change.
   Compare its numbers with each other, not with a real display.

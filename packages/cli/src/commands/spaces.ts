@@ -18,7 +18,7 @@ import { createClient, createRealtimeClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
 import { table, json as outJson, jsonRequested, ok, error, reportError, handleHttp, formatEpochMs, truncateText, excerptColumn, spinner } from "../output.js";
 import { SESSION_INITIATOR_COLUMN, SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
-import { explicitSpace, failSpaceTarget, resolveSpace, resolveSpaceRef, resolveSpaceTarget } from "../space.js";
+import { explicitSpace, failSpaceTarget, resolveSpace, resolveSpacePath, resolveSpaceRef, resolveSpaceTarget } from "../space.js";
 import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
 import {
   finalReplyText,
@@ -266,7 +266,8 @@ async function uploadFiles(command: Command, paths: string[], opts: UploadOption
   const client = createClient();
   try {
     const files = await collectUploadFiles(paths);
-    const { uploaded, uploadIds } = await uploadLocalFiles(client.space(spaceId).files, files, { targetDir: opts.dir });
+    const targetDir = opts.dir === undefined ? undefined : await resolveSpacePath(spaceId, opts.dir);
+    const { uploaded, uploadIds } = await uploadLocalFiles(client.space(spaceId).files, files, { targetDir });
     if (jsonRequested(opts)) return outJson({ ok: true, uploaded, uploadId: uploadIds[0], uploadIds, files: files.length });
     ok(`Uploaded ${files.length} file${files.length === 1 ? "" : "s"}`);
   } catch (e: unknown) {
@@ -577,7 +578,7 @@ async function runCompletionCommand(command: Command, words: string[], opts: Com
   const input = {
     provider: opts.provider,
     model: opts.model,
-    systemPromptPath: opts.systemPrompt,
+    systemPromptPath: opts.systemPrompt === undefined ? undefined : await resolveSpacePath(spaceId, opts.systemPrompt).catch(handleHttp),
     messages: [{ role: "user" as const, content: [{ type: "text" as const, text }] }],
     temperature,
     maxTokens,
@@ -1553,6 +1554,11 @@ function registerFiles(spacesCmd: Command): void {
   const filesCmd = spacesCmd
     .command("files")
     .description("File operations")
+    .addHelpText("after", `
+Paths are relative to the current directory when it is inside the Space's workspace
+(/workspace in its sandbox, or a Runtime directory); an omitted path is the Space root.
+Paths in output, such as ls --json, are from the Space root: pass one back as
+/workspace/<path> to mean the same file from any directory.`)
     .hook("preAction", async () => { await resolveSpace(spacesCmd); });
 
   filesCmd
@@ -1564,7 +1570,7 @@ function registerFiles(spacesCmd: Command): void {
       const spaceId = await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        const tree = await client.space(spaceId).files.list(path ?? "");
+        const tree = await client.space(spaceId).files.list(path === undefined ? "" : await resolveSpacePath(spaceId, path));
         if (jsonRequested(opts)) return outJson(tree);
         if (tree.entries.length === 0) {
           console.log("  (empty)");
@@ -1601,7 +1607,7 @@ function registerFiles(spacesCmd: Command): void {
       const client = createClient();
       try {
         const result = await client.space(spaceId).files.write({
-          path,
+          path: await resolveSpacePath(spaceId, path),
           content,
           encoding: opts.encoding as "utf-8" | "base64",
         });
@@ -1625,8 +1631,9 @@ function registerFiles(spacesCmd: Command): void {
       const spaceId = await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        await client.space(spaceId).files.createDir(path);
-        ok(`Directory created: ${path}`);
+        const dir = await resolveSpacePath(spaceId, path);
+        await client.space(spaceId).files.createDir(dir);
+        ok(`Directory created: ${dir}`);
       } catch (e: unknown) {
         handleHttp(e);
       }
@@ -1640,8 +1647,9 @@ function registerFiles(spacesCmd: Command): void {
       const spaceId = await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        await client.space(spaceId).files.delete(path, opts.recursive ?? false);
-        ok(`Deleted: ${path}`);
+        const target = await resolveSpacePath(spaceId, path);
+        await client.space(spaceId).files.delete(target, opts.recursive ?? false);
+        ok(`Deleted: ${target}`);
       } catch (e: unknown) {
         handleHttp(e);
       }
@@ -1654,8 +1662,10 @@ function registerFiles(spacesCmd: Command): void {
       const spaceId = await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        await client.space(spaceId).files.move({ fromPath: from, toPath: to });
-        ok(`Moved: ${from} → ${to}`);
+        const fromPath = await resolveSpacePath(spaceId, from);
+        const toPath = await resolveSpacePath(spaceId, to);
+        await client.space(spaceId).files.move({ fromPath, toPath });
+        ok(`Moved: ${fromPath} → ${toPath}`);
       } catch (e: unknown) {
         handleHttp(e);
       }
@@ -1670,7 +1680,7 @@ function registerFiles(spacesCmd: Command): void {
       const client = createClient();
       try {
         if (path) {
-          const file = await client.space(spaceId).files.diffFile(path);
+          const file = await client.space(spaceId).files.diffFile(await resolveSpacePath(spaceId, path));
           if (jsonRequested(opts)) return outJson(file);
           printDiffFile(file);
           return;
@@ -2523,7 +2533,7 @@ function registerCheckpoints(spacesCmd: Command): void {
       const spaceId = await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        const tree = await client.space(spaceId).checkpoints(checkpointId).files.list(path ?? "");
+        const tree = await client.space(spaceId).checkpoints(checkpointId).files.list(path === undefined ? "" : await resolveSpacePath(spaceId, path));
         if (jsonRequested(opts)) return outJson(tree);
         if (tree.entries.length === 0) {
           console.log("  (empty)");
@@ -2549,7 +2559,7 @@ function registerCheckpoints(spacesCmd: Command): void {
       const spaceId = await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        const file = await client.space(spaceId).checkpoints(checkpointId).files.read(path);
+        const file = await client.space(spaceId).checkpoints(checkpointId).files.read(await resolveSpacePath(spaceId, path));
         if (jsonRequested(opts)) return outJson(file);
         if (file.delivery === "url" && file.url) {
           console.log(file.url);
@@ -2571,7 +2581,7 @@ function registerCheckpoints(spacesCmd: Command): void {
       const client = createClient();
       try {
         if (path) {
-          const file = await client.space(spaceId).checkpoints(checkpointId).diff.file(path, { base: opts.base ?? null });
+          const file = await client.space(spaceId).checkpoints(checkpointId).diff.file(await resolveSpacePath(spaceId, path), { base: opts.base ?? null });
           if (jsonRequested(opts)) return outJson(file);
           printDiffFile(file);
           return;

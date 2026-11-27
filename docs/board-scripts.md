@@ -54,19 +54,20 @@ imports can reference relative modules. Cycles, bare packages, remote imports,
 `import.meta` and computed import paths are rejected. Bundle external packages into
 Space modules first. A graph is limited to 64 modules and 2 MB of source.
 
-Keep large data, such as sprite sheets or level maps, in `.json` files imported with
-`with { type: "json" }`. Every instance shares one parsed, frozen copy, where a `.js`
-data module is parsed again by each instance that imports it. Fonts (`.woff2`, `.woff`,
-`.ttf`, `.otf`), images (`.png`, `.jpg`, `.webp`, `.gif`, `.avif`) and `.bin` files
-import as a `Uint8Array` with `with { type: "bytes" }`, up to 32 MB in all; publishing
-captures them with the modules. Scripts on one worker share each import, so treat it
-as read-only. Every viewer downloads them: subset a font to the characters it draws,
-which takes a CJK font from megabytes to kilobytes:
+Keep large data, such as sprite sheets or level maps, in `.json` files. Every instance
+shares one parsed, frozen copy, where a `.js` data module is parsed again by each
+instance that imports it. Fonts (`.woff2`, `.woff`, `.ttf`, `.otf`), images (`.png`,
+`.jpg`, `.webp`, `.gif`, `.avif`) and `.bin` files import as a `Uint8Array`, up to
+32 MB in all; publishing captures them with the modules. The extension picks the type,
+so `with { type: "json" }` and `with { type: "bytes" }` are optional, and bundler output
+that drops them loads as is. Scripts on one worker share each import, so treat it as
+read-only. Every viewer downloads them: subset a font to the characters it draws, which
+takes a CJK font from megabytes to kilobytes:
 
 ```js
-import sprites from "./sprites.json" with { type: "json" };
-import hand from "./fonts/hand.woff2" with { type: "bytes" };
-import ink from "./art/ink.webp" with { type: "bytes" };
+import sprites from "./sprites.json";
+import hand from "./fonts/hand.woff2";
+import ink from "./art/ink.webp";
 
 self.fonts.add(await new FontFace("Hand", hand).load());
 const art = await createImageBitmap(new Blob([ink]));

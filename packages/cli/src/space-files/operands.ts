@@ -21,6 +21,14 @@ export function normalizeSpacePath(raw: string) {
   return normalized === "." ? "" : normalized;
 }
 
+export function spacePath(raw: string, cwd = ""): string {
+  const path = raw.trim();
+  if (!cwd || path.startsWith("/")) return normalizeSpacePath(path);
+  const joined = posix.normalize(`${cwd}/${path || "."}`);
+  if (joined === ".." || joined.startsWith("../")) throw new InvalidFileOperandError(`'${raw}' leaves the Space`);
+  return normalizeSpacePath(joined);
+}
+
 function parseSpacePrefix(raw: string): SpaceOperand | null {
   const colon = raw.indexOf(":");
   if (colon <= 0) return null;
@@ -28,13 +36,13 @@ function parseSpacePrefix(raw: string): SpaceOperand | null {
   return parseSpaceRef(space) ? { kind: "space", space, path: normalizeSpacePath(raw.slice(colon + 1)) } : null;
 }
 
-export function parseSpaceFileOperand(raw: string): SpaceOperand {
-  return parseSpacePrefix(raw) ?? { kind: "space", space: null, path: normalizeSpacePath(raw) };
+export function parseSpaceFileOperand(raw: string, cwd = ""): SpaceOperand {
+  return parseSpacePrefix(raw) ?? { kind: "space", space: null, path: spacePath(raw, cwd) };
 }
 
-export function parseCopyOperand(raw: string, currentSpaceDeclared: boolean): FileOperand {
+export function parseCopyOperand(raw: string, currentSpaceDeclared: boolean, cwd = ""): FileOperand {
   const space = parseSpacePrefix(raw);
   if (space) return space;
   const local = !currentSpaceDeclared || (raw.startsWith("/") && !isWorkspacePath(raw));
-  return local ? { kind: "local", path: resolve(raw) } : { kind: "space", space: null, path: normalizeSpacePath(raw) };
+  return local ? { kind: "local", path: resolve(raw) } : { kind: "space", space: null, path: spacePath(raw, cwd) };
 }

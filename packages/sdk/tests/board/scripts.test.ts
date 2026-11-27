@@ -64,9 +64,7 @@ test("JSON imports with type json and assets with type bytes, each within its li
   const files: Record<string, string> = {
     "main.js": 'import data from "./data.json" with { type: "json" };\nimport font from "./fonts/hand.woff2" with { type: "bytes" };\nexport const load = () => import("./art.png", { with: { type: "bytes" } });',
     "data.json": '{"levels":[1,2,3]}',
-    "plain.js": 'import data from "./data.json";',
     "typed.js": 'import x from "./x.js" with { type: "json" };',
-    "untyped.js": 'import font from "./fonts/hand.woff2";',
     "wrong.js": 'import data from "./data.json" with { type: "bytes" };',
   };
   const assets: Record<string, Uint8Array> = { "fonts/hand.woff2": new Uint8Array([1, 2, 3]), "art.png": new Uint8Array(4) };
@@ -75,10 +73,8 @@ test("JSON imports with type json and assets with type bytes, each within its li
   assert.deepEqual(Object.keys(sources).sort(), ["art.png", "data.json", "fonts/hand.woff2", "main.js"]);
   assert.deepEqual(sources["fonts/hand.woff2"]?.bytes, new Uint8Array([1, 2, 3]));
   const code = sources["main.js"]?.code ?? "";
-  assert.deepEqual(sources["main.js"]?.imports.map(({ attributes }) => attributes && code.slice(...attributes)), [undefined, ' with { type: "bytes" }', ', { with: { type: "bytes" } }']);
-  await assert.rejects(loadBoardScriptSources("plain.js", readers()), /with \{ type: "json" \}/);
+  assert.deepEqual(sources["main.js"]?.imports.map(({ attributes }) => attributes && code.slice(...attributes)), [' with { type: "json" }', ' with { type: "bytes" }', ', { with: { type: "bytes" } }']);
   await assert.rejects(loadBoardScriptSources("typed.js", readers()), /Only \.json files/);
-  await assert.rejects(loadBoardScriptSources("untyped.js", readers()), /with \{ type: "bytes" \}/);
   await assert.rejects(loadBoardScriptSources("wrong.js", readers()), /Only fonts, images and \.bin files/);
   await assert.rejects(loadBoardScriptSources("main.js", readers(async (path) => (path === "data.json" ? "{" : files[path] ?? ""))), /not valid JSON/);
   await assert.rejects(loadBoardScriptSources("main.js", { module: readers().module, asset: async () => new Uint8Array(32_000_001) }), /32 MB/);

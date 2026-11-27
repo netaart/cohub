@@ -16,6 +16,7 @@ export type BoardBrowserFormat = "png" | "jpeg" | "webp" | "rgba";
 
 export type BoardBrowserFrame = {
   time: number | null;
+  next?: number;
   region: BoardExportRegion;
   camera?: { width: number; height: number };
   view?: BoardScriptCamera;

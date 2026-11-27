@@ -47,7 +47,8 @@ import { settleBoardPatch } from "../board-media.js";
 import { formatBoardTime, parseBoardTime, parseBoardTimes } from "../board-time.js";
 import { createClient, createRealtimeClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, printable, table } from "../output.js";
-import { resolveSpace } from "../space.js";
+import { boardTarget } from "../board-document.js";
+import { resolveSpace, resolveSpacePath, spaceCwd } from "../space.js";
 import { registerBoardExampleCommands } from "./boards/examples.js";
 import { registerBoardAuthoringCommands } from "./boards/authoring.js";
 
@@ -124,7 +125,7 @@ function selectCheckpointBoard(
 
 async function boardClient(boards: Command, target: string, spaceId?: string) {
   spaceId ??= await resolveSpace(boards);
-  return createClient().space(spaceId).boards.open(target);
+  return createClient().space(spaceId).boards.open(await boardTarget(spaceId, target));
 }
 
 /** A patch from an inline argument, a file, or stdin (`-`). */
@@ -197,8 +198,10 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 async function runExportTask(boards: Command, options: ExportOptions): Promise<void> {
   try {
-    const command = ["cohub", ...process.argv.slice(2).filter((arg) => arg !== "--async")].map(shellQuote).join(" ");
-    const { taskRunId } = await createClient().space(await resolveSpace(boards)).runCommand({ command });
+    const spaceId = await resolveSpace(boards);
+    const cwd = await spaceCwd(spaceId);
+    const command = [...(cwd ? ["cd", shellQuote(cwd), "&&"] : []), ...["cohub", ...process.argv.slice(2).filter((arg) => arg !== "--async")].map(shellQuote)].join(" ");
+    const { taskRunId } = await createClient().space(spaceId).runCommand({ command });
     if (jsonRequested(options)) return outJson({ taskRunId, command });
     ok(`Exporting as Task ${taskRunId}`);
     console.log(`  Follow it with: cohub tasks get ${taskRunId}`);
@@ -209,7 +212,7 @@ async function runExportTask(boards: Command, options: ExportOptions): Promise<v
 
 async function readSpaceText(spaceId: string, path: string): Promise<string> {
   const { readSpaceFileBytes } = await import("../board-export.js");
-  return new TextDecoder().decode((await readSpaceFileBytes(createClient(), spaceId, path)).bytes);
+  return new TextDecoder().decode((await readSpaceFileBytes(createClient(), spaceId, await resolveSpacePath(spaceId, path))).bytes);
 }
 
 export function parseBoardView(value: string): BoardScriptCamera {
@@ -705,7 +708,8 @@ export function registerBoards(program: Command): Command {
     .description("Read, write, animate and export Boards (by id or .board path)")
     .addHelpText("after", `
 A Board is one JSON document: { board, items, animations }. A .board file points to one;
-a copy of the file opens the same Board.
+a copy of the file opens the same Board. .board paths are relative to the current directory
+in the Space's workspace; paths inside the document, such as src, are from the Space root.
   look up    schema, examples, get
   write      create, apply (fields merge, arrays replace, null deletes)
   generate   preset, sequence, place, path print patches for apply
@@ -722,9 +726,10 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
     .addHelpText("after", `
   cohub boards examples slides > slides.json
   cohub boards create slides.board -i slides.json`)
-    .action(async (path: string, options: JsonOptions & { title?: string; input?: string; mutationId?: string }) => {
+    .action(async (target: string, options: JsonOptions & { title?: string; input?: string; mutationId?: string }) => {
       try {
         const spaceId = await resolveSpace(boards);
+        const path = await resolveSpacePath(spaceId, target);
         const read = options.input ? await readBoardJsonObject(options.input, BOARD_CREATE_INPUT_MAX_BYTES) : undefined;
         const document = read && await settleBoardPatch(spaceId, read, async () => ({}));
         const input: BoardCreateInput = {
@@ -773,7 +778,8 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
         if (options.checkpoint) {
           const unsupported = (["rect", "limit", "cursor", "since"] as const).filter((name) => options[name] !== undefined);
           if (unsupported.length) throw new Error(`--checkpoint cannot be combined with ${unsupported.map((name) => `--${name}`).join(", ")}.`);
-          const saved = await createClient().space(await resolveSpace(boards)).checkpoints(options.checkpoint).board(target);
+          const spaceId = await resolveSpace(boards);
+          const saved = await createClient().space(spaceId).checkpoints(options.checkpoint).board(await boardTarget(spaceId, target));
           return outJson(selectCheckpointBoard(saved, { sections, items: list(options.items), within: options.within, animations: list(options.animations) }));
         }
         const input: BoardReadInput = {
@@ -986,7 +992,7 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
       try {
         const spaceId = await resolveSpace(boards);
         const client = createRealtimeClient();
-        const board = await client.space(spaceId).boards.open(target);
+        const board = await client.space(spaceId).boards.open(await boardTarget(spaceId, target));
         const boardId = board.id;
         if (!jsonRequested(options)) process.stderr.write(`Watching Board ${boardId}…\n`);
         const offConnection = client.onConnection((state) => {
@@ -1034,7 +1040,7 @@ async function withRealtimeBoard<T>(boards: Command, target: string, use: (board
   const spaceId = await resolveSpace(boards);
   const client = createRealtimeClient();
   try {
-    return await use(await client.space(spaceId).boards.open(target));
+    return await use(await client.space(spaceId).boards.open(await boardTarget(spaceId, target)));
   } finally {
     await client.disconnect().catch(() => undefined);
   }

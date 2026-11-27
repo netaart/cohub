@@ -5,11 +5,12 @@ import type { SpaceFsCopyResult, SpaceFsCopyStats } from "@neta-art/cohub";
 import { Option, type Command } from "commander";
 import { createClient } from "../client.js";
 import { error, json as outJson, jsonRequested, ok } from "../output.js";
-import { explicitSpace, failSpaceTarget, resolveSpace, resolveSpaceRef } from "../space.js";
+import { explicitSpace, failSpaceTarget, resolveSpace, resolveSpaceRef, spaceCwd } from "../space.js";
 import {
   InvalidFileOperandError,
   parseCopyOperand,
   parseSpaceFileOperand,
+  type FileOperand,
   type LocalOperand,
   type SpaceOperand,
 } from "../space-files/operands.js";
@@ -32,6 +33,9 @@ function fail(e: unknown): never {
 
 const operandSpaceResolver = (spacesCmd: Command) => (space: string | null) =>
   space ? resolveSpaceRef(space) : resolveSpace(spacesCmd);
+
+const bareOperandCwd = async (spacesCmd: Command, operands: FileOperand[]) =>
+  operands.some((operand) => operand.kind === "space" && operand.space === null) ? spaceCwd(await resolveSpace(spacesCmd)) : "";
 
 export function formatBytes(bytes: number) {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -92,7 +96,8 @@ async function copyFiles(spacesCmd: Command, raw: string[], opts: CopyCliOptions
   };
   try {
     const declared = explicitSpace(spacesCmd) !== null;
-    const operands = raw.map((value) => parseCopyOperand(value, declared));
+    const cwd = await bareOperandCwd(spacesCmd, raw.map((value) => parseCopyOperand(value, declared)));
+    const operands = raw.map((value) => parseCopyOperand(value, declared, cwd));
     const destination = operands.pop() as SpaceOperand | LocalOperand;
     const display = raw.at(-1) as string;
     const spaceSources = operands.filter((operand): operand is SpaceOperand => operand.kind === "space");
@@ -179,7 +184,8 @@ async function catFiles(spacesCmd: Command, paths: string[], opts: { json?: bool
   const client = createClient();
   const resolveSpaceId = operandSpaceResolver(spacesCmd);
   try {
-    const operands = paths.map(parseSpaceFileOperand);
+    const cwd = await bareOperandCwd(spacesCmd, paths.map((path) => parseSpaceFileOperand(path)));
+    const operands = paths.map((path) => parseSpaceFileOperand(path, cwd));
     if (jsonRequested(opts)) {
       const files = await Promise.all(operands.map(async (operand) =>
         client.space(await resolveSpaceId(operand.space)).files.read(operand.path)));

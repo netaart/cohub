@@ -112,6 +112,7 @@ let session: {
   scripts: BrowserBoardScriptExport;
   layers: ReturnType<typeof createBoardShaderLayers>;
 } | null = null;
+let ahead: Promise<unknown> | null = null;
 const files = boardScriptFiles((path) => fetch(`file?path=${encodeURIComponent(path)}`));
 const scriptCosts = new Map<string, BoardScriptCost[]>();
 const recordCost = (id: string, cost: BoardScriptCost) => {
@@ -172,7 +173,7 @@ async function modelStill(item: BoardSceneItem): Promise<Texture | null> {
   return new Texture({ source: new ImageSource({ resource: image, alphaMode: "premultiply-alpha-on-upload" }) });
 }
 
-async function upload(canvas: HTMLCanvasElement, info: BoardBrowserFrameInfo, format: BoardBrowserFrame["format"], quality?: number): Promise<void> {
+async function upload(canvas: HTMLCanvasElement, info: BoardBrowserFrameInfo, format: BoardBrowserFrame["format"], quality?: number, ahead?: () => void): Promise<void> {
   let body: Blob | ArrayBuffer | null;
   if (format === "rgba") {
     const context = canvas.getContext("2d");
@@ -183,7 +184,9 @@ async function upload(canvas: HTMLCanvasElement, info: BoardBrowserFrameInfo, fo
   const json = new TextEncoder().encode(JSON.stringify(info));
   const length = new Uint8Array(4);
   new DataView(length.buffer).setUint32(0, json.byteLength, true);
-  const response = await fetch("upload", { method: "POST", body: new Blob([length, json, body]) });
+  const sent = fetch("upload", { method: "POST", body: new Blob([length, json, body]) });
+  ahead?.();
+  const response = await sent;
   if (!response.ok) throw new Error((await response.text()) || "The frame was not received.");
 }
 
@@ -194,6 +197,7 @@ type Draw = BoardBrowserFrame & {
   theme: ReturnType<typeof boardRenderTheme>;
   scripts?: BoardScriptHost;
   layers: ReturnType<typeof createBoardShaderLayers>;
+  ahead?: () => void;
 };
 
 async function draw(target: Renderer, input: Draw): Promise<BoardBrowserFrameInfo> {
@@ -244,7 +248,7 @@ async function draw(target: Renderer, input: Draw): Promise<BoardBrowserFrameInf
     warnings: result.warnings,
     media: boardTimedMedia(prepared.scene),
   };
-  await upload(canvas, info, input.format, input.quality);
+  await upload(canvas, info, input.format, input.quality, input.ahead);
   return info;
 }
 
@@ -284,6 +288,7 @@ const api = {
     session?.scripts.dispose();
     session?.layers.destroy();
     session = null;
+    ahead = null;
     await releaseImages();
   },
   async init(init: BoardBrowserInit): Promise<{ renderer: string }> {
@@ -291,6 +296,7 @@ const api = {
     await document.fonts.ready;
     const board = normalizeBoardDocument(init.document);
     session?.scripts.dispose();
+    ahead = null;
     const layers = session?.layers ?? createBoardShaderLayers({ wait: true });
     layers.rewind();
     if (!init.keep) {
@@ -485,12 +491,21 @@ const api = {
   async render(frame: BoardBrowserFrame): Promise<BoardBrowserFrameInfo> {
     if (!renderer || !session) throw new Error("The browser is not ready.");
     const { document, animation, theme } = session.init;
-    const time = frame.time ?? 0;
-    const sampler = session.sampler;
-    const planned = prepareBoardExport(document, { ...frame, sampler, ...(frame.time === null ? {} : { at: { animation: animation ?? undefined, time } }) });
-    const sample = frame.time === null ? document : sampler.at(time).document;
-    const scripts = await session.scripts.at(sample, time, planned ? boardExportView(planned.plan, planned.camera?.view) : undefined);
-    return draw(renderer, { ...frame, document, sampler, animation, theme: boardRenderTheme(theme), scripts, layers: session.layers });
+    const { sampler, scripts: run } = session;
+    const settle = (time: number | null) => {
+      const planned = prepareBoardExport(document, { ...frame, sampler, ...(time === null ? {} : { at: { animation: animation ?? undefined, time } }) });
+      return run.at(time === null ? document : sampler.at(time).document, time ?? 0, planned ? boardExportView(planned.plan, planned.camera?.view) : undefined);
+    };
+    const pending = ahead;
+    ahead = null;
+    await pending;
+    const scripts = await settle(frame.time);
+    const { time, next } = frame;
+    const start = time !== null && next !== undefined && next > time ? () => {
+      ahead = settle(next);
+      ahead.catch(() => {});
+    } : undefined;
+    return draw(renderer, { ...frame, document, sampler, animation, theme: boardRenderTheme(theme), scripts, layers: session.layers, ...(start ? { ahead: start } : {}) });
   },
   async simulate(input: BoardBrowserSimulation): Promise<BoardSimulationResult> {
     const target = await ensureRenderer();
