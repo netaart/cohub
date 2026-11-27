@@ -4,6 +4,16 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.114 — 2026-11-27
+
+- **One composer chip for every Space**: Cohub joins the local Harnesses as a tab in the composer runtime picker, listing the Cloud catalog with its generation policy, so picking a model commits Harness and model together; without a local Runtime the tabs are hidden and the chip shows the model name alone. The separate session model dialog is gone.
+- **More payments qualify referrals**: an invitee's first paid subscription period and paid App Store or Google Play orders and subscriptions now count as their first payment, alongside paid orders; redeemed, manual, fully discounted and sandbox purchases are ignored. Billing SDK 2.1.0 lets the webhook read both the 2026-08-21 and 2026-10-20 payload versions, and the billing endpoint should subscribe to `subscription.activated` as well as `order.paid`.
+
+### Bug Fixes
+
+- Model and generation searches in the picker share one focus rule: a mouse or keyboard focuses them, touch does not, so tapping a tab no longer opens the software keyboard.
+- A subscription activation delivered together with its paid order qualifies a referral only once.
+
 ## v2.113 — 2026-11-27
 
 - **Composer runtime picker**: the local harness menu and model chip merge into one dialog — harness tabs preview above the model list, and picking a model commits harness, model and approval mode together, with offline, uninstalled and empty catalogs treated as first-class states (cloud-only Spaces keep the single cloud chip).
