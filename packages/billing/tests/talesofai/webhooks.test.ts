@@ -50,6 +50,45 @@ const orderPaid = (overrides: { paid?: number; source?: string; reason?: string;
     overrides.businessKey,
   );
 
+const iapOrderPaid = (sandbox = false) => {
+  const id = randomUUID();
+  const scope = { provider_key: "apple_app_store", app_id: "live.cohub.app", environment: "live" } as const;
+  return {
+    id: randomUUID(),
+    type: "order.paid",
+    api_version: "2026-10-20",
+    timestamp: paidAt,
+    environment: "live",
+    business: { id: randomUUID(), key: "cohub" },
+    customer: { id: randomUUID(), external_user_id: "user-1" },
+    resource: { type: "order", id, version: 1 },
+    data: {
+      object: {
+        id,
+        status: "paid",
+        product,
+        amount_snapshot: 999,
+        discount_amount_snapshot: 0,
+        paid_amount_snapshot: 999,
+        currency_snapshot: "USD",
+        paid_at: paidAt,
+        billing_reason: "purchase",
+        fulfillment_source: "iap",
+        subscription_id: null,
+        paid_period_id: null,
+        iap: { iap_app_id: randomUUID(), sandbox, ...scope },
+        provider_financial_snapshot: {
+          version: 1,
+          policy: { version: 1, policy_id: "iap_transaction_v1", pricing_authority: "provider_transaction" },
+          provider_scope: { config_id: "apple", ...scope },
+          transaction_price: { currency: "USD", amount: "9.99" },
+          source: { kind: "apple_signed_transaction", field_path: "price", observed_at: paidAt },
+        },
+      },
+    },
+  };
+};
+
 const subscriptionActivated = (overrides: { paid?: number; source?: string } = {}) => {
   const period = { start: paidAt, end: "2026-12-26T08:00:00.000Z" };
   return envelope("subscription.activated", "subscription", {
@@ -100,6 +139,7 @@ test("real payments carry the payer and payment time", async () => {
     orderPaid({ reason: "subscription_create" }),
     orderPaid({ reason: "subscription_cycle" }),
     subscriptionActivated(),
+    iapOrderPaid(),
   ]) {
     const parsed = await deliver(event);
     assert.equal(parsed.id, event.id);
@@ -107,7 +147,7 @@ test("real payments carry the payer and payment time", async () => {
   }
 });
 
-test("redemptions, manual grants, free charges and other businesses are not payments", async () => {
+test("redemptions, manual grants, free charges, IAP sandbox purchases and other businesses are not payments", async () => {
   for (const event of [
     orderPaid({ source: "redemption" }),
     orderPaid({ source: "manual" }),
@@ -116,6 +156,7 @@ test("redemptions, manual grants, free charges and other businesses are not paym
     subscriptionActivated({ source: "redemption" }),
     subscriptionActivated({ source: "manual" }),
     subscriptionActivated({ paid: 0 }),
+    iapOrderPaid(true),
   ]) {
     assert.equal((await deliver(event)).payment, null);
   }
