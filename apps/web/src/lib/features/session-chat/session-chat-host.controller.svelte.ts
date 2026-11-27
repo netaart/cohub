@@ -1661,7 +1661,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		]);
 	}
 
-	function handleModelSelect(model: {
+	function setSessionModel(model: {
 		provider: string;
 		id: string;
 		thinkingLevel?: ModelThinkingLevel;
@@ -1680,8 +1680,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			draftSessionModel = selected;
 			draftSessionModelManuallySelected = true;
 			draftThinkingLevel = thinkingLevel;
-			showModelSelector = false;
-			focusComposerSoon();
 			return;
 		}
 		sessionModelById = {
@@ -1692,8 +1690,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			...sessionThinkingLevelById,
 			[activeSessionId]: thinkingLevel,
 		};
-		showModelSelector = false;
-		focusComposerSoon();
 	}
 
 	function loadSessionScrollAnchors() {
@@ -3134,7 +3130,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		if (sending || composerMode !== "agent") return;
 		harnessBySession = { ...harnessBySession, [harnessSelectionKey]: harness };
 		if (harness === "cohub") {
-			if (model) handleModelSelect(model);
+			if (model) setSessionModel(model);
 		} else {
 			localModelsBySession = {
 				...localModelsBySession,
@@ -5130,7 +5126,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		loadModelsCatalog,
 		loadGenerationModelsCatalog,
 		loadPromptTemplates,
-		handleModelSelect,
 		handleCreateModelSelect,
 		setGenerationPolicyMode,
 		setGenerationModelSelected,

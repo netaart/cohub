@@ -128,7 +128,6 @@ type Props = {
 	attachments?: ComposerAttachment[];
 	viewportContexts?: ViewportContext[];
 	currentModel?: SelectedModel | null;
-	/** Where agent Turns run, with the Cloud catalog its Cohub tab lists. */
 	runtime?: ComposerRuntime;
 	cloud?: Pick<CloudModels, "list" | "onOpen">;
 	modelOpen?: boolean;

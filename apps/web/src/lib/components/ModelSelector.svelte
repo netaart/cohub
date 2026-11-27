@@ -69,7 +69,6 @@ type Props = {
 	header?: Snippet;
 	footer?: Snippet;
 	catalogKey?: string;
-	/** Shown in place of the list and search while the catalog is empty. */
 	emptyText?: string;
 	emptyAction?: { label: string; onclick: () => void };
 	onClose: () => void;
@@ -161,10 +160,11 @@ let generationFilter = $state<GenerationCategoryFilter>("all");
 let selectedIndex = $state(0);
 let navigationMode: "mouse" | "keyboard" = $state("mouse");
 let activeTab: "chat" | "generation" = $state("chat");
+const chatTab = $derived(activeTab === "chat" || !showGeneration);
 let expandedGenerationModels = $state<Set<string>>(new Set());
 let expandedGenerationParameters = $state<Set<string>>(new Set());
 let containerEl = $state<HTMLElement | null>(null);
-let searchInputEl = $state<HTMLInputElement | null>(null);
+let rootEl = $state<HTMLDivElement | null>(null);
 let thinkingMenuOpenFor = $state<string | null>(null);
 let thinkingMenuPos = $state<{ top: number; right: number } | null>(null);
 let thinkingMenuTrigger = $state<HTMLElement | null>(null);
@@ -237,33 +237,18 @@ let hoverAnchorRect = $state<DOMRect | null>(null);
 let hoverShowTimer: ReturnType<typeof setTimeout> | null = null;
 let hoverHideTimer: ReturnType<typeof setTimeout> | null = null;
 
-function getVisibleSearchInput() {
-	if (searchInputEl && searchInputEl.getClientRects().length > 0) {
-		return searchInputEl;
-	}
-	return (
-		Array.from(
-			document.querySelectorAll<HTMLInputElement>(
-				'[data-model-selector-search="true"]',
-			),
-		).find((input) => input.getClientRects().length > 0) ?? null
-	);
-}
-
-function focusSearchInputSoon() {
+// A search takes focus only with a keyboard; on touch it would raise the software keyboard.
+function focusInside() {
 	requestAnimationFrame(() => {
-		getVisibleSearchInput()?.focus();
+		const search =
+			rootEl?.querySelector<HTMLInputElement>("input[data-search]");
+		const touch =
+			"ontouchstart" in window ||
+			window.matchMedia("(pointer: coarse)").matches ||
+			navigator.maxTouchPoints > 0;
+		if (search?.getClientRects().length && !touch) search.focus();
+		else rootEl?.focus({ preventScroll: true });
 	});
-}
-
-/** Focusing a search on touch pops the software keyboard, so only a mouse or keyboard does it. */
-function focusesSearch() {
-	return (
-		typeof window !== "undefined" &&
-		!("ontouchstart" in window) &&
-		!window.matchMedia("(pointer: coarse)").matches &&
-		navigator.maxTouchPoints === 0
-	);
 }
 
 function getDisplayName(item: ModelItem): string {
@@ -704,7 +689,7 @@ $effect(() => {
 		selectedIndex = 0;
 		navigationMode = "mouse";
 		closeThinkingMenu();
-		if (focusesSearch()) focusSearchInputSoon();
+		focusInside();
 	}
 });
 
@@ -718,7 +703,7 @@ $effect(() => {
 });
 
 function moveSelection(delta: number) {
-	if (activeTab !== "chat") return;
+	if (!chatTab) return;
 	if (filteredModels.length === 0) {
 		selectedIndex = 0;
 		return;
@@ -736,10 +721,7 @@ function handleNavigationKeydown(e: KeyboardEvent) {
 	if (!open || e.defaultPrevented || isComposingKeyboardEvent(e)) return;
 	const key = e.key.toLowerCase();
 	if (e.key === "Escape") {
-		e.preventDefault();
-		e.stopPropagation();
-		e.stopImmediatePropagation?.();
-		onClose();
+		dismiss(e);
 		return;
 	}
 	if (e.key === "ArrowDown" || (e.ctrlKey && key === "n")) {
@@ -756,11 +738,7 @@ function handleNavigationKeydown(e: KeyboardEvent) {
 		moveSelection(-1);
 		return;
 	}
-	if (
-		e.key === "Enter" &&
-		activeTab === "chat" &&
-		filteredModels[selectedIndex]
-	) {
+	if (e.key === "Enter" && chatTab && filteredModels[selectedIndex]) {
 		e.preventDefault();
 		e.stopPropagation();
 		e.stopImmediatePropagation();
@@ -769,11 +747,21 @@ function handleNavigationKeydown(e: KeyboardEvent) {
 	}
 }
 
-function closeOnEscape(e: KeyboardEvent) {
-	if (e.key !== "Escape" || e.defaultPrevented || isComposingKeyboardEvent(e))
-		return;
+function dismiss(e: KeyboardEvent) {
 	e.preventDefault();
-	onClose();
+	e.stopPropagation();
+	if (thinkingMenuOpenFor) closeThinkingMenu();
+	else onClose();
+}
+
+function handleRootKeydown(e: KeyboardEvent) {
+	if (e.target === e.currentTarget) handleNavigationKeydown(e);
+	else if (
+		e.key === "Escape" &&
+		!e.defaultPrevented &&
+		!isComposingKeyboardEvent(e)
+	)
+		dismiss(e);
 }
 
 function handleKeyDown(e: KeyboardEvent) {
@@ -994,7 +982,7 @@ const hoverCardPos = $derived.by(() => {
 
 <Dialog {open} {onClose} title={title ?? m.model_selector_title({}, { locale })} maxWidth="540px" height={header ? "min(70vh, 480px)" : undefined} scrollable={!header} {footer}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class={header ? "flex h-full flex-col" : "contents"} onkeydown={closeOnEscape}>
+	<div bind:this={rootEl} class={header ? "flex h-full flex-col outline-none" : "outline-none"} tabindex="-1" onkeydown={handleRootKeydown}>
 	{@render header?.()}
 	{#if showGeneration}
 	<div class="border-b border-border-subtle/70 px-3 py-2">
@@ -1004,7 +992,7 @@ const hoverCardPos = $derived.by(() => {
 				class={`rounded px-3 py-1.5 font-medium transition-colors duration-100 ${activeTab === "chat" ? "bg-bg-surface text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-primary"}`}
 				onclick={() => {
 					activeTab = "chat";
-					if (focusesSearch()) focusSearchInputSoon();
+					focusInside();
 				}}
 			>
 				{m.model_selector_tab_chat({}, { locale })}
@@ -1015,7 +1003,7 @@ const hoverCardPos = $derived.by(() => {
 				onclick={() => {
 					activeTab = "generation";
 					onGenerationTabOpen?.();
-					if (focusesSearch()) focusSearchInputSoon();
+					focusInside();
 				}}
 			>
 				{m.model_selector_tab_generation({}, { locale })}
@@ -1024,11 +1012,10 @@ const hoverCardPos = $derived.by(() => {
 	</div>
 
 	{/if}
-	{#if activeTab === "chat" || !showGeneration}
+	{#if chatTab}
 		<div class:hidden={emptyText && models.length === 0} class="shrink-0 border-b border-border-subtle/70 px-3 py-2">
 			<input
-				bind:this={searchInputEl}
-				data-model-selector-search="true"
+				data-search
 				type="text"
 				placeholder={m.model_selector_search_placeholder({}, { locale })}
 				bind:value={searchQuery}
@@ -1230,7 +1217,7 @@ const hoverCardPos = $derived.by(() => {
 
 			<div class="mt-3">
 				<input
-					data-model-selector-search="true"
+					data-search
 					type="text"
 					placeholder={m.model_selector_generation_search({}, { locale })}
 					aria-label={m.model_selector_generation_search({}, { locale })}

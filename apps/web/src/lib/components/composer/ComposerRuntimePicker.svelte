@@ -8,7 +8,7 @@ import {
 	type LocalHarness,
 } from "@cohub/protocol/runtime";
 import { Check, Eye, Shield, ShieldCheck, ShieldOff } from "lucide-svelte";
-import { tick } from "svelte";
+import { tick, untrack } from "svelte";
 import ModelSelector from "#lib/components/ModelSelector.svelte";
 import { localHarnessOptions } from "#lib/features/space/runtime-status-view.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -83,33 +83,35 @@ const localMeta = $derived.by(() => {
 			: null,
 	].filter((item): item is string => Boolean(item));
 });
-const approval = $derived(
-	isLocalHarness(harness)
-		? runtime.approvalFor(harness)
-		: { modes: [], mode: null },
-);
 const shownApproval = $derived(
-	approval.mode !== "inherit" ? approval.mode : null,
+	runtime.approvalMode !== "inherit" ? runtime.approvalMode : null,
 );
+const showTabs = $derived(runtime.local || harness !== "cohub");
 const label = $derived(
 	harness === "cohub"
 		? cloud.label
-		: (localModel?.name ?? harnessLabel(harness)),
+		: (localModel?.name ?? localModel?.id ?? harnessLabel(harness)),
 );
 const meta = $derived(harness === "cohub" ? cloud.meta : localMeta);
 const ariaLabel = $derived(
-	harness === "cohub"
-		? cloud.ariaLabel
-		: [
-				`${m.runtime_harness({}, { locale })}: ${harnessLabel(harness)}`,
-				localModel ? `${m.runtime_model({}, { locale })}: ${label}` : null,
-				shownApproval
-					? `${m.runtime_approval_mode({}, { locale })}: ${approvalLabel(shownApproval)}`
-					: null,
-				!runtime.online ? m.runtime_offline({}, { locale }) : null,
-			]
-				.filter(Boolean)
-				.join(", "),
+	[
+		showTabs
+			? `${m.runtime_harness({}, { locale })}: ${harnessLabel(harness)}`
+			: null,
+		harness === "cohub"
+			? cloud.ariaLabel
+			: localModel
+				? `${m.runtime_model({}, { locale })}: ${label}`
+				: null,
+		shownApproval
+			? `${m.runtime_approval_mode({}, { locale })}: ${approvalLabel(shownApproval)}`
+			: null,
+		isLocalHarness(harness) && !runtime.online
+			? m.runtime_offline({}, { locale })
+			: null,
+	]
+		.filter(Boolean)
+		.join(", "),
 );
 
 let trigger = $state<HTMLButtonElement | null>(null);
@@ -123,8 +125,7 @@ const previewModel = $derived(
 	open && isLocalHarness(preview) ? runtime.modelFor(preview) : null,
 );
 const list = $derived.by((): ModelListProps => {
-	if (preview === "cohub") return cloud.list;
-	if (!isLocalHarness(preview)) return { models: [] };
+	if (!isLocalHarness(preview)) return cloud.list;
 	const ready = availability === "ready";
 	return {
 		models: ready ? catalogFor(preview) : [],
@@ -160,18 +161,17 @@ const showApproval = $derived(
 const selectedApproval = $derived(previewApproval?.mode ?? "inherit");
 const SelectedApprovalIcon = $derived(approvalIcons[selectedApproval]);
 
-let shown = false;
 $effect(() => {
-	if (open === shown) return;
-	shown = open;
 	if (!open) return;
-	refreshed = new Set();
-	previewHarness(harness);
-	void tick().then(() => {
-		const tab = tabList?.querySelector<HTMLElement>("[aria-selected='true']");
-		tab?.scrollIntoView({ block: "nearest", inline: "nearest" });
-		tab?.focus();
+	untrack(() => {
+		refreshed = new Set();
+		previewHarness(harness);
 	});
+	void tick().then(() =>
+		tabList
+			?.querySelector("[aria-selected='true']")
+			?.scrollIntoView({ block: "nearest", inline: "nearest" }),
+	);
 });
 
 function previewHarness(next: HarnessKind) {
@@ -193,10 +193,6 @@ function commit(next: HarnessKind, model?: LocalModelSelection) {
 	close();
 }
 
-/**
- * Picking the current model again keeps its level; the Fast switch reports a
- * tier only when it changes, so other picks keep the current one.
- */
 function choose(
 	selected: Omit<LocalModelSelection, "serviceTier"> & {
 		serviceTier?: string | null;
@@ -256,31 +252,28 @@ function navigate(event: KeyboardEvent) {
 	{open}
 	onClose={close}
 	onSelect={choose}
-	title={runtime.local ? m.runtime_harness({}, { locale }) : undefined}
+	title={showTabs ? m.runtime_harness({}, { locale }) : undefined}
 	catalogKey={preview}
-	header={runtime.local ? tabs : undefined}
+	header={showTabs ? tabs : undefined}
 	footer={showApproval ? approvalRow : undefined}
 	{...list}
 />
 
 {#snippet tabs()}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="tabs" onkeydown={navigate}>
+	<div bind:this={tabList} class="tabs" role="tablist" tabindex="-1" aria-label={m.runtime_harness({}, { locale })} onkeydown={navigate}>
 		<button type="button" class="tab-key tab" data-harness="cohub" role="tab" aria-selected={preview === "cohub"} aria-current={harness === "cohub" ? "true" : undefined} title={m.runtime_cloud_execution({}, { locale })} tabindex={preview === "cohub" ? 0 : -1} onclick={() => previewHarness("cohub")}>
 			<HarnessIcon harness="cohub" size={14} />{harnessLabel("cohub")}
 			{#if harness === "cohub"}<Check class="h-3 w-3 text-brand" />{/if}
 		</button>
 		<span class="divider" aria-hidden="true"></span>
-		<div bind:this={tabList} class="flex items-center gap-0.5" role="tablist" aria-label={m.runtime_local_execution({}, { locale })}>
-			{#each options as option (option.harness)}
+		{#each options as option (option.harness)}
 				{@const selected = option.harness === preview}
-				<button type="button" class="tab-key tab" class:unavailable={option.availability !== "ready"} role="tab" data-harness={option.harness} aria-selected={selected} aria-label={harnessLabel(option.harness)} aria-current={option.harness === harness ? "true" : undefined} title={!runtime.online ? m.runtime_offline({}, { locale }) : option.availability === "missing" ? m.runtime_harness_not_installed({}, { locale }) : harnessLabel(option.harness)} tabindex={selected ? 0 : -1} onclick={() => previewHarness(option.harness)}>
-					<HarnessIcon harness={option.harness} size={14} />
-					{#if option.availability !== "missing"}{harnessLabel(option.harness)}{/if}
-					{#if option.harness === harness}<Check class="h-3 w-3 text-brand" />{/if}
-				</button>
-			{/each}
-		</div>
+			<button type="button" class="tab-key tab" class:unavailable={option.availability !== "ready"} role="tab" data-harness={option.harness} aria-selected={selected} aria-label={harnessLabel(option.harness)} aria-current={option.harness === harness ? "true" : undefined} title={!runtime.online ? m.runtime_offline({}, { locale }) : option.availability === "missing" ? m.runtime_harness_not_installed({}, { locale }) : harnessLabel(option.harness)} tabindex={selected ? 0 : -1} onclick={() => previewHarness(option.harness)}>
+				<HarnessIcon harness={option.harness} size={14} />
+				{#if option.availability !== "missing"}{harnessLabel(option.harness)}{/if}
+				{#if option.harness === harness}<Check class="h-3 w-3 text-brand" />{/if}
+			</button>
+		{/each}
 	</div>
 {/snippet}
 

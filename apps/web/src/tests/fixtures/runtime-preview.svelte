@@ -263,7 +263,7 @@ const runtime: ComposerRuntime = {
 		</div>
 		<div class="flex-1 text-sm text-text-tertiary">Isolated fixtures · no account or model requests</div>
 		<button class="rounded border border-border-subtle px-2 py-1" onclick={() => { showPicker = true; }}>open picker</button>
-		<button class="rounded border border-border-subtle px-2 py-1" onclick={() => { cloudOnly = !cloudOnly; if (cloudOnly) harness = "cohub"; }}>cloud only</button>
+		<button class="rounded border border-border-subtle px-2 py-1" onclick={() => { cloudOnly = !cloudOnly; }}>cloud only</button>
 		<output aria-label="Approval selection">{approvalMode ?? "unset"}</output>
 		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
 		<SessionApprovals {spaceId} sessionId="55555555-5555-4555-8555-555555555555" harnessOf={() => (harness === "cohub" ? "codex" : harness)} />

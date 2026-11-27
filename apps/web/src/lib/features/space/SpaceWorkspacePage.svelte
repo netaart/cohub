@@ -2657,6 +2657,7 @@ function handleSessionVimKeydown(event: KeyboardEvent) {
 		key === "m"
 	) {
 		event.preventDefault();
+		sessionChat.setComposerMode("agent");
 		sessionChat.showModelSelector = true;
 		void sessionChat.loadModelsCatalog();
 		void sessionChat.loadGenerationModelsCatalog();

@@ -1,5 +1,3 @@
-import type { PublicGenerationDeclaration } from "@cohub/protocol/generation";
-import type { ModelStatusEntry } from "@cohub/protocol/model/status";
 import {
 	APPROVAL_MODES,
 	type ApprovalMode,
@@ -7,60 +5,15 @@ import {
 	type LocalHarness,
 } from "@cohub/protocol/runtime";
 import type { RuntimeCapabilities } from "@neta-art/cohub";
-import type {
-	LocalModelSelection,
-	ModelCatalogItem,
-	ModelThinkingLevel,
-} from "#lib/model-catalog.ts";
+import type { ComponentProps } from "svelte";
+import type ModelSelector from "#lib/components/ModelSelector.svelte";
+import type { LocalModelSelection } from "#lib/model-catalog.ts";
 
-type NumericConstraint = { min?: number; max?: number };
-type BooleanConstraint = { value?: boolean };
+export type ModelListProps = Omit<
+	ComponentProps<typeof ModelSelector>,
+	"open" | "onClose" | "onSelect" | "title" | "header" | "footer" | "catalogKey"
+>;
 
-/** Props the shared model list reads; local and Cloud catalogs both fill them. */
-export type ModelListProps = {
-	models: ModelCatalogItem[];
-	currentModel?: { provider: string; id: string } | null;
-	thinkingLevelModel?: { provider: string; id: string } | null;
-	currentThinkingLevel?: ModelThinkingLevel | null;
-	currentServiceTier?: string | null;
-	modelStatus?: Record<string, ModelStatusEntry> | null;
-	showGeneration?: boolean;
-	generationModels?: PublicGenerationDeclaration[];
-	generationPolicyMode?: "auto" | "limited";
-	selectedGenerationModels?: Set<string>;
-	generationEnumSelections?: Record<string, Record<string, Set<string>>>;
-	generationNumericConstraints?: Record<
-		string,
-		Record<string, NumericConstraint>
-	>;
-	generationBooleanConstraints?: Record<
-		string,
-		Record<string, BooleanConstraint>
-	>;
-	onGenerationPolicyModeChange?: (mode: "auto" | "limited") => void;
-	onGenerationModelToggle?: (model: string, selected: boolean) => void;
-	onGenerationEnumValueToggle?: (
-		model: string,
-		parameter: string,
-		value: string,
-		selected: boolean,
-	) => void;
-	onGenerationNumericConstraintChange?: (
-		model: string,
-		parameter: string,
-		constraint: NumericConstraint,
-	) => void;
-	onGenerationBooleanConstraintChange?: (
-		model: string,
-		parameter: string,
-		constraint: BooleanConstraint,
-	) => void;
-	onGenerationTabOpen?: () => void;
-	emptyText?: string;
-	emptyAction?: { label: string; onclick: () => void };
-};
-
-/** The Cloud catalog and the facts its chip shows. */
 export type CloudModels = {
 	list: ModelListProps;
 	onOpen?: () => void;

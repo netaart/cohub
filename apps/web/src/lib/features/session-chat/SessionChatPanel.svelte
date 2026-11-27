@@ -148,7 +148,6 @@ const generationBooleanConstraints = $derived(
 	host.generationBooleanConstraints,
 );
 const activeSessionModel = $derived(host.activeSessionModel);
-// The Cloud catalog the composer's Cohub tab lists; loaded when that tab opens.
 const cloudCatalog = $derived<Pick<CloudModels, "list" | "onOpen">>({
 	onOpen: () => {
 		void host.loadModelsCatalog();
@@ -191,7 +190,10 @@ const announcedModels = $derived<AnnouncedModel[]>(
 					offer: item.offer,
 					select: () => {
 						host.setComposerMode("agent");
-						host.handleModelSelect({ provider: item.provider, id: item.id });
+						host.composerRuntime.select("cohub", {
+							provider: item.provider,
+							id: item.id,
+						});
 					},
 				})),
 			]
