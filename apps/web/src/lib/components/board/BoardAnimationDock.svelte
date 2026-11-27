@@ -24,14 +24,10 @@ import {
 	ChevronDown,
 	Circle,
 	Clapperboard,
+	Download,
 	Ellipsis,
 	Pause,
 	Play,
-	Plus,
-	Scissors,
-	Settings2,
-	SkipBack,
-	SkipForward,
 	X,
 } from "lucide-svelte";
 import { untrack } from "svelte";
@@ -46,6 +42,7 @@ import {
 	parseBoardKeyId,
 } from "#lib/board/animation-timeline.ts";
 import { createBoardAnimationTransport } from "#lib/board/board-animation-transport.svelte.ts";
+import type { BoardInputRecorder } from "#lib/board/board-input-recorder.svelte.ts";
 import type { BoardEditor } from "#lib/board/editor.svelte.ts";
 import BoardAnimationInspector from "#lib/components/board/BoardAnimationInspector.svelte";
 import BoardAnimationLanes from "#lib/components/board/BoardAnimationLanes.svelte";
@@ -53,7 +50,6 @@ import BoardAnimationSettings from "#lib/components/board/BoardAnimationSettings
 import BoardMenu, {
 	type BoardMenuItem,
 } from "#lib/components/board/BoardMenu.svelte";
-import BoardSequenceDialog from "#lib/components/board/BoardSequenceDialog.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 
@@ -61,15 +57,19 @@ const {
 	editor,
 	playback,
 	isMobile = false,
+	inputRecorder,
 	onPlayback,
 	onDropResources,
+	onExport,
 	onClose,
 }: {
 	editor: BoardEditor;
 	playback: BoardPlaybackSnapshot | null;
 	isMobile?: boolean;
+	inputRecorder?: BoardInputRecorder;
 	onPlayback: BoardTransportSend;
 	onDropResources?: (data: DataTransfer, at: number) => void;
+	onExport?: (animationId: string) => void;
 	onClose: () => void;
 } = $props();
 
@@ -90,10 +90,8 @@ const time = $derived(transport.time);
 let height = $state(untrack(() => storedHeight(isMobile ? 220 : 248)));
 let root = $state<HTMLElement | null>(null);
 let pickerAnchor = $state<HTMLButtonElement | null>(null);
-let settingsAnchor = $state<HTMLButtonElement | null>(null);
 let moreAnchor = $state<HTMLButtonElement | null>(null);
 let menu = $state<"picker" | "settings" | "more" | null>(null);
-let sequenceOpen = $state(false);
 let selection = $state.raw<BoardDockSelection>(null);
 let lanes = $state<ReturnType<typeof BoardAnimationLanes> | null>(null);
 let dropAt = $state<number | null>(null);
@@ -134,10 +132,6 @@ const splitTargets = $derived(
 		const span = spans.get(id);
 		return span !== undefined && time > span.start && time < span.end;
 	}),
-);
-const manualCount = $derived(
-	Object.values(editor.animations).filter((entry) => entry.play === "manual")
-		.length,
 );
 
 $effect(() => {
@@ -221,21 +215,6 @@ function split() {
 	if (copies.length) selectClips(new Set(copies));
 }
 
-function insertTime() {
-	const range = selection?.type === "range" ? selection : null;
-	edit(() =>
-		editor.insertTime(range?.from ?? time, range ? range.to - range.from : 1000),
-	);
-}
-
-function removeTime() {
-	if (selection?.type !== "range") return;
-	const { from, to } = selection;
-	edit(() => editor.removeTime(from, to));
-	selection = null;
-	transport.seek(from);
-}
-
 function dragOver(event: DragEvent) {
 	if (!onDropResources || !event.dataTransfer?.types.length) return;
 	event.preventDefault();
@@ -295,9 +274,6 @@ function handleKeydown(event: KeyboardEvent) {
 			if (selection.type === "clips") {
 				const targets = [...selection.targets];
 				edit(() => editor.removeFromTimeline(targets));
-			} else if (selection.type === "range") {
-				removeTime();
-				return true;
 			} else if (selection.type === "marker") {
 				const at = selection.at;
 				edit(() =>
@@ -379,54 +355,49 @@ const pickerItems = $derived<BoardMenuItem[]>([
 	})),
 	...(transport.ids.length ? [{ id: "separator", separator: true as const }] : []),
 	{ id: "new", label: m.board_animation_new({}, { locale }), run: create },
-	...(manualCount > 1
+	...(animationId
 		? [
 				{
-					id: "sequence",
-					label: m.board_sequence_create({}, { locale }),
+					id: "settings",
+					label: m.board_animation_settings({}, { locale }),
 					run: () => {
-						sequenceOpen = true;
+						menu = "settings";
 					},
+				},
+				{
+					id: "delete",
+					label: m.board_animation_delete({}, { locale }),
+					danger: true,
+					run: () => editor.deleteAnimation(animationId),
 				},
 			]
 		: []),
 ]);
 
+const recordingInput = $derived(inputRecorder?.startedAt != null);
 const moreItems = $derived<BoardMenuItem[]>([
-	{
-		id: "follow",
-		label: m.board_camera_follow({}, { locale }),
-		checked: editor.cameraPolicy === "follow",
-		run: () =>
-			editor.setCameraPolicy(
-				editor.cameraPolicy === "follow" ? "free" : "follow",
-			),
-	},
-	{
-		id: "record-view",
-		label: m.board_camera_record({}, { locale }),
-		run: () => edit(() => editor.keyCamera()),
-	},
+	...(unplaced.length
+		? [
+				{
+					id: "place",
+					label: m.board_timeline_add({}, { locale }),
+					run: () => place(unplaced, time),
+				},
+			]
+		: []),
 	{
 		id: "marker",
 		label: m.board_marker_add({}, { locale }),
 		run: () => addMarker(Math.round(time)),
 	},
-	{ id: "time-separator", separator: true as const },
-	{
-		id: "insert-time",
-		label:
-			selection?.type === "range"
-				? m.board_timeline_insert_range({}, { locale })
-				: m.board_timeline_insert_second({}, { locale }),
-		run: insertTime,
-	},
-	...(selection?.type === "range"
+	...(inputRecorder && (inputRecorder.available || recordingInput)
 		? [
 				{
-					id: "remove-time",
-					label: m.board_timeline_remove_range({}, { locale }),
-					run: removeTime,
+					id: "record-input",
+					label: recordingInput
+						? m.board_input_stop({}, { locale })
+						: m.board_input_title({}, { locale }),
+					run: inputRecorder.toggle,
 				},
 			]
 		: []),
@@ -460,21 +431,6 @@ const moreItems = $derived<BoardMenuItem[]>([
 		</button>
 		{#if animation}
 			<button
-				bind:this={settingsAnchor}
-				type="button"
-				class="key"
-				title={m.board_animation_settings({}, { locale })}
-				aria-label={m.board_animation_settings({}, { locale })}
-				aria-expanded={menu === "settings"}
-				onclick={() => { menu = menu === "settings" ? null : "settings"; }}
-			>
-				<Settings2 class="h-3.5 w-3.5" />
-			</button>
-			<span class="divider"></span>
-			<button type="button" class="key key--start" title={m.board_to_start({}, { locale })} aria-label={m.board_to_start({}, { locale })} disabled={transport.starting} onclick={() => transport.seek(0)}>
-				<SkipBack class="h-3.5 w-3.5" />
-			</button>
-			<button
 				type="button"
 				class="key key--play"
 				title={playLabel}
@@ -484,49 +440,37 @@ const moreItems = $derived<BoardMenuItem[]>([
 			>
 				{#if transport.playing}<Pause class="h-3.5 w-3.5" fill="currentColor" />{:else}<Play class="h-3.5 w-3.5" fill="currentColor" />{/if}
 			</button>
-			<button type="button" class="key" title={m.board_next_marker({}, { locale })} aria-label={m.board_next_marker({}, { locale })} disabled={transport.starting || !transport.nextMarker} onclick={transport.next}>
-				<SkipForward class="h-3.5 w-3.5" />
-			</button>
 			<span class="time">
 				<span class="time-now">{formatBoardTime(time)}</span>
 				<span class="time-total">/ {formatBoardTime(animation.duration)}</span>
 			</span>
 		{/if}
 		<span class="spacer"></span>
-		{#if animation && unplaced.length}
+		{#if animation && animationId}
+			{@const id = animationId}
 			<button
 				type="button"
-				class="timeline-add"
-				title={m.board_timeline_add_hint({}, { locale })}
-				onclick={() => place(unplaced, time)}
-			>
-				<Plus class="h-3 w-3" />
-				<span class="timeline-add-label">{m.board_timeline_add({}, { locale })}</span>
-			</button>
-		{/if}
-		{#if animation && splitTargets.length}
-			<button
-				type="button"
-				class="key"
-				title={m.board_timeline_split({}, { locale })}
-				aria-label={m.board_timeline_split({}, { locale })}
-				onclick={split}
-			>
-				<Scissors class="h-3.5 w-3.5" />
-			</button>
-		{/if}
-		{#if animation}
-			<button
-				type="button"
-				class="autokey"
+				class="pill pill--record"
 				aria-pressed={editor.recording}
 				aria-label={m.board_autokey({}, { locale })}
 				title={m.board_autokey_hint({}, { locale })}
 				onclick={() => edit(() => editor.setRecording(!editor.recording))}
 			>
 				<Circle class="h-2.5 w-2.5" fill={editor.recording ? "currentColor" : "none"} />
-				<span class="autokey-label">{m.board_autokey({}, { locale })}</span>
+				<span class="pill-label">{m.board_autokey({}, { locale })}</span>
 			</button>
+			{#if onExport}
+				<button
+					type="button"
+					class="pill"
+					title={m.board_export({}, { locale })}
+					aria-label={m.board_export({}, { locale })}
+					onclick={() => onExport(id)}
+				>
+					<Download class="h-3 w-3" />
+					<span class="pill-label">{m.board_export({}, { locale })}</span>
+				</button>
+			{/if}
 			<button
 				bind:this={moreAnchor}
 				type="button"
@@ -585,7 +529,7 @@ const moreItems = $derived<BoardMenuItem[]>([
 				<p class="hint">{m.board_animation_select_hint({}, { locale })}</p>
 			{/if}
 		</div>
-		{#if selection && selection.type !== "clips" && selection.type !== "range"}
+		{#if selection && selection.type !== "clips"}
 			<BoardAnimationInspector
 				{editor}
 				{edit}
@@ -602,10 +546,9 @@ const moreItems = $derived<BoardMenuItem[]>([
 	<BoardMenu anchor={pickerAnchor} items={pickerItems} label={m.board_animation_select({}, { locale })} onClose={() => { menu = null; }} />
 {:else if menu === "more" && moreAnchor}
 	<BoardMenu anchor={moreAnchor} items={moreItems} label={m.board_more({}, { locale })} placement="top-start" onClose={() => { menu = null; }} />
-{:else if menu === "settings" && settingsAnchor && animation && animationId}
-	<BoardAnimationSettings {editor} {animationId} {animation} anchor={settingsAnchor} onClose={() => { menu = null; }} />
+{:else if menu === "settings" && pickerAnchor && animation && animationId}
+	<BoardAnimationSettings {editor} {animationId} {animation} anchor={pickerAnchor} onClose={() => { menu = null; }} />
 {/if}
-{#if sequenceOpen}<BoardSequenceDialog {editor} onClose={() => { sequenceOpen = false; }} />{/if}
 
 <style>
 	.dock {
@@ -675,17 +618,10 @@ const moreItems = $derived<BoardMenuItem[]>([
 	.key[aria-expanded="true"] { background: var(--bg-hover); color: var(--text-primary); }
 	.key:disabled { opacity: 0.35; }
 	.key--play { color: var(--text-primary); }
-	.divider {
-		flex: none;
-		width: 1px;
-		height: 16px;
-		margin: 0 4px;
-		background: var(--border-subtle);
-	}
 	.time {
 		display: inline-flex;
 		gap: 4px;
-		margin-left: 6px;
+		margin-left: 4px;
 		font-family: var(--font-mono);
 		font-size: 11px;
 		font-variant-numeric: tabular-nums;
@@ -694,28 +630,13 @@ const moreItems = $derived<BoardMenuItem[]>([
 	.time-now { color: var(--text-primary); }
 	.time-total { color: var(--text-tertiary); }
 	.spacer { flex: 1; }
-	.timeline-add {
-		display: inline-flex;
-		flex: none;
-		align-items: center;
-		gap: 4px;
-		height: 26px;
-		margin-right: 4px;
-		border-radius: 999px;
-		background: var(--brand-muted);
-		padding: 0 10px;
-		color: var(--brand-muted-fg);
-		font-size: 11px;
-		font-weight: 600;
-		white-space: nowrap;
-	}
-	.timeline-add:hover { background: color-mix(in srgb, var(--brand) 22%, transparent); }
-	.autokey {
+	.pill {
 		display: inline-flex;
 		flex: none;
 		align-items: center;
 		gap: 6px;
 		height: 26px;
+		margin-right: 2px;
 		border: 1px solid var(--border-subtle);
 		border-radius: 999px;
 		padding: 0 10px;
@@ -724,8 +645,8 @@ const moreItems = $derived<BoardMenuItem[]>([
 		font-weight: 500;
 		white-space: nowrap;
 	}
-	.autokey:hover { color: var(--text-primary); }
-	.autokey[aria-pressed="true"] {
+	.pill:hover { background: var(--bg-hover); color: var(--text-primary); }
+	.pill--record[aria-pressed="true"] {
 		border-color: color-mix(in srgb, var(--error-500) 50%, transparent);
 		background: color-mix(in srgb, var(--error-500) 12%, transparent);
 		color: var(--error-500);
@@ -778,18 +699,15 @@ const moreItems = $derived<BoardMenuItem[]>([
 
 	@container (max-width: 560px) {
 		.time-total,
-		.autokey-label,
-		.timeline-add-label,
-		.key--start { display: none; }
-		.autokey { width: 34px; justify-content: center; padding: 0; }
+		.pill-label { display: none; }
+		.pill { width: 34px; justify-content: center; padding: 0; }
 		.picker { max-width: 128px; }
 	}
 
 	@media (pointer: coarse) {
 		.key { width: 38px; height: 38px; }
 		.picker { height: 38px; }
-		.autokey,
-		.timeline-add { height: 34px; }
+		.pill { height: 34px; }
 		.hint { left: 132px; }
 	}
 </style>

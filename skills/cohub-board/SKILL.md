@@ -189,7 +189,7 @@ cohub boards export <board> --view 1300,3400,0.7 -o /tmp/spot.png    # a tempora
 - `-o` picks the format, and `%d` writes a frame sequence.
 - Long videos, especially with shaders, render slowly on a CPU. Add `--async` to run
   the export as a Task and follow it with `cohub tasks get <id>`; never sleep and poll.
-  Viewers can also export MP4 from the web app on their GPU.
+  The web app's Export button runs the same camera-view MP4 export as a Task in the Space.
 - Wrap long local runs in `timeout 300 …`. To stop stray runs, use `pkill -f '[c]ohub boards (export|simulate)'`.
 
 ## Going further

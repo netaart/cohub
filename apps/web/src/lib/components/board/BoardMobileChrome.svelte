@@ -13,11 +13,11 @@ import {
 	Clapperboard,
 	Copy,
 	Diamond,
+	Download,
 	Frame,
 	GanttChart,
 	Hand,
 	History,
-	ImageDown,
 	Layers,
 	Link,
 	LocateFixed,
@@ -221,8 +221,8 @@ function focusContent() {
 				{/if}
 				{#if onExport}
 					<button type="button" class="sheet-item sheet-item--wide" onclick={() => { moreOpen = false; onExport?.(); }}>
-						<ImageDown class="h-4 w-4" />
-						<span>{m.board_export_image({}, { locale })}</span>
+						<Download class="h-4 w-4" />
+						<span>{m.board_export_ellipsis({}, { locale })}</span>
 					</button>
 				{/if}
 				{#if onReplay}

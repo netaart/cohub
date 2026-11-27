@@ -1,18 +1,32 @@
+<script lang="ts" module>
+import type { BoardExportRegion } from "@neta-art/cohub/board";
+
+export type BoardExportView = Extract<
+	BoardExportRegion,
+	{ kind: "rect" }
+>["rect"];
+
+export type BoardExportInputs = { path: string; recent: boolean };
+
+export type BoardExportIntent = {
+	mode: "image" | "video";
+	animationId?: string;
+};
+</script>
+
 <script lang="ts">
 import {
 	BOARD_CAMERA_VIEWPORT,
 	BOARD_EXPORT_MAX_EDGE,
 	type BoardDocument,
-	type BoardExportRegion,
 	buildBoardScene,
 	createBoardAnimationSampler,
 	planBoardExport,
 } from "@neta-art/cohub/board";
-import {
-	type BoardRenderDiagnostic,
-	inspectBoardScene,
-} from "@neta-art/cohub/board/render";
-import { Check, Copy, Download, Loader2 } from "lucide-svelte";
+import { Check, ChevronDown, Copy, Download, Loader2, X } from "lucide-svelte";
+import { untrack } from "svelte";
+import { formatBoardTime } from "#lib/board/animation-timeline.ts";
+import { boardAnimationReach } from "#lib/board/board-media-playback.ts";
 import {
 	type BoardImageExportWarning,
 	type BoardImageFormat,
@@ -23,6 +37,7 @@ import {
 } from "#lib/board/board-image-export.ts";
 import type { BoardVideoExportRequest } from "#lib/board/board-video-export.svelte.ts";
 import Dialog from "#lib/components/Dialog.svelte";
+import Segmented from "#lib/components/Segmented.svelte";
 import Spinner from "#lib/components/Spinner.svelte";
 import { saveFile } from "#lib/downloads.svelte.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -30,30 +45,35 @@ import { m } from "#lib/paraglide/messages.js";
 
 const {
 	open,
+	intent,
 	onClose,
 	document: boardDocument,
 	bridge,
 	title,
 	selection,
-	onLocate,
-	onExportVideo,
+	view,
+	playhead,
+	videoBlocked,
 	inputs = null,
+	onExportVideo,
 }: {
 	open: boolean;
+	intent: BoardExportIntent;
 	onClose: () => void;
 	document: BoardDocument;
 	bridge: BoardStageExportBridge | null;
 	title: string | null;
 	selection: string[];
-	onLocate?: (id: string) => void;
-	onExportVideo?: (request: BoardVideoExportRequest) => void;
-	inputs?: string | null;
+	view: BoardExportView | null;
+	playhead: { animationId: string; time: number } | null;
+	videoBlocked: string | null;
+	inputs?: BoardExportInputs | null;
+	onExportVideo: (request: BoardVideoExportRequest) => void;
 } = $props();
-let replayInputs = $state(true);
 
 const locale = $derived(getLocale());
 
-type Scope = "all" | "selection" | "frame" | "camera";
+type ImageScope = "view" | "all" | "selection" | "frame" | "camera";
 
 const SCALES = [1, 2, 3, 4] as const;
 const FORMATS: Array<{ id: BoardImageFormat; label: string }> = [
@@ -62,68 +82,25 @@ const FORMATS: Array<{ id: BoardImageFormat; label: string }> = [
 	{ id: "webp", label: "WebP" },
 ];
 
-let scope = $state<Scope>("all");
+let mode = $state<"image" | "video">("image");
+let scope = $state<ImageScope>("view");
 let frameId = $state<string | null>(null);
-let scale = $state<number>(2);
-let format = $state<BoardImageFormat | "mp4">("png");
+let at = $state<{ animationId: string; time: number } | null>(null);
+let scale = $state(2);
+let format = $state<BoardImageFormat>("png");
 let transparent = $state(false);
+let optionsOpen = $state(false);
+let videoId = $state("");
+let videoScope = $state<"camera" | "all">("camera");
+let replayInputs = $state(true);
 let busy = $state<"download" | "copy" | null>(null);
 let copied = $state(false);
 let failure = $state<string | null>(null);
 let warnings = $state<BoardImageExportWarning[]>([]);
-let animationId = $state("");
-let seconds = $state(0);
-let chosenViewport = $state<string | null>(null);
-let hints = $state<BoardRenderDiagnostic[] | null>(null);
+
 const animationIds = $derived(Object.keys(boardDocument.animations));
-const framedViewport = $derived.by(() => {
-	const { width, height } = animation?.viewport ?? BOARD_CAMERA_VIEWPORT;
-	return `${width}x${height}`;
-});
-const viewports = $derived([
-	...new Set([framedViewport, "1600x900", "900x1600", "1080x1080"]),
-]);
-const viewport = $derived(
-	chosenViewport && viewports.includes(chosenViewport)
-		? chosenViewport
-		: framedViewport,
-);
-const cameraSize = $derived.by(() => {
-	const [width = 1600, height = 900] = viewport.split("x").map(Number);
-	return { width, height };
-});
+const hasSelection = $derived(selection.length > 0);
 const scene = $derived(open ? buildBoardScene(boardDocument) : null);
-const sampler = $derived(
-	open && animationId && boardDocument.animations[animationId]
-		? createBoardAnimationSampler(boardDocument, animationId)
-		: null,
-);
-const sampledScene = $derived(
-	sampler ? sampler.at(Math.max(0, seconds || 0) * 1000).scene : scene,
-);
-
-function inspect() {
-	hints = sampledScene ? inspectBoardScene(sampledScene) : [];
-}
-function hintLabel(hint: BoardRenderDiagnostic) {
-	if (hint.code === "text-clipped")
-		return m.board_issue_clipped({}, { locale });
-	if (hint.code === "text-overlap")
-		return m.board_issue_overlap({}, { locale });
-	if (hint.code === "glyph-unavailable")
-		return m.board_issue_glyph(
-			{ characters: hint.characters ?? "" },
-			{ locale },
-		);
-	return m.board_issue_follow({}, { locale });
-}
-$effect(() => {
-	boardDocument;
-	seconds;
-	animationId;
-	hints = null;
-});
-
 const frames = $derived(
 	scene
 		? scene.items
@@ -134,46 +111,114 @@ const frames = $derived(
 				}))
 		: [],
 );
-const hasSelection = $derived(selection.length > 0);
+
+function nameOf(id: string) {
+	return boardDocument.animations[id]?.name || id;
+}
+
+function viewportOf(id: string | undefined) {
+	return (
+		(id ? boardDocument.animations[id]?.viewport : undefined) ??
+		BOARD_CAMERA_VIEWPORT
+	);
+}
+
+function chooseVideo(id: string) {
+	videoId = id;
+	videoScope = boardAnimationReach(boardDocument, id).camera ? "camera" : "all";
+}
 
 $effect(() => {
-	if (!open) return;
+	if (open) untrack(reset);
+});
+
+function reset() {
 	failure = null;
 	warnings = [];
 	copied = false;
 	busy = null;
-	scope = hasSelection ? "selection" : "all";
+	optionsOpen = false;
+	replayInputs = inputs?.recent ?? false;
+	at = playhead && boardDocument.animations[playhead.animationId] ? playhead : null;
+	scope = hasSelection ? "selection" : view ? "view" : "all";
 	if (!frameId && frames.length > 0) frameId = frames[0]?.id ?? null;
+	const preferred = intent.animationId ?? at?.animationId;
+	const id =
+		preferred && boardDocument.animations[preferred]
+			? preferred
+			: animationIds[0];
+	if (id) chooseVideo(id);
+	mode = intent.mode === "video" && id ? "video" : "image";
+}
+
+$effect(() => {
+	if (scope === "camera" && !at) scope = view ? "view" : "all";
 });
 
-const region = $derived.by<BoardExportRegion>(() => {
+const sampler = $derived(
+	open && at ? createBoardAnimationSampler(boardDocument, at.animationId) : null,
+);
+const imageScene = $derived(sampler && at ? sampler.at(at.time).scene : scene);
+const imageRegion = $derived.by<BoardExportRegion>(() => {
 	if (scope === "selection" && hasSelection)
 		return { kind: "items", ids: selection };
 	if (scope === "frame" && frameId) return { kind: "frame", id: frameId };
+	if (scope === "view" && view) return { kind: "rect", rect: view };
 	return { kind: "all" };
 });
-
-const plan = $derived.by(() =>
-	sampledScene ? planBoardExport({ scene: sampledScene, region, scale }) : null,
+const imageCamera = $derived(
+	scope === "camera" && at ? viewportOf(at.animationId) : null,
 );
-const sizeLabel = $derived(
-	scope === "camera"
-		? `${cameraSize.width} × ${cameraSize.height} px`
-		: plan
-			? `${plan.width} × ${plan.height} px`
+const imagePlan = $derived(
+	imageScene
+		? planBoardExport({ scene: imageScene, region: imageRegion, scale })
+		: null,
+);
+const transparencySupported = $derived(format !== "jpeg");
+const imageSize = $derived(
+	imageCamera
+		? `${imageCamera.width} × ${imageCamera.height} px`
+		: imagePlan
+			? `${imagePlan.width} × ${imagePlan.height} px`
 			: m.board_nothing_export({}, { locale }),
 );
-const clamped = $derived(Boolean(plan?.clamped));
-
-const video = $derived(format === "mp4");
-const animation = $derived(
-	animationId ? boardDocument.animations[animationId] : undefined,
+const imageSummary = $derived(
+	[
+		FORMATS.find((entry) => entry.id === format)?.label,
+		imageCamera ? null : `${scale}×`,
+		transparent && transparencySupported
+			? m.board_transparent_bg({}, { locale })
+			: null,
+	]
+		.filter(Boolean)
+		.join(" · "),
 );
-const transparencySupported = $derived(format !== "jpeg" && !video);
 
-$effect(() => {
-	if (video && !(sampler && onExportVideo)) format = "png";
-});
+const video = $derived(
+	videoId ? boardDocument.animations[videoId] : undefined,
+);
+const videoCamera = $derived(
+	videoScope === "camera" ? viewportOf(videoId) : null,
+);
+const videoPlan = $derived(
+	open && video && !videoCamera
+		? planBoardExport({
+				scene: createBoardAnimationSampler(boardDocument, videoId).at(0).scene,
+				region: { kind: "all" },
+				scale: 1,
+			})
+		: null,
+);
+const videoSize = $derived(
+	videoCamera
+		? `${videoCamera.width} × ${videoCamera.height} px`
+		: videoPlan
+			? `${videoPlan.width} × ${videoPlan.height} px`
+			: m.board_nothing_export({}, { locale }),
+);
+const videoReady = $derived(
+	videoBlocked === null && Boolean(video) && Boolean(videoCamera || videoPlan),
+);
 
 function warningText(warning: BoardImageExportWarning) {
 	switch (warning.kind) {
@@ -228,39 +273,31 @@ function warningText(warning: BoardImageExportWarning) {
 }
 
 function exportVideo() {
-	if (!animation || !plan) return;
-	onExportVideo?.({
-		animationId,
-		duration: animation.duration,
-		region,
-		...(scope === "camera" ? { camera: cameraSize } : {}),
-		...(inputs && replayInputs ? { inputs } : {}),
-		scale,
+	if (!video || !videoReady) return;
+	onExportVideo({
+		animationId: videoId,
+		duration: video.duration,
+		region: { kind: "all" },
+		...(videoCamera ? { camera: videoCamera } : {}),
+		...(inputs && replayInputs ? { inputs: inputs.path } : {}),
+		scale: 1,
 	});
 	onClose();
 }
 
-async function run(mode: "download" | "copy") {
-	if (video) return exportVideo();
-	if (!bridge || !plan || busy) return;
-	busy = mode;
+async function exportImage(target: "download" | "copy") {
+	if (!bridge || !imagePlan || busy) return;
+	busy = target;
 	failure = null;
 	warnings = [];
 	copied = false;
 	try {
-		const outputFormat: BoardImageFormat =
-			mode === "copy" ? "png" : (format as BoardImageFormat);
+		const outputFormat: BoardImageFormat = target === "copy" ? "png" : format;
 		const result = await exportBoardImage(bridge, boardDocument, {
-			region,
-			...(scope === "camera" ? { camera: cameraSize } : {}),
-			...(sampler
-				? {
-						at: {
-							animation: animationId,
-							time: Math.max(0, seconds || 0) * 1000,
-						},
-						sampler,
-					}
+			region: imageRegion,
+			...(imageCamera ? { camera: imageCamera } : {}),
+			...(sampler && at
+				? { at: { animation: at.animationId, time: at.time }, sampler }
 				: {}),
 			scale,
 			background:
@@ -272,7 +309,7 @@ async function run(mode: "download" | "copy") {
 			return;
 		}
 		warnings = result.warnings;
-		if (mode === "copy") {
+		if (target === "copy") {
 			await copyImageToClipboard(result.blob);
 			copied = true;
 			setTimeout(() => {
@@ -306,190 +343,157 @@ async function run(mode: "download" | "copy") {
 }
 </script>
 
-<Dialog {open} {onClose} title={m.board_export_image({}, { locale })} maxWidth="440px">
+{#snippet chip(active: boolean, label: string, select: () => void)}
+	<button type="button" class="chip" class:chip--active={active} aria-pressed={active} onclick={select}>{label}</button>
+{/snippet}
+
+<Dialog {open} {onClose} title={m.board_export({}, { locale })} maxWidth="420px">
 	<div class="flex flex-col gap-4 px-4 py-3">
-		<fieldset class="flex flex-col gap-1.5">
-			<legend class="export-label">{m.board_area({}, { locale })}</legend>
-			<div class="flex flex-wrap gap-1.5" role="radiogroup" aria-label={m.board_export_area({}, { locale })}>
-				<button
-					type="button"
-					class="chip"
-					class:chip--active={scope === "all"}
-					aria-pressed={scope === "all"}
-					onclick={() => { scope = "all"; }}
-				>
-					{m.board_whole_board({}, { locale })}
-				</button>
-				<button
-					type="button"
-					class="chip"
-					class:chip--active={scope === "selection"}
-					aria-pressed={scope === "selection"}
-					disabled={!hasSelection}
-					onclick={() => { scope = "selection"; }}
-				>
-					{m.board_selection_chip({}, { locale })}{hasSelection ? ` (${selection.length})` : ""}
-				</button>
-				{#if sampler}
-					<button type="button" class="chip" class:chip--active={scope === "camera"} aria-pressed={scope === "camera"} onclick={() => { scope = "camera"; }}>{m.board_export_camera({}, { locale })}</button>
-				{/if}
-				{#if frames.length > 0}
-					<button
-						type="button"
-						class="chip"
-						class:chip--active={scope === "frame"}
-						aria-pressed={scope === "frame"}
-						onclick={() => { scope = "frame"; }}
-					>
-						{m.board_frame({}, { locale })}
-					</button>
-				{/if}
-			</div>
-			{#if scope === "frame" && frames.length > 0}
-				<label class="mt-1 flex flex-col gap-1">
-					<span class="sr-only">{m.board_frame_to_export({}, { locale })}</span>
-					<select class="export-select" bind:value={frameId}>
+		{#if animationIds.length > 0}
+			<Segmented
+				label={m.board_export_format({}, { locale })}
+				value={mode}
+				options={[
+					{ value: "image", label: m.board_export_mode_image({}, { locale }) },
+					{ value: "video", label: m.board_export_mode_video({}, { locale }) },
+				]}
+				onchange={(next) => { mode = next; }}
+			/>
+		{/if}
+
+		{#if mode === "image"}
+			<fieldset class="flex flex-col gap-1.5">
+				<legend class="export-label">{m.board_area({}, { locale })}</legend>
+				<div class="flex flex-wrap gap-1.5" role="radiogroup" aria-label={m.board_export_area({}, { locale })}>
+					{#if view}{@render chip(scope === "view", m.board_export_view({}, { locale }), () => { scope = "view"; })}{/if}
+					{@render chip(scope === "all", m.board_whole_board({}, { locale }), () => { scope = "all"; })}
+					{#if hasSelection}{@render chip(scope === "selection", `${m.board_selection_chip({}, { locale })} (${selection.length})`, () => { scope = "selection"; })}{/if}
+					{#if frames.length > 0}{@render chip(scope === "frame", m.board_frame({}, { locale }), () => { scope = "frame"; })}{/if}
+					{#if at}{@render chip(scope === "camera", m.board_export_camera({}, { locale }), () => { scope = "camera"; })}{/if}
+				</div>
+				{#if scope === "frame" && frames.length > 0}
+					<select class="export-select mt-1" aria-label={m.board_frame({}, { locale })} bind:value={frameId}>
 						{#each frames as frame (frame.id)}
 							<option value={frame.id}>{frame.label || m.board_frame({}, { locale })}</option>
 						{/each}
 					</select>
-				</label>
-			{/if}
-		</fieldset>
+				{/if}
+			</fieldset>
 
-		{#if animationIds.length > 0}
-			<div class="grid grid-cols-2 gap-2">
-				<label class="flex min-w-0 flex-col gap-1 text-xs text-text-secondary">{m.board_export_animation({}, { locale })}
-					<select class="export-select" bind:value={animationId} onchange={() => { if (!animationId && scope === "camera") scope = "all"; }}>
-						<option value="">—</option>
-						{#each animationIds as id (id)}<option value={id}>{boardDocument.animations[id]?.name || id}</option>{/each}
+			{#if at}
+				<div class="moment">
+					<span class="min-w-0 truncate">{m.board_export_moment({ name: nameOf(at.animationId), time: formatBoardTime(at.time) }, { locale })}</span>
+					<button type="button" class="moment-clear" title={m.board_export_moment_clear({}, { locale })} aria-label={m.board_export_moment_clear({}, { locale })} onclick={() => { at = null; }}>
+						<X class="h-3 w-3" />
+					</button>
+				</div>
+			{/if}
+
+			<div class="flex flex-col gap-2">
+				<button type="button" class="options-toggle" aria-expanded={optionsOpen} onclick={() => { optionsOpen = !optionsOpen; }}>
+					<span>{m.board_export_options({}, { locale })}</span>
+					<span class="min-w-0 flex-1 truncate text-left text-text-tertiary">{optionsOpen ? "" : imageSummary}</span>
+					<ChevronDown class="options-chevron h-3.5 w-3.5" />
+				</button>
+				{#if optionsOpen}
+					<div class="flex flex-col gap-3">
+						<div class="flex gap-1.5" role="radiogroup" aria-label={m.board_export_format({}, { locale })}>
+							{#each FORMATS as option (option.id)}
+								{@render chip(format === option.id, option.label, () => { format = option.id; })}
+							{/each}
+						</div>
+						{#if !imageCamera}
+							<div class="flex gap-1.5" role="radiogroup" aria-label={m.board_export_scale({}, { locale })}>
+								{#each SCALES as option (option)}
+									{@render chip(scale === option, `${option}×`, () => { scale = option; })}
+								{/each}
+							</div>
+						{/if}
+						<label class="flex items-center gap-2 text-[12px] text-text-secondary">
+							<input type="checkbox" bind:checked={transparent} disabled={!transparencySupported} />
+							{m.board_transparent_bg({}, { locale })}
+							{#if !transparencySupported}
+								<span class="text-text-tertiary">{m.board_jpeg_no_alpha({}, { locale })}</span>
+							{/if}
+						</label>
+					</div>
+				{/if}
+			</div>
+
+			<p class="text-[12px] text-text-tertiary" aria-live="polite">
+				{imageSize}
+				{#if imagePlan?.clamped && !imageCamera}
+					<span class="text-warning">{m.board_reduced_to({ max: BOARD_EXPORT_MAX_EDGE }, { locale })}</span>
+				{/if}
+			</p>
+			{#if failure}
+				<p class="text-[12px] text-error-soft" role="alert">{failure}</p>
+			{/if}
+			{#each warnings as warning (warning.kind)}
+				<p class="text-[12px] text-text-tertiary">{warningText(warning)}</p>
+			{/each}
+		{:else}
+			{#if animationIds.length > 1}
+				<label class="flex flex-col gap-1.5">
+					<span class="export-label">{m.board_export_animation({}, { locale })}</span>
+					<select class="export-select" value={videoId} onchange={(event) => chooseVideo(event.currentTarget.value)}>
+						{#each animationIds as id (id)}<option value={id}>{nameOf(id)}</option>{/each}
 					</select>
 				</label>
-				<label class="flex min-w-0 flex-col gap-1 text-xs text-text-secondary">{m.board_export_time({}, { locale })}<input class="export-select" type="number" min="0" max={(animation?.duration ?? 0) / 1000} step="0.1" bind:value={seconds} disabled={!sampler || video} /></label>
-			</div>
-		{/if}
-		{#if scope === "camera"}
-			<label class="flex flex-col gap-1 text-xs text-text-secondary">{m.board_export_viewport({}, { locale })}<select class="export-select" value={viewport} onchange={(event) => { chosenViewport = event.currentTarget.value; }}>{#each viewports as option (option)}<option>{option}</option>{/each}</select></label>
-		{/if}
-		<button type="button" class="export-btn self-start" onclick={inspect}>{m.board_inspect({}, { locale })}</button>
-		{#if hints}
-			<div class="max-h-32 overflow-y-auto text-xs text-text-secondary" aria-live="polite">
-				{#if hints.length === 0}<p>{m.board_inspect_clear({}, { locale })}</p>{/if}
-				{#each hints as hint, index (`${hint.code}:${hint.item}:${index}`)}
-					<button type="button" class="block w-full rounded px-1 py-2 text-left hover:bg-bg-hover" onclick={() => { onLocate?.(hint.item); onClose(); }}>{hint.item} · {hintLabel(hint)}</button>
-				{/each}
-			</div>
-		{/if}
-
-		{#if scope !== "camera"}
-		<fieldset class="flex flex-col gap-1.5">
-			<legend class="export-label">{m.board_scale({}, { locale })}</legend>
-			<div class="flex gap-1.5" role="radiogroup" aria-label={m.board_export_scale({}, { locale })}>
-				{#each SCALES as option (option)}
-					<button
-						type="button"
-						class="chip"
-						class:chip--active={scale === option}
-						aria-pressed={scale === option}
-						onclick={() => { scale = option; }}
-					>
-						{option}×
-					</button>
-				{/each}
-			</div>
-		</fieldset>
-		{/if}
-
-		<fieldset class="flex flex-col gap-1.5">
-			<legend class="export-label">{m.board_format({}, { locale })}</legend>
-			<div class="flex gap-1.5" role="radiogroup" aria-label={m.board_export_format({}, { locale })}>
-				{#each FORMATS as option (option.id)}
-					<button
-						type="button"
-						class="chip"
-						class:chip--active={format === option.id}
-						aria-pressed={format === option.id}
-						onclick={() => { format = option.id; }}
-					>
-						{option.label}
-					</button>
-				{/each}
-				{#if sampler && onExportVideo}
-					<button type="button" class="chip" class:chip--active={video} aria-pressed={video} onclick={() => { format = "mp4"; }}>MP4</button>
-				{/if}
-			</div>
-			{#if video}
-				<p class="mt-1 text-[12px] text-text-tertiary">{m.board_video_export_note({}, { locale })}</p>
-				{#if inputs}
-					<label class="mt-1 flex min-w-0 items-center gap-2 text-[12px] text-text-secondary" title={inputs}>
-						<input type="checkbox" bind:checked={replayInputs} />
-						<span class="truncate">{m.board_export_replay_input({}, { locale })}</span>
-					</label>
-				{/if}
-			{:else}
-			<label class="mt-1 flex items-center gap-2 text-[12px] text-text-secondary">
-				<input
-					type="checkbox"
-					bind:checked={transparent}
-					disabled={!transparencySupported}
-				/>
-				{m.board_transparent_bg({}, { locale })}
-				{#if !transparencySupported}
-					<span class="text-text-tertiary">{m.board_jpeg_no_alpha({}, { locale })}</span>
-				{/if}
-			</label>
 			{/if}
-		</fieldset>
-
-		<p class="text-[12px] text-text-tertiary" aria-live="polite">
-			{sizeLabel}{#if video && animation} · {(animation.duration / 1000).toFixed(1)}s{/if}
-			{#if clamped}
-				<span class="text-warning">
-					· {m.board_reduced_to({ max: BOARD_EXPORT_MAX_EDGE }, { locale })}
-				</span>
+			<fieldset class="flex flex-col gap-1.5">
+				<legend class="export-label">{m.board_area({}, { locale })}</legend>
+				<div class="flex gap-1.5" role="radiogroup" aria-label={m.board_export_area({}, { locale })}>
+					{@render chip(videoScope === "camera", m.board_export_camera({}, { locale }), () => { videoScope = "camera"; })}
+					{@render chip(videoScope === "all", m.board_whole_board({}, { locale }), () => { videoScope = "all"; })}
+				</div>
+			</fieldset>
+			{#if inputs}
+				<label class="flex min-w-0 items-center gap-2 text-[12px] text-text-secondary" title={inputs.path}>
+					<input type="checkbox" bind:checked={replayInputs} />
+					<span class="truncate">{m.board_export_replay_input({}, { locale })}</span>
+				</label>
 			{/if}
-		</p>
-
-		{#if failure}
-			<p class="text-[12px] text-error-soft" role="alert">{failure}</p>
+			<div class="flex flex-col gap-1 text-[12px]" aria-live="polite">
+				<p class="text-text-secondary">
+					{nameOf(videoId)} · {formatBoardTime(video?.duration ?? 0)} · {videoSize}
+				</p>
+				{#if videoBlocked}
+					<p class="text-warning">{videoBlocked}</p>
+				{:else}
+					<p class="text-text-tertiary">{m.board_video_export_note({}, { locale })}</p>
+				{/if}
+			</div>
 		{/if}
-		{#each warnings as warning (warning.kind)}
-			<p class="text-[12px] text-text-tertiary">{warningText(warning)}</p>
-		{/each}
 	</div>
 
 	{#snippet footer()}
 		<div class="flex justify-end gap-2">
-			{#if !video}
-			<button
-				type="button"
-				class="export-btn"
-				disabled={!plan || busy !== null}
-				onclick={() => run("copy")}
-			>
-				{#if busy === "copy"}
-					<Loader2 size={14} class="animate-spin" />
-				{:else if copied}
-					<Check size={14} />
-				{:else}
-					<Copy size={14} />
-				{/if}
-				{copied ? m.board_copied({}, { locale }) : m.board_copy({}, { locale })}
-			</button>
-			{/if}
-			<button
-				type="button"
-				class="primary-key"
-				disabled={!plan || busy !== null}
-				onclick={() => run("download")}
-			>
-				{#if busy === "download"}
-					<Spinner class="h-3.5 w-3.5" />
-				{:else}
+			{#if mode === "image"}
+				<button type="button" class="export-btn" disabled={!imagePlan || busy !== null} onclick={() => exportImage("copy")}>
+					{#if busy === "copy"}
+						<Loader2 size={14} class="animate-spin" />
+					{:else if copied}
+						<Check size={14} />
+					{:else}
+						<Copy size={14} />
+					{/if}
+					{copied ? m.board_copied({}, { locale }) : m.board_copy({}, { locale })}
+				</button>
+				<button type="button" class="primary-key" disabled={!imagePlan || busy !== null} onclick={() => exportImage("download")}>
+					{#if busy === "download"}
+						<Spinner class="h-3.5 w-3.5" />
+					{:else}
+						<Download size={14} />
+					{/if}
+					{m.download({}, { locale })}
+				</button>
+			{:else}
+				<button type="button" class="primary-key" disabled={!videoReady} onclick={exportVideo}>
 					<Download size={14} />
-				{/if}
-				{video ? m.board_video_export_start({}, { locale }) : m.download({}, { locale })}
-			</button>
+					{m.board_video_export_start({}, { locale })}
+				</button>
+			{/if}
 		</div>
 	{/snippet}
 </Dialog>
@@ -514,15 +518,11 @@ async function run(mode: "download" | "copy") {
 		transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 	}
 
-	.chip:hover:not(:disabled) {
+	.chip:hover {
 		background: var(--bg-hover);
 		color: var(--text-primary);
 	}
 
-	.chip:disabled {
-		cursor: not-allowed;
-		opacity: 0.45;
-	}
 
 	.chip--active {
 		border-color: var(--brand);
@@ -538,6 +538,53 @@ async function run(mode: "download" | "copy") {
 		font-size: 12px;
 		color: var(--text-primary);
 	}
+
+	.moment {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+		border-radius: 7px;
+		background: var(--bg-hover);
+		padding: 4px 4px 4px 10px;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+
+	.moment-clear {
+		display: inline-grid;
+		flex: none;
+		place-items: center;
+		width: 22px;
+		height: 22px;
+		margin-left: auto;
+		border-radius: 5px;
+		color: var(--text-tertiary);
+	}
+
+	.moment-clear:hover {
+		background: var(--bg-surface);
+		color: var(--text-primary);
+	}
+
+	.options-toggle {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+
+	.options-toggle:hover { color: var(--text-primary); }
+
+	.options-toggle :global(.options-chevron) {
+		flex: none;
+		color: var(--text-tertiary);
+		transition: transform 150ms var(--ease-out);
+	}
+
+	.options-toggle[aria-expanded="true"] :global(.options-chevron) { transform: rotate(180deg); }
 
 	.export-btn,
 	.primary-key {
@@ -563,5 +610,10 @@ async function run(mode: "download" | "copy") {
 	.export-btn:disabled {
 		cursor: not-allowed;
 		opacity: 0.5;
+	}
+
+	@media (pointer: coarse) {
+		.chip { padding: 8px 12px; }
+		.moment-clear { width: 32px; height: 32px; }
 	}
 </style>

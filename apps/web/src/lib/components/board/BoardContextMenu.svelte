@@ -21,7 +21,7 @@ import {
 	Heart,
 	ExternalLink,
 	History,
-	ImageDown,
+	Download,
 	LayoutDashboard,
 	LayoutGrid,
 	Link,
@@ -294,10 +294,8 @@ const actions = $derived.by<BoardMenuAction[]>(() => {
 	if (onExport)
 		list.push({
 			id: "export",
-			label: hasSelection
-				? m.board_export_selection({}, { locale })
-				: m.board_export_image({}, { locale }),
-			icon: ImageDown,
+			label: m.board_export_ellipsis({}, { locale }),
+			icon: Download,
 			run: onExport,
 		});
 	if (onCopyLink)

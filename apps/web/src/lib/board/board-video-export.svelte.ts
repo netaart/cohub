@@ -97,9 +97,24 @@ export async function readBoardVideoExportAccess(
 	const cached = await getCachedSpaceRecord(spaceId).catch(() => null);
 	if (cached) apply(allows(cached.space));
 	const fresh = await sdk.spaces.get(spaceId).catch(() => null);
-	if (!fresh) return;
+	if (!fresh) return cached ? undefined : apply(true);
 	apply(allows(fresh));
 	cacheSpaceRecordSoon(fresh);
+}
+
+export async function findBoardInputRecording(
+	spaceId: string,
+	boardPath: string,
+): Promise<string | null> {
+	const dir = `${boardPath.replace(/\.board$/i, "")}.inputs`;
+	const listing = await sdk
+		.space(spaceId)
+		.files.list(dir)
+		.catch(() => null);
+	const latest = listing?.entries
+		.filter((entry) => entry.type === "file" && entry.name.endsWith(".json"))
+		.sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+	return latest?.path ?? null;
 }
 
 export function createBoardVideoExport(spaceId: string) {

@@ -1,7 +1,6 @@
 <script lang="ts">
-import type { BoardAnimation, BoardPlayMode } from "@cohub/protocol";
+import type { BoardAnimation } from "@cohub/protocol";
 import { BOARD_CAMERA_VIEWPORT } from "@neta-art/cohub/board";
-import { Trash2 } from "lucide-svelte";
 import { onMount } from "svelte";
 import { floatNear } from "#lib/actions/portal.ts";
 import { boardAnimationReach } from "#lib/board/board-media-playback.ts";
@@ -28,17 +27,22 @@ const {
 const locale = $derived(getLocale());
 let panel = $state<HTMLDivElement | null>(null);
 
+const VIEWPORTS = [
+	{ ratio: "16:9", ...BOARD_CAMERA_VIEWPORT },
+	{ ratio: "9:16", width: 900, height: 1600 },
+	{ ratio: "1:1", width: 1080, height: 1080 },
+];
 const size = ({ width, height }: { width: number; height: number }) =>
 	`${width}x${height}`;
 const viewport = $derived(size(animation.viewport ?? BOARD_CAMERA_VIEWPORT));
 const viewports = $derived([
-	...new Set([
-		size(BOARD_CAMERA_VIEWPORT),
-		"1920x1080",
-		"1080x1920",
-		"1080x1080",
-		viewport,
-	]),
+	...VIEWPORTS.map((entry) => ({
+		value: size(entry),
+		label: `${entry.ratio} · ${entry.width} × ${entry.height}`,
+	})),
+	...(VIEWPORTS.some((entry) => size(entry) === viewport)
+		? []
+		: [{ value: viewport, label: viewport.replace("x", " × ") }]),
 ]);
 const framesCamera = $derived(
 	boardAnimationReach(editor.document, animationId).camera,
@@ -62,11 +66,6 @@ function seconds(
 	const value = Number(raw);
 	if (!raw || !Number.isFinite(value) || value < 0 || !apply(value * 1000))
 		event.currentTarget.value = (stored / 1000).toFixed(2);
-}
-
-function remove() {
-	onClose();
-	editor.deleteAnimation(animationId);
 }
 
 onMount(() => {
@@ -100,22 +99,13 @@ onMount(() => {
 		<span>{m.board_animation_name({}, { locale })}</span>
 		<input class="input" type="text" maxlength="280" value={animation.name ?? ""} placeholder={animationId} onchange={(event) => update({ name: event.currentTarget.value.trim() })} />
 	</label>
-	<div class="pair">
-		<label class="field">
-			<span>{m.board_animation_duration({}, { locale })}</span>
-			<span class="with-unit">
-				<input class="input input--number" type="text" inputmode="decimal" value={(animation.duration / 1000).toFixed(2)} onchange={(event) => seconds(event, animation.duration, (duration) => update({ duration }))} />
-				<span>s</span>
-			</span>
-		</label>
-		<label class="field">
-			<span>{m.board_animation_delay({}, { locale })}</span>
-			<span class="with-unit">
-				<input class="input input--number" type="text" inputmode="decimal" value={(animation.delay / 1000).toFixed(2)} onchange={(event) => seconds(event, animation.delay, (delay) => update({ delay }))} />
-				<span>s</span>
-			</span>
-		</label>
-	</div>
+	<label class="field">
+		<span>{m.board_animation_duration({}, { locale })}</span>
+		<span class="with-unit">
+			<input class="input input--number" type="text" inputmode="decimal" value={(animation.duration / 1000).toFixed(2)} onchange={(event) => seconds(event, animation.duration, (duration) => update({ duration }))} />
+			<span>s</span>
+		</span>
+	</label>
 	<div class="field">
 		<span>{m.board_animation_play({}, { locale })}</span>
 		<Segmented
@@ -134,31 +124,15 @@ onMount(() => {
 			<span>{m.board_animation_loop({}, { locale })}</span>
 			<ToggleSwitch checked={animation.loop} label={m.board_animation_loop({}, { locale })} onchange={(loop) => update({ loop })} />
 		</div>
-		<div class="field">
-			<span>{m.board_animation_end({}, { locale })}</span>
-			<Segmented
-				label={m.board_animation_end({}, { locale })}
-				value={animation.end}
-				options={[
-					{ value: "hold", label: m.board_animation_end_hold({}, { locale }) },
-					{ value: "reset", label: m.board_animation_end_reset({}, { locale }) },
-				]}
-				onchange={(end) => update({ end })}
-			/>
-		</div>
 	{/if}
 	{#if framesCamera}
 		<label class="field">
 			<span>{m.board_animation_viewport({}, { locale })}</span>
 			<select class="input" value={viewport} onchange={(event) => setViewport(event.currentTarget.value)}>
-				{#each viewports as option (option)}<option value={option}>{option.replace("x", " × ")}</option>{/each}
+				{#each viewports as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
 			</select>
 		</label>
 	{/if}
-	<button type="button" class="delete" onclick={remove}>
-		<Trash2 class="h-3.5 w-3.5" />
-		{m.board_animation_delete({}, { locale })}
-	</button>
 </div>
 
 <style>
@@ -179,11 +153,6 @@ onMount(() => {
 	.row > span {
 		color: var(--text-secondary);
 		font-size: 11px;
-	}
-	.pair {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 8px;
 	}
 	.row {
 		display: flex;
@@ -215,22 +184,7 @@ onMount(() => {
 		font-variant-numeric: tabular-nums;
 		text-align: right;
 	}
-	.delete {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		align-self: flex-start;
-		border-radius: 6px;
-		padding: 5px 8px;
-		color: var(--text-tertiary);
-		font-size: 12px;
-	}
-	.delete:hover {
-		background: var(--color-error-bg);
-		color: var(--error-700);
-	}
 	@media (pointer: coarse) {
 		.input { height: 36px; }
-		.delete { min-height: 36px; }
 	}
 </style>

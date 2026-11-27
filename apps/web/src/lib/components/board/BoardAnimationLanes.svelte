@@ -146,11 +146,9 @@ type ClipDrag = {
 	moved: boolean;
 	delta: number;
 };
-type RangeDrag = { pointerId: number; from: number; to: number };
 
 let keyDrag = $state<KeyDrag | null>(null);
 let clipDrag = $state<ClipDrag | null>(null);
-let rangeDrag = $state<RangeDrag | null>(null);
 let markerDrag = $state<MarkerDrag | null>(null);
 let marquee = $state<Marquee | null>(null);
 let scrubbing = $state<{ pointerId: number; candidates: number[] } | null>(
@@ -266,17 +264,6 @@ function clipSpan(group: BoardTrackGroup) {
 			};
 }
 
-const shownRange = $derived(
-	rangeDrag
-		? {
-				from: Math.min(rangeDrag.from, rangeDrag.to),
-				to: Math.max(rangeDrag.from, rangeDrag.to),
-			}
-		: selection?.type === "range"
-			? selection
-			: null,
-);
-
 function snap(at: number, event: PointerEvent, candidates: number[]) {
 	return event.altKey ? at : snapBoardTime(at, candidates, SNAP_PX / scale);
 }
@@ -327,13 +314,6 @@ function pressMarker(event: PointerEvent, at: number) {
 function pressRuler(event: PointerEvent) {
 	if (event.button !== 0) return;
 	scroller?.setPointerCapture(event.pointerId);
-	if (event.shiftKey) {
-		const at = Math.round(
-			snap(timeAt(event.clientX), event, allTimes(new Set())),
-		);
-		rangeDrag = { pointerId: event.pointerId, from: at, to: at };
-		return;
-	}
 	scrubbing = { pointerId: event.pointerId, candidates: allTimes(new Set()) };
 	onSeek(snap(timeAt(event.clientX), event, scrubbing.candidates));
 }
@@ -367,10 +347,6 @@ function move(event: PointerEvent) {
 			clipDrag.mode === "move"
 				? Math.max(target - clipDrag.anchor, -clipDrag.earliest)
 				: Math.max(0, target) - clipDrag.anchor,
-		);
-	} else if (rangeDrag?.pointerId === event.pointerId) {
-		rangeDrag.to = Math.round(
-			snap(timeAt(event.clientX), event, allTimes(new Set())),
 		);
 	} else if (keyDrag?.pointerId === event.pointerId) {
 		const dx = event.clientX - keyDrag.startX;
@@ -409,12 +385,6 @@ function release(event: PointerEvent) {
 		if (!drag.moved || drag.delta === 0) return;
 		if (drag.mode === "move") onShiftClips(drag.targets, drag.delta);
 		else onTrimClip(drag.target, drag.mode, drag.anchor + drag.delta);
-	} else if (rangeDrag?.pointerId === event.pointerId) {
-		const drag = rangeDrag;
-		rangeDrag = null;
-		const from = Math.min(drag.from, drag.to);
-		const to = Math.max(drag.from, drag.to);
-		onSelect(to > from ? { type: "range", from, to } : null);
 	} else if (keyDrag?.pointerId === event.pointerId) {
 		const drag = keyDrag;
 		keyDrag = null;
@@ -454,7 +424,6 @@ function release(event: PointerEvent) {
 
 function cancel(event: PointerEvent) {
 	if (clipDrag?.pointerId === event.pointerId) clipDrag = null;
-	if (rangeDrag?.pointerId === event.pointerId) rangeDrag = null;
 	if (keyDrag?.pointerId === event.pointerId) keyDrag = null;
 	if (markerDrag?.pointerId === event.pointerId) markerDrag = null;
 	if (marquee?.pointerId === event.pointerId) marquee = null;
@@ -585,9 +554,9 @@ function segmentSelected(trackId: string, keyframe: BoardKeyframe) {
 	<div bind:this={content} class="lanes-content" style:width="calc({treeWidth}px + {laneWidth}px)">
 		<div class="row row--ruler">
 			<div class="label label--corner" bind:clientWidth={treeWidth}>
-				<button type="button" class="zoom-key" title={m.board_zoom_out({}, { locale })} aria-label={m.board_zoom_out({}, { locale })} disabled={zoom <= 1} onclick={() => setZoom(zoom / 1.6)}><Minus class="h-3 w-3" /></button>
+				{#if coarse}<button type="button" class="zoom-key" title={m.board_zoom_out({}, { locale })} aria-label={m.board_zoom_out({}, { locale })} disabled={zoom <= 1} onclick={() => setZoom(zoom / 1.6)}><Minus class="h-3 w-3" /></button>{/if}
 				<button type="button" class="zoom-key" title={m.board_timeline_fit({}, { locale })} aria-label={m.board_timeline_fit({}, { locale })} disabled={zoom === 1} onclick={() => setZoom(1)}><Maximize2 class="h-3 w-3" /></button>
-				<button type="button" class="zoom-key" title={m.board_zoom_in({}, { locale })} aria-label={m.board_zoom_in({}, { locale })} onclick={() => setZoom(zoom * 1.6)}><Plus class="h-3 w-3" /></button>
+				{#if coarse}<button type="button" class="zoom-key" title={m.board_zoom_in({}, { locale })} aria-label={m.board_zoom_in({}, { locale })} onclick={() => setZoom(zoom * 1.6)}><Plus class="h-3 w-3" /></button>{/if}
 			</div>
 			<div
 				class="lane ruler"
@@ -731,9 +700,6 @@ function segmentSelected(trackId: string, keyframe: BoardKeyframe) {
 		{/each}
 		<div style:height="{visible.after * rowHeight}px"></div>
 
-		{#if shownRange}
-			<div class="range" style:--from={shownRange.from} style:--to={shownRange.to} aria-hidden="true"></div>
-		{/if}
 		{#if dropAt !== null}
 			<div class="drop" style:--at={dropAt} aria-hidden="true"></div>
 		{/if}
@@ -960,19 +926,12 @@ function segmentSelected(trackId: string, keyframe: BoardKeyframe) {
 	.clip-edge:hover,
 	.clip--selected .clip-edge { background: color-mix(in srgb, var(--brand) 55%, transparent); }
 
-	.range,
 	.drop {
 		position: absolute;
 		top: 0;
 		bottom: 0;
 		z-index: 2;
 		pointer-events: none;
-	}
-	.range {
-		left: calc(var(--tree) + var(--pad) + var(--from) * var(--scale) * 1px);
-		width: calc((var(--to) - var(--from)) * var(--scale) * 1px);
-		background: color-mix(in srgb, var(--brand) 12%, transparent);
-		box-shadow: inset 1px 0 var(--brand), inset -1px 0 var(--brand);
 	}
 	.drop {
 		left: calc(var(--tree) + var(--pad) + var(--at) * var(--scale) * 1px);

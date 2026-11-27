@@ -303,54 +303,23 @@ export function snapBoardTime(
 	return best;
 }
 
-export type BoardBezier = readonly [number, number, number, number];
-
-export const BOARD_EASE_PRESETS: ReadonlyArray<{
-	id: string;
-	value: string;
-	curve: BoardBezier | null;
-}> = [
-	{ id: "linear", value: "linear", curve: [0, 0, 1, 1] },
-	{ id: "ease", value: "ease", curve: [0.25, 0.1, 0.25, 1] },
-	{ id: "ease-in", value: "ease-in", curve: [0.42, 0, 1, 1] },
-	{ id: "ease-out", value: "ease-out", curve: [0, 0, 0.58, 1] },
-	{ id: "ease-in-out", value: "ease-in-out", curve: [0.42, 0, 0.58, 1] },
-	{
-		id: "smooth-out",
-		value: "cubic-bezier(0.22, 1, 0.36, 1)",
-		curve: [0.22, 1, 0.36, 1],
-	},
-	{
-		id: "overshoot",
-		value: "cubic-bezier(0.34, 1.56, 0.64, 1)",
-		curve: [0.34, 1.56, 0.64, 1],
-	},
-	{ id: "step-end", value: "step-end", curve: null },
-];
-
-export function parseBoardBezier(ease: string | undefined): BoardBezier | null {
-	const value = (ease ?? "linear").trim();
-	const preset = BOARD_EASE_PRESETS.find((entry) => entry.value === value);
-	if (preset) return preset.curve;
-	const match =
-		/^cubic-bezier\(\s*([^,()]+),\s*([^,()]+),\s*([^,()]+),\s*([^,()]+)\)$/.exec(
-			value,
-		);
-	if (!match) return null;
-	const numbers = match.slice(1).map(Number);
-	return numbers.every(Number.isFinite)
-		? (numbers as unknown as BoardBezier)
-		: null;
-}
-
-export function formatBoardBezier(curve: BoardBezier): string {
-	const preset = BOARD_EASE_PRESETS.find((entry) =>
-		entry.curve?.every((value, index) => value === curve[index]),
-	);
-	if (preset) return preset.value;
-	const round = (value: number) => Number(value.toFixed(3));
-	return `cubic-bezier(${curve.map(round).join(", ")})`;
-}
+export const BOARD_EASE_PRESETS: ReadonlyArray<{ id: string; value: string }> =
+	[
+		{ id: "linear", value: "linear" },
+		{ id: "ease", value: "ease" },
+		{ id: "ease-in", value: "ease-in" },
+		{ id: "ease-out", value: "ease-out" },
+		{ id: "ease-in-out", value: "ease-in-out" },
+		{
+			id: "smooth-out",
+			value: "cubic-bezier(0.22, 1, 0.36, 1)",
+		},
+		{
+			id: "overshoot",
+			value: "cubic-bezier(0.34, 1.56, 0.64, 1)",
+		},
+		{ id: "step-end", value: "step-end" },
+	];
 
 export type BoardTrackRowState = "none" | "animated" | "keyed";
 
@@ -370,5 +339,4 @@ export type BoardDockSelection =
 	| { type: "segment"; key: BoardKeyRef }
 	| { type: "marker"; at: number }
 	| { type: "clips"; targets: ReadonlySet<string> }
-	| { type: "range"; from: number; to: number }
 	| null;

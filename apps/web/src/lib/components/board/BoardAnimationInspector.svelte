@@ -1,10 +1,9 @@
 <script lang="ts">
-import type { BoardAnimation, BoardTrack } from "@cohub/protocol";
+import type { BoardAnimation } from "@cohub/protocol";
 import { BOARD_CAMERA_TARGET } from "@cohub/protocol";
 import { resolveBoardProperty } from "@neta-art/cohub/board";
 import type { BoardKeyRef } from "@neta-art/cohub/board/editor";
-import { Spline, Trash2 } from "lucide-svelte";
-import { floatNear } from "#lib/actions/portal.ts";
+import { Trash2 } from "lucide-svelte";
 import {
 	boardGroupLabel,
 	boardPropertyLabel,
@@ -14,12 +13,9 @@ import {
 	type BoardDockSelection,
 	type BoardTrackGroup,
 	boardKeyId,
-	formatBoardBezier,
-	parseBoardBezier,
 	parseBoardKeyId,
 } from "#lib/board/animation-timeline.ts";
 import type { BoardEditor } from "#lib/board/editor.svelte.ts";
-import BoardEaseCurve from "#lib/components/board/BoardEaseCurve.svelte";
 import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
@@ -99,30 +95,6 @@ const ease = $derived(focused?.keyframe.ease ?? "linear");
 const preset = $derived(
 	BOARD_EASE_PRESETS.find((entry) => entry.value === ease)?.id ?? "custom",
 );
-const curve = $derived(parseBoardBezier(ease));
-let curveOpen = $state(false);
-let curveAnchor = $state<HTMLButtonElement | null>(null);
-let curvePopover = $state<HTMLDivElement | null>(null);
-const segmentTrack = $derived(
-	selection.type === "segment" ? selection.key.trackId : null,
-);
-
-$effect(() => {
-	segmentTrack;
-	curveOpen = false;
-});
-
-$effect(() => {
-	if (!curveOpen) return;
-	const down = (event: PointerEvent) => {
-		const target = event.target as Node;
-		if (!curvePopover?.contains(target) && !curveAnchor?.contains(target))
-			curveOpen = false;
-	};
-	document.addEventListener("pointerdown", down, true);
-	return () => document.removeEventListener("pointerdown", down, true);
-});
-
 const EASE_LABELS = $derived<Record<string, string>>({
 	linear: m.board_ease_linear({}, { locale }),
 	ease: m.board_ease_ease({}, { locale }),
@@ -159,13 +131,6 @@ function commit(
 		event.currentTarget.value = String(shown);
 }
 
-function setTrack(
-	patch: Partial<Pick<BoardTrack, "interpolation" | "composite" | "orient">>,
-) {
-	const trackId = focused?.ref.trackId;
-	if (trackId) edit(() => editor.setTrack(trackId, patch));
-}
-
 function number(raw: string): number | null {
 	const value = Number(raw);
 	return raw.trim() && Number.isFinite(value) ? value : null;
@@ -196,7 +161,6 @@ function setEase(id: string) {
 	const entry = BOARD_EASE_PRESETS.find((candidate) => candidate.id === id);
 	if (entry)
 		setKeyframe({ ease: entry.value === "linear" ? null : entry.value });
-	else curveOpen = true;
 }
 
 function setMarker(patch: { label?: string; pause?: boolean }) {
@@ -250,41 +214,9 @@ const round = (value: number) => Number(value.toFixed(3));
 				{#each BOARD_EASE_PRESETS as entry (entry.id)}
 					<option value={entry.id}>{EASE_LABELS[entry.id]}</option>
 				{/each}
-				<option value="custom">{EASE_LABELS.custom}</option>
+				{#if preset === "custom"}<option value="custom" disabled>{EASE_LABELS.custom}</option>{/if}
 			</select>
 		</label>
-		<button
-			bind:this={curveAnchor}
-			type="button"
-			class="icon-key"
-			title={m.board_ease_curve({}, { locale })}
-			aria-label={m.board_ease_curve({}, { locale })}
-			aria-expanded={curveOpen}
-			onclick={() => { curveOpen = !curveOpen; }}
-		>
-			<Spline class="h-3.5 w-3.5" />
-		</button>
-		<input
-			class="input input--code"
-			type="text"
-			value={ease}
-			aria-label={m.board_ease({}, { locale })}
-			spellcheck="false"
-			onchange={(event) => commit(event, ease, (raw) => setKeyframe({ ease: raw || null }))}
-		/>
-		{#if curveOpen && curveAnchor}
-			<div
-				bind:this={curvePopover}
-				class="curve-popover menu-surface"
-				use:floatNear={{ getAnchor: () => curveAnchor, placement: "top-start", gap: 8, zIndex: 130 }}
-			>
-				<BoardEaseCurve
-					curve={curve ?? [0, 0, 1, 1]}
-					label={m.board_ease_curve({}, { locale })}
-					onChange={(next) => setKeyframe({ ease: formatBoardBezier(next) })}
-				/>
-			</div>
-		{/if}
 	{:else if focused}
 		<span class="title" title={title}>{title}</span>
 		<label class="field">
@@ -305,22 +237,6 @@ const round = (value: number) => Number(value.toFixed(3));
 				<code class="readout" title={JSON.stringify(focused.keyframe.value)}>{JSON.stringify(focused.keyframe.value)}</code>
 			{/if}
 		</span>
-		{#if kind !== "discrete"}
-			<label class="field">
-				<span>{m.board_interpolation({}, { locale })}</span>
-				<select class="input" value={focused.track.interpolation} onchange={(event) => setTrack({ interpolation: event.currentTarget.value as BoardTrack["interpolation"] })}>
-					<option value="auto">{m.board_interpolation_auto({}, { locale })}</option>
-					<option value="step">{m.board_interpolation_step({}, { locale })}</option>
-					{#if kind === "vec2"}<option value="spline">{m.board_interpolation_spline({}, { locale })}</option>{/if}
-				</select>
-			</label>
-		{/if}
-		{#if focused.track.property === "position"}
-			<span class="field">
-				<span>{m.board_orient({}, { locale })}</span>
-				<ToggleSwitch checked={focused.track.orient === true} label={m.board_orient({}, { locale })} onchange={(orient) => setTrack({ orient })} />
-			</span>
-		{/if}
 	{:else if keys.length > 1}
 		<span class="title">{m.board_keyframes_count({ count: keys.length }, { locale })}</span>
 	{/if}
@@ -375,10 +291,6 @@ const round = (value: number) => Number(value.toFixed(3));
 		text-align: right;
 	}
 	.input--wide { width: 160px; }
-	.input--code {
-		width: 200px;
-		font-family: var(--font-mono);
-	}
 	.unit { color: var(--text-tertiary); }
 	.readout {
 		max-width: 180px;
@@ -397,10 +309,8 @@ const round = (value: number) => Number(value.toFixed(3));
 		border-radius: 6px;
 		color: var(--text-tertiary);
 	}
-	.icon-key:hover,
-	.icon-key[aria-expanded="true"] { background: var(--bg-hover); color: var(--text-primary); }
+	.icon-key:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.icon-key--danger:hover { background: var(--color-error-bg); color: var(--error-700); }
-	.curve-popover { padding: 8px; }
 
 	@media (pointer: coarse) {
 		.input { height: 32px; font-size: 12px; }

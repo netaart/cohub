@@ -4,9 +4,8 @@ import {
 	removeBoardScriptPatch,
 } from "@neta-art/cohub/board";
 import type { BoardStage } from "@neta-art/cohub/board/stage";
-import { ChevronDown, Circle, Plus, Square, Trash2 } from "lucide-svelte";
+import { ChevronDown, Plus, Trash2 } from "lucide-svelte";
 import { untrack } from "svelte";
-import type { BoardInputRecorder } from "#lib/board/board-input-recorder.svelte.ts";
 import {
 	type BoardScriptStatus,
 	boardScriptRunsHere,
@@ -21,12 +20,10 @@ import { m } from "#lib/paraglide/messages.js";
 const {
 	editor,
 	stage = null,
-	inputRecorder,
 	onOpenSource,
 }: {
 	editor: BoardEditor;
 	stage?: BoardStage | null;
-	inputRecorder?: BoardInputRecorder;
 	onOpenSource?: (path: string) => void;
 } = $props();
 
@@ -160,24 +157,6 @@ function remove(id: string) {
 	{#if invalid}
 		<p class="error" role="status">{m.board_scripts_path_invalid({}, { locale })}</p>
 	{/if}
-	{#if inputRecorder && (inputRecorder.available || inputRecorder.startedAt !== null)}
-		{@const recording = inputRecorder.startedAt !== null}
-		<div class="record-row">
-			<div class="record-copy">
-				<span class="record-title">{m.board_input_title({}, { locale })}</span>
-				<span class="section-hint">{m.board_input_hint({}, { locale })}</span>
-			</div>
-			<button type="button" class="secondary-key record-button" aria-pressed={recording} onclick={inputRecorder.toggle}>
-				{#if recording}
-					<Square class="h-3 w-3" fill="currentColor" aria-hidden="true" />
-					{m.board_input_end({}, { locale })}
-				{:else}
-					<Circle class="record-icon h-3 w-3" fill="currentColor" aria-hidden="true" />
-					{m.board_input_record({}, { locale })}
-				{/if}
-			</button>
-		</div>
-	{/if}
 </section>
 
 <style>
@@ -202,11 +181,5 @@ function remove(id: string) {
 	.add-button { display: inline-flex; align-items: center; gap: 4px; height: 30px; border-radius: 6px; padding: 0 9px; background: var(--brand-bg); color: var(--brand-muted-fg); font-size: 11px; }
 	.add-button:disabled { opacity: .45; }
 	.error { margin: 0; color: var(--error-700); font-size: 11px; line-height: 1.35; }
-	.record-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
-	.record-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
-	.record-title { color: var(--text-primary); font-size: 12px; }
-	.record-copy .section-hint { margin: 0; }
-	.record-button { flex-shrink: 0; min-width: 76px; height: 28px; padding: 0 10px; font-size: 11px; }
-	.record-button :global(.record-icon) { color: var(--error-500); }
-	@media (pointer: coarse) { .script-row, .script-toggle, .icon-button { min-height: 40px; } .icon-button { width: 40px; height: 40px; } .add-row input, .add-button, .record-button { height: 40px; } }
+	@media (pointer: coarse) { .script-row, .script-toggle, .icon-button { min-height: 40px; } .icon-button { width: 40px; height: 40px; } .add-row input, .add-button { height: 40px; } }
 </style>

@@ -20,6 +20,7 @@ import {
 	formatBoardLaunch,
 	inferBoardMediaKind,
 	isBoardModelItem,
+	isBoardViewLevel,
 	layoutBoardImages,
 	normalizeBoardRemoteUrl,
 	parseBoardDocument,
@@ -117,6 +118,7 @@ import { boardTimelineLanding } from "#lib/board/board-timeline.ts";
 import {
 	type BoardVideoExportRequest,
 	createBoardVideoExport,
+	findBoardInputRecording,
 	readBoardVideoExportAccess,
 } from "#lib/board/board-video-export.svelte.ts";
 import {
@@ -136,7 +138,11 @@ import BoardContextMenu, {
 	type BoardMenuAction,
 } from "#lib/components/board/BoardContextMenu.svelte";
 import BoardEmptyState from "#lib/components/board/BoardEmptyState.svelte";
-import BoardExportDialog from "#lib/components/board/BoardExportDialog.svelte";
+import BoardExportDialog, {
+	type BoardExportInputs,
+	type BoardExportIntent,
+	type BoardExportView,
+} from "#lib/components/board/BoardExportDialog.svelte";
 import BoardFloatingToolbar from "#lib/components/board/BoardFloatingToolbar.svelte";
 import BoardFrameNav from "#lib/components/board/BoardFrameNav.svelte";
 import BoardGenerationComposer from "#lib/components/board/BoardGenerationComposer.svelte";
@@ -446,6 +452,8 @@ const scriptSettingsAction = $derived.by<BoardMenuAction | null>(() => {
 let contextMenu = $state<{ x: number; y: number } | null>(null);
 let exportBridge = $state<BoardStageExportBridge | null>(null);
 let exportOpen = $state(false);
+let exportIntent = $state<BoardExportIntent>({ mode: "image" });
+let exportView = $state.raw<BoardExportView | null>(null);
 let generationOpen = $state(false);
 let appearanceOpen = $state(false);
 let linkRequest = $state<{ url: string; at: WorldPoint } | null>(null);
@@ -816,15 +824,32 @@ const videoExport =
 	liveSpaceId && editable && !linked
 		? createBoardVideoExport(liveSpaceId)
 		: null;
-let canExportVideo = $state(false);
+let canExportVideo = $state<boolean | null>(null);
+const videoBlocked = $derived(
+	!videoExport
+		? m.board_video_unavailable_readonly({}, { locale })
+		: canExportVideo === null
+			? ""
+			: !canExportVideo
+				? m.board_video_unavailable_permission({}, { locale })
+				: videoExport.running
+					? m.board_video_unavailable_busy({}, { locale })
+					: null,
+);
 
-function openExport() {
+function openExport(intent: BoardExportIntent = { mode: "image" }) {
 	if (!exportBridge) return;
 	contextMenu = null;
+	exportIntent = intent;
+	exportView = isBoardViewLevel(editor.camera) ? editor.visibleRect : null;
 	exportOpen = true;
 	if (spaceId && videoExport)
 		void readBoardVideoExportAccess(spaceId, (allowed) => {
 			canExportVideo = allowed;
+		});
+	if (liveSpaceId && path && videoExport && !recordedInputs)
+		void findBoardInputRecording(liveSpaceId, path).then((found) => {
+			recordedInputs ??= found ? { path: found, recent: false } : null;
 		});
 }
 
@@ -844,7 +869,7 @@ async function exportVideo(request: BoardVideoExportRequest) {
 }
 
 const canRecord = $derived(Boolean(liveSpaceId && editable && path && !linked));
-let recordedInputs = $state<string | null>(null);
+let recordedInputs = $state<BoardExportInputs | null>(null);
 const inputRecorder = createBoardInputRecorder({
 	stage: () => scriptStage,
 	onStop: (recording) => void saveInputs(recording),
@@ -864,7 +889,7 @@ async function saveInputs({ log, duration, full }: BoardInputRecording) {
 			content: stringifyBoardScriptInputs(log),
 			encoding: "utf-8",
 		});
-		recordedInputs = target;
+		recordedInputs = { path: target, recent: true };
 		showNotice(
 			full
 				? m.board_input_full({ time }, { locale })
@@ -1530,7 +1555,7 @@ onDestroy(() => {
 					<Spinner class="h-3.5 w-3.5" />
 					<span>{job.progress === null ? m.board_video_exporting({}, { locale }) : m.board_video_exporting_percent({ percent: Math.round(job.progress * 100) }, { locale })}</span>
 				{:else if job.status === "done"}
-					<span>{m.board_video_exported({}, { locale })}</span>
+					<span class="min-w-0 truncate" title={job.path}>{m.board_video_exported({ name: job.path.slice(job.path.lastIndexOf("/") + 1) }, { locale })}</span>
 					<button type="button" class="board-job-action" onclick={() => { void openFile(job.path); videoExport.dismiss(); }}>{m.board_video_open({}, { locale })}</button>
 				{:else}
 					<span class="min-w-0 truncate" title={job.message}>{m.board_video_failed({}, { locale })}{job.message ? ` · ${job.message}` : ""}</span>
@@ -1666,7 +1691,7 @@ onDestroy(() => {
 					onToggleAppearance={toggleAppearance}
 					onToggleGeneration={generates ? toggleGeneration : undefined}
 					onToggleTimeline={authoring || hasAnimations ? toggleAnimation : undefined}
-					onExport={exportBridge ? openExport : undefined}
+					onExport={exportBridge ? () => openExport() : undefined}
 					onReplay={history ? () => { replayOpen = true; } : undefined}
 					onPresent={hasFrames ? () => present() : undefined}
 					contextMenuOpen={contextMenu !== null}
@@ -1706,7 +1731,6 @@ onDestroy(() => {
 						{editor}
 						{backdropStatus}
 						stage={scriptStage}
-						inputRecorder={canRecord ? inputRecorder : undefined}
 						onOpenSource={openFile}
 						onClose={() => { appearanceOpen = false; }}
 					/>
@@ -1772,7 +1796,7 @@ onDestroy(() => {
 				onCopyLink={shareUrl ? () => void copyViewLink() : undefined}
 				onPresent={present}
 				onReact={collaboration && scriptStage ? (reaction) => reactAt(reaction, contextMenu) : undefined}
-				onExport={exportBridge ? openExport : undefined}
+				onExport={exportBridge ? () => openExport() : undefined}
 				onReplay={history ? () => { contextMenu = null; replayOpen = true; } : undefined}
 				onAnimate={authoring ? () => { contextMenu = null; animationOpen = true; } : undefined}
 				onClose={() => { contextMenu = null; }}
@@ -1787,7 +1811,9 @@ onDestroy(() => {
 			{editor}
 			{isMobile}
 			playback={activePlayback}
+			inputRecorder={canRecord ? inputRecorder : undefined}
 			onPlayback={sendPlayback}
+			onExport={exportBridge ? (animationId) => openExport({ mode: "video", animationId }) : undefined}
 			onClose={closeAnimation}
 		/>
 	{/if}
@@ -1795,14 +1821,17 @@ onDestroy(() => {
 
 <BoardExportDialog
 	open={exportOpen}
+	intent={exportIntent}
 	onClose={() => { exportOpen = false; }}
 	document={editor.document}
 	bridge={exportBridge}
 	title={path}
 	selection={editor.selection}
-	onLocate={(id) => { editor.setSelection([id]); editor.focusItems([id]); }}
-	onExportVideo={canExportVideo && !videoExport?.running ? (request) => void exportVideo(request) : undefined}
+	view={exportView}
+	playhead={animationOpen ? editor.playhead : null}
+	{videoBlocked}
 	inputs={recordedInputs}
+	onExportVideo={(request) => void exportVideo(request)}
 />
 
 <style>
