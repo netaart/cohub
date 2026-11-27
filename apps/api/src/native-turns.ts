@@ -13,6 +13,7 @@ import { createSessionForkInTransaction, findSegmentForTurn, publishSessionFork 
 import { addUsage, buildIntermediateObjectsForTurn } from "./session-turns.js";
 import { adoptNativeStreamSnapshot, cacheNativeTurnBinding, clearNativeTurnBinding, releaseNativeStreamSnapshot } from "./native-turn-progress.js";
 import { enqueueAgentTurnJob } from "./agent-turn-queue.js";
+import { publishRuntimeTurn } from "./runtime.js";
 import { createLogger } from "@cohub/infra/logging";
 import type { RealtimeSessionFork } from "@cohub/protocol/realtime";
 
@@ -273,8 +274,12 @@ export async function observeNativeTurn(spaceId: string, userId: string, session
   let meta = sql`jsonb_set(jsonb_set(${sessionTurns.meta}, '{nativeSync,observedAt}', to_jsonb(${new Date().toISOString()}::text)), '{runtimeRecovery,state}', '"executing"'::jsonb)`;
   if (controllable !== undefined) meta = sql`jsonb_set(${meta}, '{nativeSync,controllable}', ${controllable ? sql`'true'::jsonb` : sql`'false'::jsonb`})`;
   // Restore liveness and the executing state so the attention watchdog only fires on real silence.
-  await db.update(sessionTurns).set({ meta })
-    .where(and(eq(sessionTurns.id, turnId), inArray(sessionTurns.status, ["running", "abort_requested"]), runtimeResolutionOpen));
+  const [updated] = await db.update(sessionTurns).set({ meta })
+    .where(and(eq(sessionTurns.id, turnId), inArray(sessionTurns.status, ["running", "abort_requested"]), runtimeResolutionOpen)).returning({ id: sessionTurns.id });
+  // A Turn that was waiting for a stop confirmation is alive after all; clients drop the request.
+  if (updated && record(record(turn.meta).runtimeRecovery).state === "attention") {
+    await publishRuntimeTurn(spaceId, sessionId, turnId).catch((error) => nativeLogger.warn("[NativeTurn] recovery publish failed", { spaceId, turnId, error }));
+  }
   return { abortRequested: turn.status === "abort_requested", status: turn.status };
 }
 

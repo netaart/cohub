@@ -244,6 +244,8 @@ export type RuntimeSessionRecoveryStatus = {
 };
 export const runtimeStopConfirmationSchema = z.object({ expectedTurnId: z.string().uuid(), revision: z.string().min(1), confirmed: z.literal(true) }).strict();
 export type RuntimeStopConfirmation = z.infer<typeof runtimeStopConfirmationSchema>;
+/** Error code of a stop the user must confirm instead: Cohub cannot reach the run. */
+export const NATIVE_STOP_CONFIRMATION_REQUIRED = "native_stop_confirmation_required";
 
 export type RuntimeTurnUserMessage = {
   turnId: string;

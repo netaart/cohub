@@ -26,14 +26,14 @@ import { dispatchLabelAssignmentsUpdated } from "../realtime-events.js";
 import { buildSessionTurnResponse } from "../session-turn-response.js";
 import { parseSessionTitleInput } from "../session-title-input.js";
 import { changeSessionArchive } from "../session-archive.js";
-import { canForkTurn, isNativeClientTurn, SESSION_TURN_SIGNED_URL_LIMIT, type SpeakTurnResponse } from "@cohub/protocol";
+import { canForkTurn, isNativeClientTurn, NATIVE_STOP_CONFIRMATION_REQUIRED, SESSION_TURN_SIGNED_URL_LIMIT, type SpeakTurnResponse } from "@cohub/protocol";
 import { BillingAccessBlockedError } from "@cohub/billing";
 import { billingBlockedResponse } from "../lib/billing-blocked.js";
 import { getRequestSource } from "../lib/request-source.js";
 import { GenerationRequestError } from "../generations/enqueue.js";
 import { speakTurn, SpeechError } from "../speech.js";
 import type { SessionFilesResponse } from "@cohub/protocol/model";
-import { getSessionRuntimeTurn } from "../runtime.js";
+import { getSessionRuntimeTurn, requestUnreachableNativeStop } from "../runtime.js";
 import { listSessionFiles } from "../session-files.js";
 import { toSessionSpace } from "../session-space.js";
 
@@ -498,9 +498,14 @@ router.post("/:id/abort", async (c) => {
   const turnId = body?.turnId?.trim() || null;
   if (turnId && !requireValidId(turnId)) return c.json({ message: "invalid turn id" }, 400);
   const target = turnId ? await getSessionTurnById(session.id, turnId) : await getSessionRuntimeTurn(session.spaceId, session.id);
-  // A terminal client without Cohub's link cannot be stopped from here; say so instead of waiting.
+  // A terminal client without Cohub's link cannot be stopped from here: its run may already be
+  // gone, so the user is asked to confirm that instead.
   if (target && isNativeClientTurn(target.meta) && (target.meta as { nativeSync?: { controllable?: boolean } }).nativeSync?.controllable === false && ["running", "abort_requested"].includes(target.status)) {
-    return c.json({ message: "Stop this native run in its terminal" }, 409);
+    const active = await getSessionRuntimeTurn(session.spaceId, session.id);
+    const confirmable = active?.id === target.id && await requestUnreachableNativeStop(session.spaceId, active);
+    return c.json(confirmable
+      ? { message: "Stop this native run in its terminal, or confirm in Cohub that it has stopped", code: NATIVE_STOP_CONFIRMATION_REQUIRED }
+      : { message: "Stop this native run in its terminal" }, 409);
   }
 
   await enqueueSessionAbort({

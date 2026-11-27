@@ -7,6 +7,8 @@ import { enqueueRuntimeRecovery } from "@cohub/infra/agent-queue";
 import { redisCommandClient } from "./redis.js";
 import { db } from "./db/index.js";
 import { agentTurnQueue } from "./agent-turn-queue.js";
+import { getSessionTurnById } from "./session-turns.js";
+import { dispatchTurnUpdated } from "./session-output.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 
@@ -38,23 +40,53 @@ export async function getSessionRuntimeTurn(spaceId: string, sessionId: string) 
 const NATIVE_DISCONNECTED_ATTENTION_MS = 45_000;
 const NATIVE_QUIET_ATTENTION_MS = 30 * 60_000;
 
+type RuntimeTurn = NonNullable<Awaited<ReturnType<typeof getSessionRuntimeTurn>>>;
+
+const isExecutingNativeTurn = (turn: RuntimeTurn) => isNativeClientTurn(turn.meta) && readRuntimeRecovery(turn.meta)?.state === "executing";
+const nativeSync = (turn: RuntimeTurn) => (turn.meta as { nativeSync?: { observedAt?: string; controllable?: boolean } }).nativeSync ?? {};
+
+/** Clients show the Turn's recovery state from its meta, so every change to it is published. */
+export async function publishRuntimeTurn(spaceId: string, sessionId: string, turnId: string) {
+  const turn = await getSessionTurnById(sessionId, turnId);
+  if (turn) await dispatchTurnUpdated({ spaceId, sessionId, turn });
+}
+
+/**
+ * Ask the user whether a native Turn Cohub cannot reach has stopped. Fenced on its last sign of
+ * life: a Turn that reported in meanwhile stays executing.
+ */
+async function requestNativeStopConfirmation(spaceId: string, turn: RuntimeTurn): Promise<RuntimeTurn> {
+  const { observedAt } = nativeSync(turn);
+  const [updated] = await db.update(sessionTurns).set({ meta: sql`jsonb_set(${sessionTurns.meta}, '{runtimeRecovery,state}', '"attention"'::jsonb)` })
+    .where(and(eq(sessionTurns.id, turn.id), inArray(sessionTurns.status, ["running", "abort_requested"]), sql`${sessionTurns.meta}->'runtimeRecovery'->>'state' = 'executing'`, sql`${sessionTurns.meta}->'nativeSync'->>'observedAt' is not distinct from ${observedAt ?? null}`)).returning();
+  if (!updated) return turn;
+  await publishRuntimeTurn(spaceId, turn.sessionId, turn.id).catch((error) => logger.warn("[Runtime] failed to publish recovery state", { spaceId, turnId: turn.id, error }));
+  return { ...updated, harness: turn.harness };
+}
+
 export async function getSessionRuntimeRecovery(spaceId: string, sessionId: string) {
   let turn = await getSessionRuntimeTurn(spaceId, sessionId);
-  if (turn && isNativeClientTurn(turn.meta) && readRuntimeRecovery(turn.meta)?.state === "executing") {
-    const { observedAt, controllable } = (turn.meta as { nativeSync?: { observedAt?: string; controllable?: boolean } }).nativeSync ?? {};
+  if (turn && isExecutingNativeTurn(turn)) {
+    const { observedAt, controllable } = nativeSync(turn);
     // A native Turn is alive while its owner's Runtime holds the Space's lease.
     const registration = await getRuntimeRegistration(spaceId);
     const connected = registration?.ownerUserId === readRuntimeRecovery(turn.meta)?.ownerUserId;
     const quietMs = !connected ? NATIVE_DISCONNECTED_ATTENTION_MS : controllable ? Number.POSITIVE_INFINITY : NATIVE_QUIET_ATTENTION_MS;
-    if (!observedAt || Date.now() - Date.parse(observedAt) > quietMs) {
-      const [updated] = await db.update(sessionTurns).set({ meta: sql`jsonb_set(${sessionTurns.meta}, '{runtimeRecovery,state}', '"attention"'::jsonb)` })
-        .where(and(eq(sessionTurns.id, turn.id), inArray(sessionTurns.status, ["running", "abort_requested"]), sql`${sessionTurns.meta}->'runtimeRecovery'->>'state' = 'executing'`, sql`${sessionTurns.meta}->'nativeSync'->>'observedAt' is not distinct from ${observedAt ?? null}`)).returning();
-      if (updated) turn = { ...updated, harness: turn.harness };
-    }
+    if (!observedAt || Date.now() - Date.parse(observedAt) > quietMs) turn = await requestNativeStopConfirmation(spaceId, turn);
   }
   const pending = turn ? readRuntimeRecovery(turn.meta)?.state === "attention" : false;
   const snapshot = runtimeRecoverySnapshot(pending && turn ? [turn] : []);
   return { pending, revision: snapshot.revision, turnId: pending && turn ? turn.id : null, harness: pending && turn ? turn.harness : null };
+}
+
+/**
+ * A stop of a native Turn Cohub cannot reach: whether it still runs is only known in its terminal,
+ * so the user is asked to confirm it has stopped. False when there is nothing to confirm.
+ */
+export async function requestUnreachableNativeStop(spaceId: string, turn: RuntimeTurn): Promise<boolean> {
+  const state = readRuntimeRecovery(turn.meta)?.state;
+  if (state === "executing") return readRuntimeRecovery((await requestNativeStopConfirmation(spaceId, turn)).meta)?.state === "attention";
+  return state === "attention";
 }
 
 export async function confirmRuntimeStopped(spaceId: string, sessionId: string, actorUserId: string, request: RuntimeStopConfirmation) {

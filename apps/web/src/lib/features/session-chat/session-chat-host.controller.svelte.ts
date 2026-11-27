@@ -9,6 +9,7 @@ import {
 	buildViewportContentBlock,
 	isLocalHarness,
 	type LocalHarness,
+	NATIVE_STOP_CONFIRMATION_REQUIRED,
 } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { SpaceFsChangedPayload } from "@cohub/protocol/fs";
@@ -2821,6 +2822,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			interruptGeneration(opSessionId);
 		} catch (error) {
 			if (disposed || spaceId !== opSpaceId) return;
+			// The Turn now asks to confirm it has stopped, above the composer.
+			if (getHttpErrorCode(error) === NATIVE_STOP_CONFIRMATION_REQUIRED) return;
 			setComposerError(
 				error instanceof Error ? error.message : "Failed to stop generation",
 			);
