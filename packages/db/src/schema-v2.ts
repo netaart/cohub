@@ -960,6 +960,7 @@ export const tokenUsageStatsHourly = v2.table(
     userId: varchar("user_id", { length: 255 }),
     spaceId: uuid("space_id").notNull(),
     sessionId: uuid("session_id").notNull(),
+    harness: varchar("harness", { length: 32 }).notNull().default("cohub"),
     provider: varchar("provider", { length: 100 }),
     model: varchar("model", { length: 255 }),
     requestCount: integer("request_count").notNull().default(0),
@@ -979,14 +980,15 @@ export const tokenUsageStatsHourly = v2.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({
-    pk: uniqueIndex("v2_uq_token_usage_stats_hourly_bucket_dims").on(
+    dims: unique("v2_uq_token_usage_stats_hourly_dims").on(
       table.bucketStartAt,
       table.userId,
       table.spaceId,
       table.sessionId,
+      table.harness,
       table.provider,
       table.model,
-    ),
+    ).nullsNotDistinct(),
     bucketIdx: index("v2_idx_token_usage_stats_hourly_bucket").on(table.bucketStartAt),
     userBucketIdx: index("v2_idx_token_usage_stats_hourly_user_bucket").on(table.userId, table.bucketStartAt),
     spaceBucketIdx: index("v2_idx_token_usage_stats_hourly_space_bucket").on(table.spaceId, table.bucketStartAt),

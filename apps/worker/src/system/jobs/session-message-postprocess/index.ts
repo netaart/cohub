@@ -1,7 +1,7 @@
 import { billingOperations, spaceWalletBillingOperations, COHUB_BILLING_TOKEN_TYPES, COHUB_BILLING_USAGE_TYPES, normalizePositiveUsd } from "@cohub/billing";
 import { claimMessageWalletBilling } from "@cohub/core/space-wallet";
-import { readImageToTextCalls } from "@cohub/core/sessions";
-import { sessionMessages, spaceSessions, tokenUsageStatsHourly } from "@cohub/db";
+import { readImageToTextCalls, recordTokenUsage, resolveUsageActorUserId, tokenUsageIncrements } from "@cohub/core/sessions";
+import { sessionMessages, spaceSessions } from "@cohub/db";
 import {
   isLlmUsageMessage,
   SESSION_MESSAGE_POSTPROCESS_JOB,
@@ -9,11 +9,10 @@ import {
   type Usage,
 } from "@cohub/protocol";
 import type { Job } from "bullmq";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { createLogger } from "@cohub/infra/logging";
 import { db } from "../../../db.js";
 import { registerSystemJob } from "../../registry.js";
-import { resolveLlmRequestStats } from "./request-stats.js";
 import { spaceWalletBilling } from "../../../space-wallet-billing.js";
 import { usagePricing } from "../../../usage-pricing.js";
 import { priceUsage, type FrozenPricing } from "@cohub/core/usage-pricing";
@@ -22,25 +21,8 @@ import { stopTurnsOnBillingBlock } from "./billing-stop.js";
 
 const logger = createLogger({ serviceName: "cohub-worker" });
 
-const finiteNumberOrZero = (value: unknown) =>
-  typeof value === "number" && Number.isFinite(value) ? value : 0;
-
 const normalizeUsage = (value: unknown): Usage | null =>
   value && typeof value === "object" ? (value as Usage) : null;
-
-const resolveActorUserId = async (message: typeof sessionMessages.$inferSelect) => {
-  const meta = message.meta as Record<string, unknown> | null;
-  if (typeof meta?.actorUserId === "string" && meta.actorUserId.trim()) return meta.actorUserId.trim();
-  const anchorUserMessageId = typeof meta?.anchorUserMessageId === "string" ? meta.anchorUserMessageId : null;
-  if (!anchorUserMessageId) return null;
-  const [anchor] = await db
-    .select({ meta: sessionMessages.meta })
-    .from(sessionMessages)
-    .where(and(eq(sessionMessages.id, anchorUserMessageId), eq(sessionMessages.sessionId, message.sessionId)))
-    .limit(1);
-  const userId = (anchor?.meta as Record<string, unknown> | null)?.userId;
-  return typeof userId === "string" && userId.trim() ? userId.trim() : null;
-};
 
 type LlmCharge = { officialUsd: number; operationId: string; provider: string; model: string };
 
@@ -89,18 +71,9 @@ const recordBilling = async (input: {
   return results.includes(true);
 };
 
-const aggregateUsage = async (
-  message: typeof sessionMessages.$inferSelect,
-  spaceId: string,
-  userId: string | null,
-  usage: Usage | null,
-) => {
+const aggregateUsage = async (message: typeof sessionMessages.$inferSelect, spaceId: string, userId: string | null) => {
   if (message.usageAggregatedAt) return;
-  const bucketStartAt = new Date(message.createdAt ?? new Date());
-  bucketStartAt.setUTCMinutes(0, 0, 0);
-  const mainStats = resolveLlmRequestStats(message);
-  const auxiliaryCalls = readImageToTextCalls(message.meta);
-
+  const increments = tokenUsageIncrements(message, { spaceId, userId });
   await db.transaction(async (tx) => {
     const [claimed] = await tx
       .update(sessionMessages)
@@ -108,90 +81,7 @@ const aggregateUsage = async (
       .where(and(eq(sessionMessages.id, message.id), isNull(sessionMessages.usageAggregatedAt)))
       .returning({ id: sessionMessages.id });
     if (!claimed) return;
-
-    const increment = async (input: {
-      provider: string | null;
-      model: string | null;
-      usage: Usage | null;
-      requestCount: number;
-      successCount: number;
-      errorCount: number;
-    }) => {
-      const inputTokens = finiteNumberOrZero(input.usage?.input);
-      const outputTokens = finiteNumberOrZero(input.usage?.output);
-      const cacheReadTokens = finiteNumberOrZero(input.usage?.cacheRead);
-      const cacheWriteTokens = finiteNumberOrZero(input.usage?.cacheWrite);
-      const totalTokens = finiteNumberOrZero(input.usage?.totalTokens);
-      const costInput = finiteNumberOrZero(input.usage?.cost?.input);
-      const costOutput = finiteNumberOrZero(input.usage?.cost?.output);
-      const costCacheRead = finiteNumberOrZero(input.usage?.cost?.cacheRead);
-      const costCacheWrite = finiteNumberOrZero(input.usage?.cost?.cacheWrite);
-      const costTotal = finiteNumberOrZero(input.usage?.cost?.total);
-      await tx.insert(tokenUsageStatsHourly).values({
-        bucketStartAt,
-        userId,
-        spaceId,
-        sessionId: message.sessionId,
-        provider: input.provider,
-        model: input.model,
-        requestCount: input.requestCount,
-        successCount: input.successCount,
-        errorCount: input.errorCount,
-        inputTokens,
-        outputTokens,
-        cacheReadTokens,
-        cacheWriteTokens,
-        totalTokens,
-        costInput: String(costInput),
-        costOutput: String(costOutput),
-        costCacheRead: String(costCacheRead),
-        costCacheWrite: String(costCacheWrite),
-        costTotal: String(costTotal),
-        updatedAt: new Date(),
-      }).onConflictDoUpdate({
-        target: [
-          tokenUsageStatsHourly.bucketStartAt,
-          tokenUsageStatsHourly.userId,
-          tokenUsageStatsHourly.spaceId,
-          tokenUsageStatsHourly.sessionId,
-          tokenUsageStatsHourly.provider,
-          tokenUsageStatsHourly.model,
-        ],
-        set: {
-          requestCount: sql`${tokenUsageStatsHourly.requestCount} + ${input.requestCount}`,
-          successCount: sql`${tokenUsageStatsHourly.successCount} + ${input.successCount}`,
-          errorCount: sql`${tokenUsageStatsHourly.errorCount} + ${input.errorCount}`,
-          inputTokens: sql`${tokenUsageStatsHourly.inputTokens} + ${inputTokens}`,
-          outputTokens: sql`${tokenUsageStatsHourly.outputTokens} + ${outputTokens}`,
-          cacheReadTokens: sql`${tokenUsageStatsHourly.cacheReadTokens} + ${cacheReadTokens}`,
-          cacheWriteTokens: sql`${tokenUsageStatsHourly.cacheWriteTokens} + ${cacheWriteTokens}`,
-          totalTokens: sql`${tokenUsageStatsHourly.totalTokens} + ${totalTokens}`,
-          costInput: sql`${tokenUsageStatsHourly.costInput} + ${String(costInput)}::numeric`,
-          costOutput: sql`${tokenUsageStatsHourly.costOutput} + ${String(costOutput)}::numeric`,
-          costCacheRead: sql`${tokenUsageStatsHourly.costCacheRead} + ${String(costCacheRead)}::numeric`,
-          costCacheWrite: sql`${tokenUsageStatsHourly.costCacheWrite} + ${String(costCacheWrite)}::numeric`,
-          costTotal: sql`${tokenUsageStatsHourly.costTotal} + ${String(costTotal)}::numeric`,
-          updatedAt: new Date(),
-        },
-      });
-    };
-
-    await increment({
-      provider: message.provider,
-      model: message.model,
-      usage,
-      ...mainStats,
-    });
-    for (const call of auxiliaryCalls) {
-      await increment({
-        provider: call.provider,
-        model: call.model,
-        usage: call.usage,
-        requestCount: 1,
-        successCount: call.status === "succeeded" ? 1 : 0,
-        errorCount: call.status === "failed" ? 1 : 0,
-      });
-    }
+    for (const increment of increments) await recordTokenUsage(tx, increment);
   });
 };
 
@@ -208,7 +98,7 @@ registerSystemJob(SESSION_MESSAGE_POSTPROCESS_JOB, async (job: Job) => {
   if (!isLlmUsageMessage(message)) return { ok: true, skipped: "non_llm_usage" };
 
   const usage = normalizeUsage(message.usage);
-  const userId = await resolveActorUserId(message);
+  const userId = await resolveUsageActorUserId(db, message);
 
   // Idempotent external effects first; non-idempotent hourly aggregation must remain last.
   const meta = (message.meta ?? {}) as Record<string, unknown>;
@@ -245,7 +135,7 @@ registerSystemJob(SESSION_MESSAGE_POSTPROCESS_JOB, async (job: Job) => {
       if (turnIds.length) logger.info("[Billing] stopping Agent Turns on insufficient balance", { spaceId, sessionId, turnIds });
     }).catch((error: unknown) => logger.warn("[Billing] failed to stop Agent Turns on insufficient balance", { spaceId, sessionId, turnId: message.turnId, error }));
   }
-  await aggregateUsage(message, spaceId, userId, usage);
+  await aggregateUsage(message, spaceId, userId);
 
   return { ok: true };
 });

@@ -43,6 +43,7 @@ const response: SpaceActivityResponse = {
 	rankings: {
 		llmModels: [
 			{
+				harness: "cohub",
 				provider: "anthropic",
 				model: "claude-sonnet-4-5",
 				totalTokens: 8200,

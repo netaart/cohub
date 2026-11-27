@@ -271,6 +271,7 @@ export async function loadSpaceActivity(input: {
 						requestCount: sql<number>`coalesce(sum(${tokenUsage.requestCount}), 0)::double precision`,
 						successCount: sql<number>`coalesce(sum(${tokenUsage.successCount}), 0)::double precision`,
 						errorCount: sql<number>`coalesce(sum(${tokenUsage.errorCount}), 0)::double precision`,
+						harness: tokenUsage.harness,
 						provider: tokenUsage.provider,
 						model: tokenUsage.model,
 					})
@@ -284,11 +285,13 @@ export async function loadSpaceActivity(input: {
 					)
 					.groupBy(
 						tokenUsage.bucketStartAt,
+						tokenUsage.harness,
 						tokenUsage.provider,
 						tokenUsage.model,
 					)
 					.orderBy(
 						asc(tokenUsage.bucketStartAt),
+						asc(tokenUsage.harness),
 						asc(tokenUsage.provider),
 						asc(tokenUsage.model),
 					),

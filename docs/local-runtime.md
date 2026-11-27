@@ -790,6 +790,12 @@ Never infer that a disconnected execution has stopped.
 - Final local messages and terminal Turn state commit atomically. Realtime,
   postprocessing and bound external channels are best effort; durable Session data remains
   authoritative and reloadable when a notification fails.
+- Messages keep the provider the Harness reported (a gateway host, or none for transcript-synced
+  Claude Code), since replaying signed thinking depends on it. Hourly usage stats instead record the
+  Harness with provider `local`, so a private endpoint never reaches usage pages or public trending.
+  `scripts/rebuild-local-token-usage.ts` relabels usage recorded before this rule. Usage jobs that
+  run on a worker mismatched with migration `0089` fail unclaimed; re-drive them with
+  `scripts/requeue-unaggregated-usage.ts`.
 
 ## Verification
 

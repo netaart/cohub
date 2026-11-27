@@ -1903,6 +1903,7 @@ export type UserActivityRange = {
 
 export type UserActivityRankings = {
   llmModels: Array<{
+    harness: HarnessKind;
     provider: string;
     model: string;
     totalTokens: number;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveLlmRequestStats } from "../src/system/jobs/session-message-postprocess/request-stats.js";
+import { resolveLlmRequestStats } from "./token-usage.js";
 
 test("uses exact provider call outcomes for compaction usage", () => {
   assert.deepEqual(resolveLlmRequestStats({

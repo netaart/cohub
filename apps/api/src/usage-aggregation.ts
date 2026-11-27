@@ -1,4 +1,5 @@
 import { generationUsageStatsHourly, tokenUsageStatsHourly } from "@cohub/db";
+import { resolveHarness, type HarnessKind } from "@cohub/protocol/runtime";
 
 const toFiniteNumber = (value: unknown): number => {
   const numberValue = Number(value);
@@ -20,6 +21,7 @@ export type UsageRow = {
   requestCount: number;
   successCount: number;
   errorCount: number;
+  harness: string;
   provider: string | null;
   model: string | null;
 };
@@ -194,6 +196,7 @@ export const USAGE_SELECT_COLUMNS = {
   requestCount: tokenUsageStatsHourly.requestCount,
   successCount: tokenUsageStatsHourly.successCount,
   errorCount: tokenUsageStatsHourly.errorCount,
+  harness: tokenUsageStatsHourly.harness,
   provider: tokenUsageStatsHourly.provider,
   model: tokenUsageStatsHourly.model,
 } as const;
@@ -306,6 +309,7 @@ type GenerationUsageAggregationResult = {
 
 export type UserModelRankings = {
   llmModels: Array<{
+    harness: HarnessKind;
     provider: string;
     model: string;
     totalTokens: number;
@@ -326,9 +330,10 @@ export function aggregateUserModelRankings(
 ): UserModelRankings {
   const llmModels = new Map<string, UserModelRankings["llmModels"][number]>();
   for (const row of usageRows) {
+    const harness = resolveHarness(row);
     const provider = row.provider ?? "unknown";
     const model = row.model ?? "unknown";
-    const key = `${provider}\0${model}`;
+    const key = `${harness}\0${provider}\0${model}`;
     const current = llmModels.get(key);
     if (current) {
       current.totalTokens += row.totalTokens;
@@ -336,6 +341,7 @@ export function aggregateUserModelRankings(
       current.costTotal += toFiniteNumber(row.costTotal);
     } else {
       llmModels.set(key, {
+        harness,
         provider,
         model,
         totalTokens: row.totalTokens,

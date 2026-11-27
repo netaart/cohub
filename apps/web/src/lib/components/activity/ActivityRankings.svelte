@@ -1,9 +1,11 @@
 <script lang="ts">
+import { harnessLabel, resolveHarness } from "@cohub/protocol/runtime";
 import type {
 	SpaceActivityAppRanking,
 	UserActivityRankings,
 } from "@neta-art/cohub";
 import { formatCompact, formatCost } from "#lib/activity.ts";
+import HarnessIcon from "#lib/components/composer/HarnessIcon.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { buildSpaceAppRoute } from "#lib/space-routes.ts";
@@ -38,12 +40,20 @@ const withCost = (value: number, cost: number) =>
 		</div>
 		{#if rankings.llmModels.length}
 			<ol class="space-y-3">
-				{#each rankings.llmModels as row, index (`${row.provider}:${row.model}`)}
+				{#each rankings.llmModels as row, index (`${row.harness}:${row.provider}:${row.model}`)}
+					{@const harness = resolveHarness(row)}
 					<li class="grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 text-[12px]">
 						<span class="font-mono text-[10px] text-text-placeholder">{index + 1}</span>
 						<div class="min-w-0" title={`${row.provider}/${row.model}`}>
 							<div class="truncate text-text-secondary">{row.model}</div>
-							<div class="truncate text-[10px] text-text-placeholder">{row.provider}</div>
+							{#if harness === "cohub"}
+								<div class="truncate text-[10px] text-text-placeholder">{row.provider}</div>
+							{:else}
+								<div class="flex min-w-0 items-center gap-1 text-[10px] text-text-placeholder">
+									<HarnessIcon {harness} size={10} />
+									<span class="truncate">{harnessLabel(harness)}</span>
+								</div>
+							{/if}
 						</div>
 						<div class="whitespace-nowrap text-right font-mono text-text-secondary">{withCost(row.totalTokens, row.costTotal)}</div>
 					</li>

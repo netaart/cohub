@@ -624,6 +624,13 @@
       "when": 1795687204923,
       "tag": "0088_referral_first_payment",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1795774252108,
+      "tag": "0089_token_usage_harness",
+      "breakpoints": true
     }
   ]
 }

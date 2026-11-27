@@ -1,7 +1,9 @@
-import type {
-	SpaceActivityAppRanking,
-	SpaceActivityContributor,
-	SpaceActivityResponse,
+import {
+	harnessLabel,
+	resolveHarness,
+	type SpaceActivityAppRanking,
+	type SpaceActivityContributor,
+	type SpaceActivityResponse,
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
@@ -134,6 +136,7 @@ export function printActivityReport(activity: SpaceActivityResponse): void {
 		table(llmModels, [
 			{ key: "model", label: "Model" },
 			{ key: "provider", label: "Provider" },
+			{ key: "harness", label: "Harness", format: (harness) => harnessLabel(resolveHarness({ harness })) },
 			{ key: "totalTokens", label: "Tokens", format: formatNumber },
 			{ key: "requestCount", label: "Requests", format: formatNumber },
 			...(showCost ? [{ key: "costTotal", label: "Cost", format: formatCost }] : []),
