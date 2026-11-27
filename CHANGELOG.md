@@ -4,6 +4,19 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.113 — 2026-11-27
+
+- **Composer runtime picker**: the local harness menu and model chip merge into one dialog — harness tabs preview above the model list, and picking a model commits harness, model and approval mode together, with offline, uninstalled and empty catalogs treated as first-class states (cloud-only Spaces keep the single cloud chip).
+- **Board playback and export**: `cohub boards export` renders scripted video about 30% faster by keeping the script sandbox in one browser process and running the next frame's scripts while the current frame uploads; Play and read-only views now hold up to 1.5s until on-screen scripts draw their first frame, so `auto` animations and the script clock no longer start under an empty item, with `ctx.env.ready` following and fonts served from the CDN at any size.
+- **Referral rewards on first payment**: rewards move off the message post-processing pipeline onto a signature-verified Talesofai `order.paid` webhook, paying out on the invitee's first real payment within a 30-day window and removing the per-cycle cap; `ReferralDashboard.quota`, `inCurrentCycle` and `rewardAvailable` are replaced by `summary.pending` and `reward.paymentWindowDays`.
+- **Native launch mark**: the splash tile collapses onto the C, which closes into an O and grows woven rings until the page is ready, then opens into a circular window onto the page — with a slow-start wave, an offline unwoven drift, a failed-start return to C, and a still mark under Reduce Motion.
+- **CLI Space paths from cwd**: `boards`, `spaces files`, `apps publish --file/--dir` and `desktop open` resolve path arguments from the current directory inside the Space workspace, while paths inside documents such as a Board's `src` stay relative to the Space root.
+
+### Bug Fixes
+
+- Board script imports infer their type from the extension, so `with { type: "json" }` and `with { type: "bytes" }` are optional and bundles whose bundler drops import attributes load as written, while a wrong type still fails.
+- Referral qualification no longer rides on the LLM-message post-process job, so billing and referral side effects can no longer block or duplicate each other.
+
 ## v2.112 — 2026-11-26
 
 - **One browser engine for Board scripts**: `cohub boards export`, `simulate` and `profile` run scripts in headless Chrome, the same sandboxed workers the Cohub app uses, instead of a Node VM. Without an installed Chrome, Chromium or Edge, Chrome's headless shell downloads once, the first time a Board with scripts, shaders or 3D needs it, and the SDK's Node script host is gone while `board/testing` runs scripts in the page.
