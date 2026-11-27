@@ -256,6 +256,16 @@ function focusSearchInputSoon() {
 	});
 }
 
+/** Focusing a search on touch pops the software keyboard, so only a mouse or keyboard does it. */
+function focusesSearch() {
+	return (
+		typeof window !== "undefined" &&
+		!("ontouchstart" in window) &&
+		!window.matchMedia("(pointer: coarse)").matches &&
+		navigator.maxTouchPoints === 0
+	);
+}
+
 function getDisplayName(item: ModelItem): string {
 	const name = item.model.name;
 	return typeof name === "string" && name.trim() ? name : item.id;
@@ -694,15 +704,7 @@ $effect(() => {
 		selectedIndex = 0;
 		navigationMode = "mouse";
 		closeThinkingMenu();
-		// Focus search input after render — skip on mobile to avoid keyboard popup
-		const isMobile =
-			typeof window !== "undefined" &&
-			("ontouchstart" in window ||
-				window.matchMedia("(pointer: coarse)").matches ||
-				navigator.maxTouchPoints > 0);
-		if (!isMobile) {
-			focusSearchInputSoon();
-		}
+		if (focusesSearch()) focusSearchInputSoon();
 	}
 });
 
@@ -1002,7 +1004,7 @@ const hoverCardPos = $derived.by(() => {
 				class={`rounded px-3 py-1.5 font-medium transition-colors duration-100 ${activeTab === "chat" ? "bg-bg-surface text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-primary"}`}
 				onclick={() => {
 					activeTab = "chat";
-					focusSearchInputSoon();
+					if (focusesSearch()) focusSearchInputSoon();
 				}}
 			>
 				{m.model_selector_tab_chat({}, { locale })}
@@ -1013,6 +1015,7 @@ const hoverCardPos = $derived.by(() => {
 				onclick={() => {
 					activeTab = "generation";
 					onGenerationTabOpen?.();
+					if (focusesSearch()) focusSearchInputSoon();
 				}}
 			>
 				{m.model_selector_tab_generation({}, { locale })}
@@ -1227,6 +1230,7 @@ const hoverCardPos = $derived.by(() => {
 
 			<div class="mt-3">
 				<input
+					data-model-selector-search="true"
 					type="text"
 					placeholder={m.model_selector_generation_search({}, { locale })}
 					aria-label={m.model_selector_generation_search({}, { locale })}

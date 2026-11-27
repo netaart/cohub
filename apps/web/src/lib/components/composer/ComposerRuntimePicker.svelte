@@ -241,7 +241,7 @@ function navigate(event: KeyboardEvent) {
 </script>
 
 <ComposerModelTrigger bind:element={trigger} {label} {meta} keepMetaVisible {ariaLabel} {disabled} expanded={open} onclick={() => { open = true; }}>
-	{#snippet leading()}{#if runtime.local}<HarnessIcon {harness} size={14} />{/if}{/snippet}
+	{#snippet leading()}{#if harness !== "cohub"}<HarnessIcon {harness} size={14} />{/if}{/snippet}
 	{#snippet trailing()}
 		{#if shownApproval}
 			{@const Icon = approvalIcons[shownApproval]}
