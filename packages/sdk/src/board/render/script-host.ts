@@ -28,7 +28,7 @@ import type { ScriptRuntimeInput, ScriptRuntimeInputDelta } from "./script-runti
 
 export type { BoardScriptFont } from "./script-sandbox.js";
 
-type Graph = { key: string; sources: BoardScriptSources };
+type Graph = { key: string; sources: BoardScriptSources; drawOnly: boolean };
 
 type Entry = {
   id: string;
@@ -66,6 +66,7 @@ type Entry = {
   tick: number;
   visible: boolean;
   draw: boolean;
+  drawOnly: boolean;
   scale: number;
   calledAt?: number;
 };
@@ -136,6 +137,13 @@ const NO_BOX = { width: 0, height: 0 };
 const OFFSCREEN_FRAME_RATE = 4;
 const CALL_QUIET_MS = 1_000;
 
+// Without setup, shaders or bend a script can only draw its own box.
+const drawsOnly = (exports: readonly string[] | undefined) =>
+  Boolean(exports && !exports.some((name) => name === "default" || name === "shader" || name === "bend" || name === "*"));
+
+const exportScale = (demand: number, edge: number) =>
+  Math.min(2 ** (Math.ceil(Math.log2(Math.max(demand, 1 / 64)) * 4 - 1e-6) / 4), 2048 / Math.max(1, edge));
+
 const framesOf = (events: readonly BoardScriptEvent[]): Transferable[] =>
   events.flatMap((event) => (event.type === "browser:video" ? [(event.data as { frame: ImageBitmap }).frame] : []));
 
@@ -162,6 +170,7 @@ export type BrowserBoardScriptHost = BoardScriptHost & {
   snapshot(id: string): Promise<BoardScriptSnapshot | null>;
   clock(id: string): number;
   settled(id: string): boolean;
+  waiting(): boolean;
   restore(id: string, snapshot: BoardScriptSnapshot): void;
   fault(id: string, message: string): void;
   restart(id: string): void;
@@ -256,7 +265,9 @@ export function createBoardScriptHost(
   let settledAt = 0;
   let resolutionTimer: ReturnType<typeof setTimeout> | undefined;
   const moving = (entry: Entry) => Boolean(entry.output?.updating || (entry.output?.animated && entry.output.draws !== false && entry.draw));
-  const needsTick = (entry: Entry) => !entry.error && brokerReady && entry.graph !== null && !entry.pending && (entry.dirty || moving(entry));
+  let opening = false;
+  const asleep = (entry: Entry) => entry.drawOnly && !entry.sent && !entry.visible && (Boolean(options.export) || opening);
+  const needsTick = (entry: Entry) => !entry.error && brokerReady && entry.graph !== null && !entry.pending && !asleep(entry) && (entry.dirty || moving(entry));
   let syncedAt = 0;
   const retiredTextures = new Set<BoardBitmapTexture>();
   let retirementFrame = 0;
@@ -333,7 +344,7 @@ export function createBoardScriptHost(
       };
       loading = loadBoardScriptSources(src, { module: read(modules), asset: read(assets) }).then((sources) => {
         unsent.set(key, sources);
-        return { key, sources };
+        return { key, sources, drawOnly: drawsOnly(sources[src]?.exports) };
       });
       graphs.set(src, loading);
       void loading.catch(() => {
@@ -505,7 +516,11 @@ export function createBoardScriptHost(
       entries.get(id)?.output !== null && entries.get(id)?.output !== undefined,
     settled: (id) => {
       const entry = entries.get(id);
-      return Boolean(entry?.output && !entry.pending && !entry.dirty && !entry.answering.size);
+      return Boolean(entry && (asleep(entry) || (entry.output && !entry.pending && !entry.dirty && !entry.answering.size)));
+    },
+    waiting: () => {
+      for (const entry of entries.values()) if (entry.drawOnly && !entry.sent && !entry.error) return true;
+      return false;
     },
     frame: (item) => entries.get(item.id)?.texture.current ?? null,
     error: (id) => entries.get(id)?.error ?? (limited.has(id) ? `A Board runs at most ${BOARD_SCRIPT_INSTANCE_LIMIT} scripts.` : null),
@@ -578,6 +593,13 @@ export function createBoardScriptHost(
         clearTimeout(resolutionTimer);
         if (!first) resolutionTimer = setTimeout(schedule, 120);
       }
+      opening = false;
+      if (!options.export)
+        for (const entry of entries.values())
+          if (entry.item && entry.visible && !entry.output && !entry.error) {
+            opening = true;
+            break;
+          }
       const env = readEnv();
       const alive = new Set<string>();
       const liveFocusTargets = new Set<string>();
@@ -628,6 +650,7 @@ export function createBoardScriptHost(
             tick: -1,
             visible: true,
             draw: false,
+            drawOnly: false,
             scale: 0,
           };
           entries.set(id, entry);
@@ -644,6 +667,7 @@ export function createBoardScriptHost(
               if (disposed || entries.get(id) !== current) return;
               clearTimeout(current.timer);
               current.graph = graph.key;
+              current.drawOnly = graph.drawOnly;
               options.onFrame();
             },
             (error: unknown) => {
@@ -658,7 +682,7 @@ export function createBoardScriptHost(
         const visible = !item || !visibleIds || visibleIds.has(id);
         if (entry.visible !== visible) {
           entry.visible = visible;
-          if (visible) entry.dirty = true;
+          if (visible && !options.export) entry.dirty = true;
         }
         const shaded = Boolean(options.shaders && entry.output?.shader);
         const draw = Boolean(item && !shaded && (options.export || (visible && (options.isMaterialized?.(id) ?? true))));
@@ -672,7 +696,7 @@ export function createBoardScriptHost(
         const scale = entry.output?.pixelated
           ? boardBitmapResolution(box.width, box.height, 1)
           : options.export
-            ? Math.min(2, 2048 / Math.max(1, box.width, box.height))
+            ? exportScale(camera.zoom * Math.max(1, itemScale), Math.max(box.width, box.height))
             : boardBitmapResolution(box.width, box.height,
                 options.scale?.() ?? (now < settledAt && entry.scale > 0 ? entry.scale : camera.zoom * getBoardResolution() * itemScale), entry.scale);
         if (scale !== entry.scale) {
@@ -701,7 +725,7 @@ export function createBoardScriptHost(
             }
           }
         }
-        if (!brokerReady || !entry.graph || entry.pending) continue;
+        if (!brokerReady || !entry.graph || entry.pending || asleep(entry)) continue;
         const elapsed = entry.script.time ?? time - entry.startedAt;
         if (elapsed < entry.elapsed && entry.output?.updating) {
           restored.delete(id);
@@ -709,7 +733,7 @@ export function createBoardScriptHost(
           options.onFrame();
           continue;
         }
-        const rate = entry.visible || !selfContained(entry, now) ? entry.output?.frameRate : Math.min(entry.output?.frameRate ?? OFFSCREEN_FRAME_RATE, OFFSCREEN_FRAME_RATE);
+        const rate = entry.visible || options.export || !selfContained(entry, now) ? entry.output?.frameRate : Math.min(entry.output?.frameRate ?? OFFSCREEN_FRAME_RATE, OFFSCREEN_FRAME_RATE);
         const tick = rate ? Math.floor((elapsed * rate) / 1000) : elapsed;
         if (!entry.dirty && (!moving(entry) || entry.tick === tick)) continue;
         entry.pending = true;

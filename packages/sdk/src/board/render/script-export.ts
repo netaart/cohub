@@ -1,6 +1,8 @@
 import type { BoardDocument } from "@cohub/protocol";
 import { BOARD_SCRIPT_HISTORY_MS, boardScriptParamsKey } from "../model/animation.js";
-import { buildBoardScene } from "../model/scene.js";
+import { boardDocumentUsesDepth } from "../model/depth.js";
+import { planBoardExport } from "../model/export-plan.js";
+import { type BoardScene, buildBoardScene } from "../model/scene.js";
 import { BOARD_SCRIPT_EXPORT_CALLS } from "../model/script-calls.js";
 import { composeBoardScriptCamera, composeBoardScriptItems } from "../model/script-scene.js";
 import type {
@@ -11,6 +13,7 @@ import type {
   BoardScriptView,
 } from "../model/script.js";
 import { boardScriptAttachments } from "../model/script-index.js";
+import { boardViewRect, isBoardViewLevel } from "../model/view-camera.js";
 import { BOARD_SCRIPT_EMIT_DEPTH, BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit, boardScriptModelsLoaded, createBoardScriptOutbox } from "../model/script-events.js";
 import { type BoardScriptInputLog, boardScriptInputsBetween } from "../model/script-senses.js";
 import { type BoardScriptFiles, type BoardScriptHostOptions, type BrowserBoardScriptHost, createBoardScriptHost } from "./script-host.js";
@@ -34,8 +37,25 @@ type Run = {
   greeted: Map<string, BoardScriptEvent[]>;
   last: Map<string, string>;
   inputsAt: number;
+  area: BoardScriptView | null;
   wake(): void;
 };
+
+function shownItems(document: BoardDocument, scene: BoardScene, area: BoardScriptView | null): () => ReadonlySet<string> | null {
+  if (!area || !isBoardViewLevel(area.camera) || boardDocumentUsesDepth(document)) return () => null;
+  let shown: ReadonlySet<string> | undefined;
+  return () => {
+    shown ??= new Set(planBoardExport({
+      scene,
+      region: { kind: "rect", rect: boardViewRect(area.camera, area) },
+      scale: 1,
+      padding: 0,
+      maxEdge: Number.POSITIVE_INFINITY,
+      maxPixels: Number.POSITIVE_INFINITY,
+    })?.items.map((item) => item.id));
+    return shown;
+  };
+}
 
 export function createBrowserBoardScriptExport(
   files: BoardScriptFiles,
@@ -71,6 +91,7 @@ export function createBrowserBoardScriptExport(
       greeted: new Map(),
       last,
       inputsAt: -1,
+      area: null,
       wake: () => {},
       host: createBoardScriptHost({
         host: element,
@@ -123,8 +144,9 @@ export function createBrowserBoardScriptExport(
   function settle(current: Run, document: BoardDocument, time: number, view?: BoardScriptView): Promise<void> {
     current.time = time;
     current.document = document;
-    const { host } = current;
+    const { host, area, outputs } = current;
     const scene = buildBoardScene(document);
+    const shown = shownItems(document, scene, area);
     const ids = boardScriptAttachments(document, options.env?.mode ?? "export").map(({ id }) => id);
     current.ranks.clear();
     for (const [index, id] of ids.entries()) current.ranks.set(id, index);
@@ -150,7 +172,10 @@ export function createBrowserBoardScriptExport(
       const sync = () => {
         queued = false;
         try {
-          host.sync(document, scene, { x: 0, y: 0, zoom: 1 }, time, false);
+          // Scripts moving the camera or items change what the view shows, so then all run, at 2× or more.
+          const moving = [...outputs.values()].some((output) => output.camera || Object.keys(output.patches).length > 0);
+          const camera = area && !moving ? area.camera : { x: 0, y: 0, zoom: Math.max(2, area?.camera.zoom ?? 0) };
+          host.sync(document, scene, camera, time, false, moving || !host.waiting() ? null : shown());
           if (viewKey && !viewed) {
             viewed = true;
             for (const id of ids) {
@@ -220,6 +245,7 @@ export function createBrowserBoardScriptExport(
       const fresh = !run;
       const current = run ?? start();
       run = current;
+      current.area = view ?? null;
       const { host, outputs } = current;
       if (options.documentAt) {
         let before = { at: current.time, document: options.documentAt(current.time) };
@@ -267,11 +293,11 @@ export async function prepareBrowserBoardScripts(
   time: number,
   files: BoardScriptFiles,
   snapshots?: Readonly<Record<string, BoardScriptSnapshot>>,
-  options: { shaders?: boolean; documentAt?: (time: number) => BoardDocument; inputs?: BoardScriptInputLog; fonts?: BoardScriptHostOptions["fonts"] } = {},
+  { view, ...options }: { view?: BoardScriptView; shaders?: boolean; documentAt?: (time: number) => BoardDocument; inputs?: BoardScriptInputLog; fonts?: BoardScriptHostOptions["fonts"] } = {},
 ): Promise<{ host: BoardScriptHost; dispose(): void }> {
   const session = createBrowserBoardScriptExport(files, { snapshots, ...options });
   try {
-    return { host: await session.at(document, time), dispose: session.dispose };
+    return { host: await session.at(document, time, view), dispose: session.dispose };
   } catch (error) {
     session.dispose();
     throw error;

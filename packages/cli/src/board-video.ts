@@ -7,8 +7,8 @@ import { type BoardMediaFiles, boardAudioMix } from "./board-media-export.js";
 export type BoardVideoFormat = "mp4" | "webm";
 
 const CODEC: Record<BoardVideoFormat, { video: string[]; audio: string[]; container: string[] }> = {
-  mp4: { video: ["-c:v", "libx264", "-pix_fmt", "yuv420p"], audio: ["-c:a", "aac"], container: ["-movflags", "+faststart", "-f", "mp4"] },
-  webm: { video: ["-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-row-mt", "1"], audio: ["-c:a", "libopus"], container: ["-f", "webm"] },
+  mp4: { video: ["-c:v", "libx264", "-preset", "superfast", "-pix_fmt", "yuv420p"], audio: ["-c:a", "aac"], container: ["-movflags", "+faststart", "-f", "mp4"] },
+  webm: { video: ["-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-row-mt", "1", "-deadline", "realtime", "-cpu-used", "8"], audio: ["-c:a", "libopus"], container: ["-f", "webm"] },
 };
 
 export async function checkFfmpeg(signal?: AbortSignal): Promise<void> {

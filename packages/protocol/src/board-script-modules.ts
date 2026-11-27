@@ -14,6 +14,7 @@ export type BoardScriptSource = {
     dynamic: boolean;
     attributes?: [number, number];
   }>;
+  exports?: string[];
   bytes?: Uint8Array;
 };
 export type BoardScriptSources = Record<string, BoardScriptSource>;
@@ -151,7 +152,7 @@ export async function loadBoardScriptSources(src: string, readers: BoardScriptRe
         sources[path] = { code, imports: [] };
         return;
       }
-      const [imports] = parse(code, path);
+      const [imports, exported] = parse(code, path);
       const resolved: BoardScriptSource["imports"] = [];
       for (const entry of imports) {
         if (entry.type === "import-meta")
@@ -179,7 +180,8 @@ export async function loadBoardScriptSources(src: string, readers: BoardScriptRe
       edges.set(path, dependencies);
       if (dependencies.some((dependency) => importsReach(dependency, path))) throw new Error(`Circular module dependency: ${path}`);
       await Promise.all(dependencies.map(load));
-      sources[path] = { code, imports: resolved };
+      const names = exported.map((entry) => (entry.type !== "reexport-all" && /^[\w$]+$/.test(entry.name) ? entry.name : "*"));
+      sources[path] = { code, imports: resolved, exports: names };
     })();
     loading.set(path, promise);
     return promise;

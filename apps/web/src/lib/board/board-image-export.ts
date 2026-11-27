@@ -8,6 +8,7 @@ import {
 	type BoardExportRegion,
 	boardAnimatesScriptParams,
 	boardDocumentUsesDepth,
+	boardExportView,
 	hasBoardScripts,
 	isBoardViewLevel,
 	selectBoardExportAssets,
@@ -213,6 +214,9 @@ export async function exportBoardImage(
 		sampler && exportOptions.at
 			? sampler.at(exportOptions.at.time).document
 			: document;
+	const planned = hasScripts
+		? prepareBoardExport(document, { ...exportOptions, sampler, region })
+		: null;
 	const scripts =
 		hasScripts && bridge.scriptFiles
 			? await prepareBrowserBoardScripts(
@@ -222,6 +226,9 @@ export async function exportBoardImage(
 					exportOptions.at ? undefined : await bridge.snapshotScripts?.(),
 					{
 						fonts: boardScriptFonts,
+						...(planned
+							? { view: boardExportView(planned.plan, planned.camera?.view) }
+							: {}),
 						...(sampler && boardAnimatesScriptParams(document)
 							? { documentAt: (time: number) => sampler.at(time).document }
 							: {}),

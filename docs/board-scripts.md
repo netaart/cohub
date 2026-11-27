@@ -404,7 +404,9 @@ for the model objects in view to load and the scripts in view to draw their firs
 meanwhile the script clock, `onFrame` and `auto` animations hold at their start. It turns
 true, with an `envchange`, once they are done, and is always true while editing and in
 exports. Do one-time heavy work, such as building textures, at module top level or in
-setup rather than on a later frame, so it lands inside this wait.
+setup rather than on a later frame, so it lands inside this wait. Module top level runs
+once for each instance, so a module placed many times repeats it: keep it to what the
+instance draws.
 
 `boards simulate` reports its `--mode` (a tool step switches between `edit` and `play`),
 its `--pointer`, the orientation of its `--viewport`, and every source `on`; exports
@@ -884,7 +886,8 @@ The runtime and browser host expose snapshot/restore interfaces. `await stage.sn
 captures state on demand; frame messages do not stream complete state. Complete interaction
 recording, shared simulation sessions and historical source pinning are separate
 follow-up work. Source files are resolved from their current
-Space contents. Export times are limited to ten minutes and textures to a 2048 px edge.
+Space contents. Export times are limited to ten minutes. Exports draw scripts at the
+output's resolution, up to a 2048 px edge.
 
 Scripts run only in the browser's sandbox, never in Node. A Board uses one opaque
 sandboxed iframe hosting a pool of up to four workers shared by all its instances;
@@ -895,7 +898,9 @@ security boundary between their authors, who can edit the Board anyway.
 A worker that stops answering is replaced: the instance it was running fails and
 the others on it start over. A Board runs at most 1000 instances. User
 code never runs in the broker iframe. Offscreen Canvas content stops rasterizing;
-behavior continues so visibility does not change simulation results.
+behavior continues so visibility does not change simulation results. A script without
+setup, `shader` or `bend` can only draw its own box, so it starts once that shows: live,
+after the view in sight has drawn; in exports and profiles, once it enters the exported view.
 
 ## Test and simulate
 
