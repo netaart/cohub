@@ -1,5 +1,18 @@
 # @neta-art/cohub
 
+## 13.32.0
+
+### Minor Changes
+
+- 0524f02: Board script imports take their type from the extension, so `with { type: "json" }` and `with { type: "bytes" }` are optional and bundles whose bundler drops import attributes load as written; a wrong type still fails.
+- d04eef0: Referral rewards now trigger on the invitee's first payment instead of their first conversation. Invitees have 30 days after joining to make it, and every qualifying payment is rewarded: the 5-per-cycle limit is gone.
+  
+  `ReferralDashboard.quota`, `ReferralListItem.inCurrentCycle` and `PublicReferral.rewardAvailable` are removed; read `summary.pending` for invitees still awaiting their first payment and `reward.paymentWindowDays` for the window. `cohub referrals` prints `Awaiting first payment` instead of the cycle line.
+
+### Patch Changes
+
+- e9f56b3: Play and read-only Board views that just opened also wait, up to the same 1.5 s, for the scripts in view to draw their first frame, so `auto` animations and the script clock no longer start under an empty item; `ctx.env.ready` turns true once they have.
+
 ## 13.31.0
 
 ### Minor Changes
