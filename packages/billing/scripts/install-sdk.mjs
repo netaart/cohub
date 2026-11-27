@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const SDK = {
   name: "@talesofai-billing/sdk",
-  version: "1.31.0",
-  integrity: "sha512-aXm+Kcz2G8A7XrpoTIhvmLlvvW7MgmDeUV2HoL6DJEr1YF+XqlkSQqrLhcUyA9f7XblJxZGTc1aRdfAn45vUOg==",
+  version: "2.1.0",
+  integrity: "sha512-9+lyx97T9d1dUYBeEvfSfl7wLW4aAkJpMmauUs8Vct/r1ZFg3icpdAnxGn0qMTaq+uo+bijVAKIweg5ruGGs2w==",
 };
 const REGISTRY = "//git.talesofai.com/api/packages/talesofai/npm/";
 const TARBALL = `https:${REGISTRY}%40talesofai-billing%2Fsdk/-/${SDK.version}/sdk-${SDK.version}.tgz`;

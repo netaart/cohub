@@ -3363,12 +3363,20 @@ export function createBusinessBillingOperations(input: {
   };
 }
 
-/** Real-money paid orders only, including subscription charges: redemptions, manual grants and fully discounted orders are excluded. */
+const PAID_ORDER_SOURCES: readonly string[] = ["checkout", "provider_payment", "iap"];
+const PAID_PERIOD_SOURCES: readonly string[] = ["provider", "iap"];
+
+/** Real-money payments only: redemptions, manual grants, fully discounted charges and IAP sandbox purchases are excluded. */
 function webhookPayment(event: VerifiedOutboundWebhookEvent, businessKey: string): BillingWebhookEvent["payment"] {
-  if (event.type !== "order.paid" || event.business.key !== businessKey) return null;
-  const order = event.data.object;
-  if (!["checkout", "provider_payment"].includes(order.fulfillment_source) || order.paid_amount_snapshot <= 0) return null;
-  return { userId: event.customer.external_user_id, paidAt: new Date(order.paid_at) };
+  if (event.business.key !== businessKey) return null;
+  const payment =
+    event.type === "order.paid"
+      ? PAID_ORDER_SOURCES.includes(event.data.object.fulfillment_source) && !event.data.object.iap?.sandbox && event.data.object
+      : event.type === "subscription.activated"
+        ? PAID_PERIOD_SOURCES.includes(event.data.paid_period.fulfillment_source) && !event.data.object.iap?.sandbox && event.data.paid_period
+        : null;
+  if (!payment || payment.paid_amount_snapshot <= 0) return null;
+  return { userId: event.customer.external_user_id, paidAt: new Date(payment.paid_at) };
 }
 
 export function parseWebhook(input: { rawBody: Uint8Array; headers: Headers; secret: string; businessKey: string }): BillingWebhookEvent {
