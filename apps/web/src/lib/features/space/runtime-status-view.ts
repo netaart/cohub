@@ -1,8 +1,4 @@
-import {
-	type HarnessKind,
-	LOCAL_HARNESSES,
-	type LocalHarness,
-} from "@cohub/protocol/runtime";
+import { LOCAL_HARNESSES, type LocalHarness } from "@cohub/protocol/runtime";
 import type { RuntimeStatus } from "@neta-art/cohub";
 
 /**
@@ -75,22 +71,21 @@ export function harnessModelCounts(
 
 export type HarnessAvailability = "ready" | "offline" | "missing";
 
-/** Every local Harness is listed so an offline Runtime or an uninstalled CLI reads as a state, not an absence. */
-export function harnessOptions(
-	available: readonly HarnessKind[],
+/** Every local Harness is listed, last reported first, so an offline Runtime or an uninstalled CLI reads as a state, not an absence. */
+export function localHarnessOptions(
+	available: readonly LocalHarness[],
 	online: boolean,
-): { harness: HarnessKind; availability: HarnessAvailability }[] {
-	const local = LOCAL_HARNESSES.map((harness) => ({
-		harness,
-		availability: (!online
-			? "offline"
-			: available.includes(harness)
-				? "ready"
-				: "missing") as HarnessAvailability,
-	}));
+): { harness: LocalHarness; availability: HarnessAvailability }[] {
+	const reported = LOCAL_HARNESSES.filter((harness) =>
+		available.includes(harness),
+	);
 	return [
-		{ harness: "cohub", availability: "ready" },
-		...local.filter((option) => option.availability === "ready"),
-		...local.filter((option) => option.availability !== "ready"),
+		...reported.map((harness) => ({
+			harness,
+			availability: (online ? "ready" : "offline") as HarnessAvailability,
+		})),
+		...LOCAL_HARNESSES.filter((harness) => !reported.includes(harness)).map(
+			(harness) => ({ harness, availability: "missing" as const }),
+		),
 	];
 }

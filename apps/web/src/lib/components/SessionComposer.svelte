@@ -1,10 +1,8 @@
 <script lang="ts">
-import type { ApprovalMode, ViewportContext } from "@cohub/protocol";
-import { type HarnessKind, harnessLabel } from "@cohub/protocol/runtime";
+import type { ViewportContext } from "@cohub/protocol";
 import type {
 	BillingConversionIntent,
 	PromptTemplateCatalogEntry,
-	RuntimeCapabilities,
 	SkillCatalogEntry,
 	VoiceInputClient,
 } from "@neta-art/cohub";
@@ -18,11 +16,11 @@ import {
 	X,
 } from "lucide-svelte";
 import { flushSync, onMount } from "svelte";
-import ComposerHarnessPicker from "#lib/components/composer/ComposerHarnessPicker.svelte";
 import ComposerModelTrigger from "#lib/components/composer/ComposerModelTrigger.svelte";
+import ComposerRuntimePicker from "#lib/components/composer/ComposerRuntimePicker.svelte";
 import ComposerSubmitButton from "#lib/components/composer/ComposerSubmitButton.svelte";
 import ComposerSurface from "#lib/components/composer/ComposerSurface.svelte";
-import ModelSelector from "#lib/components/ModelSelector.svelte";
+import type { ComposerRuntime } from "#lib/components/composer/runtime-picker.ts";
 import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
 import SessionChatQuickActions from "#lib/components/SessionChatQuickActions.svelte";
 import SlashCommandMenu, {
@@ -96,12 +94,6 @@ import {
 	spaceMentionTriggerKey,
 	type TextCaret,
 } from "#lib/mentions/space-trigger.ts";
-import {
-	formatThinkingLevelShort,
-	isFastServiceTier,
-	type LocalModelSelection,
-	toLocalModelCatalog,
-} from "#lib/model-catalog.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { sdk } from "#lib/sdk.ts";
 import { confirmSpaceAddress } from "#lib/space-address-resolver.ts";
@@ -118,8 +110,6 @@ type SelectedModel = {
 	name?: string;
 };
 
-type Harness = HarnessKind;
-
 type Props = {
 	value: string;
 	mode?: ComposerMode;
@@ -135,22 +125,7 @@ type Props = {
 	attachments?: ComposerAttachment[];
 	viewportContexts?: ViewportContext[];
 	currentModel?: SelectedModel | null;
-	harness?: Harness;
-	onharnesschange?: (harness: Harness) => void;
-	harnesses?: Harness[];
-	localRuntime?: boolean;
-	/** Whether the Space's local Runtime is connected; local harnesses are unavailable when false. */
-	runtimeOnline?: boolean;
-	onharnessopen?: () => void;
-	onlocalmodelopen?: () => void;
-	localModels?: RuntimeCapabilities["models"];
-	localModel?: LocalModelSelection | null;
-	onlocalmodelchange?: (model: LocalModelSelection) => void;
-	/** Approval modes the local Harness enforces; empty hides the choice. */
-	approvalModes?: ApprovalMode[];
-	/** Selected approval mode; `null` leaves the Harness's own settings. */
-	approvalMode?: ApprovalMode | null;
-	onapprovalmodechange?: (mode: ApprovalMode) => void;
+	runtime?: ComposerRuntime;
 	/** Compact thinking level suffix; null/empty hides. */
 	thinkingLevelLabel?: string | null;
 	/** Compact generation-policy suffix; null/empty hides (Auto). */
@@ -191,19 +166,7 @@ let {
 	attachments = [],
 	viewportContexts = [],
 	currentModel = null,
-	harness = "cohub",
-	onharnesschange,
-	harnesses = ["cohub"],
-	localRuntime = false,
-	runtimeOnline = true,
-	onharnessopen,
-	onlocalmodelopen,
-	localModels = [],
-	localModel = null,
-	onlocalmodelchange,
-	approvalModes = [],
-	approvalMode = null,
-	onapprovalmodechange,
+	runtime,
 	thinkingLevelLabel = null,
 	generationPolicyLabel = null,
 	pricingMeta = [],
@@ -233,45 +196,6 @@ const modeLabel = (item: ComposerMode) =>
 		: item === "create"
 			? m.composer_create({}, { locale })
 			: m.composer_note({}, { locale });
-
-let showLocalModelSelector = $state(false);
-const localModelCatalog = $derived(toLocalModelCatalog(localModels));
-const localModelTitle = $derived(
-	localModel?.name ?? localModel?.id ?? m.runtime_model({}, { locale }),
-);
-
-const localModelMeta = $derived(
-	[
-		localModel?.thinkingLevel
-			? formatThinkingLevelShort(localModel.thinkingLevel)
-			: null,
-		isFastServiceTier(
-			localModelCatalog.find(
-				(item) =>
-					item.provider === localModel?.provider && item.id === localModel?.id,
-			),
-			localModel?.serviceTier,
-		)
-			? m.model_selector_fast({}, { locale })
-			: null,
-	].filter((item): item is string => Boolean(item)),
-);
-
-/** The Fast switch reports a tier only when it changes; other picks keep the current one. */
-function selectLocalModel(
-	selected: Omit<LocalModelSelection, "serviceTier"> & {
-		serviceTier?: string | null;
-	},
-) {
-	const { serviceTier = localModel?.serviceTier, ...model } = selected;
-	onlocalmodelchange?.(serviceTier ? { ...model, serviceTier } : model);
-	showLocalModelSelector = false;
-}
-
-$effect(() => {
-	if (mode !== "agent" || harness === "cohub" || !runtimeOnline)
-		showLocalModelSelector = false;
-});
 
 let rootEl = $state<HTMLDivElement | null>(null);
 let surfaceEl = $state<HTMLElement | null>(null);
@@ -1730,29 +1654,8 @@ $effect(() => {
 								</div>
 							{/if}
 
-							{#if onharnesschange && mode === "agent" && (localRuntime || harnesses.length > 1 || harness !== "cohub")}
-								<ComposerHarnessPicker
-									value={harness}
-									available={harnesses}
-									online={runtimeOnline}
-									onchange={(next) => onharnesschange?.(next)}
-									{approvalModes}
-									{approvalMode}
-									onapprovalchange={onapprovalmodechange}
-									onopen={onharnessopen}
-									disabled={disabled || sending}
-								/>
-							{/if}
-							{#if mode === "agent" && harness !== "cohub"}
-								<ComposerModelTrigger
-									label={localModelTitle}
-									meta={localModelMeta}
-									keepMetaVisible
-									ariaLabel={m.runtime_model({}, { locale })}
-									expanded={showLocalModelSelector}
-									disabled={disabled || sending || !runtimeOnline}
-									onclick={() => { showLocalModelSelector = true; onlocalmodelopen?.(); }}
-								/>
+							{#if runtime && mode === "agent" && (runtime.local || runtime.harness !== "cohub")}
+								<ComposerRuntimePicker {runtime} disabled={disabled || sending} />
 							{/if}
 
 							{#if onModelSelect}
@@ -1820,18 +1723,6 @@ $effect(() => {
 		</ComposerSurface>
 	</div>
 </div>
-
-<ModelSelector
-	open={showLocalModelSelector}
-	onClose={() => { showLocalModelSelector = false; }}
-	onSelect={selectLocalModel}
-	showGeneration={false}
-	title={`${harnessLabel(harness)} · ${m.runtime_model({}, { locale })}`}
-	models={localModelCatalog}
-	currentModel={localModel}
-	currentThinkingLevel={localModel?.thinkingLevel ?? null}
-	currentServiceTier={localModel?.serviceTier ?? null}
-/>
 
 <style>
 	:global(html[data-composer-transition]) {

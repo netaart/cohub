@@ -1,9 +1,10 @@
 <script lang="ts">
 import { ChevronDown, LoaderCircle } from "lucide-svelte";
+import type { Snippet } from "svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 
-const {
+let {
 	label,
 	meta = [],
 	keepMetaVisible = false,
@@ -11,6 +12,9 @@ const {
 	disabled = false,
 	expanded,
 	loading = false,
+	leading,
+	trailing,
+	element = $bindable(null),
 	onclick,
 }: {
 	label: string;
@@ -21,6 +25,9 @@ const {
 	disabled?: boolean;
 	expanded?: boolean;
 	loading?: boolean;
+	leading?: Snippet;
+	trailing?: Snippet;
+	element?: HTMLButtonElement | null;
 	onclick: () => void;
 } = $props();
 
@@ -31,14 +38,17 @@ const effectiveAriaLabel = $derived(
 </script>
 
 <button
+	bind:this={element}
 	type="button"
 	class="group flex h-7 max-w-[min(100%,17rem)] items-center gap-1 overflow-hidden rounded-full border border-border-subtle px-2 text-[11px] leading-none text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-50"
 	{disabled}
 	aria-label={effectiveAriaLabel}
+	aria-haspopup="dialog"
 	aria-expanded={expanded}
 	{onclick}
 >
 	{#if loading}<LoaderCircle class="h-3 w-3 shrink-0 animate-spin" />{/if}
+	{@render leading?.()}
 	<span class="min-w-0 shrink truncate text-text-tertiary transition-colors group-hover:text-text-secondary">
 		{label}
 	</span>
@@ -50,5 +60,6 @@ const effectiveAriaLabel = $derived(
 			<span class={`min-w-0 truncate tabular-nums ${brand ? "text-brand" : ""}`}>{text}</span>
 		</span>
 	{/each}
+	{@render trailing?.()}
 	<ChevronDown class="h-3 w-3 shrink-0 opacity-40 transition-opacity group-hover:opacity-65" />
 </button>

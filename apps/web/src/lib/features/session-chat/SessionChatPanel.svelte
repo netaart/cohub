@@ -583,19 +583,7 @@ async function handleDraftDrop(event: DragEvent) {
 					onmodechange={host.setComposerMode}
 					viewportContexts={host.viewportContexts}
 					currentModel={host.composerMode === "create" ? host.activeGenerationModel : host.activeSessionModel}
-					harness={host.composerHarness}
-					onharnesschange={host.setComposerHarness}
-					harnesses={host.runtimeCatalog?.kind === "local" ? ["cohub", ...(host.runtimeCatalog.capabilities?.harnesses ?? [])] : ["cohub"]}
-					runtimeOnline={host.runtimeCatalog?.online ?? false}
-					onharnessopen={host.loadRuntimeCatalog}
-					onlocalmodelopen={host.refreshLocalModels}
-					localRuntime={host.runtimeCatalog?.kind === "local"}
-					localModels={host.runtimeCatalog?.capabilities?.models.filter((model) => model.harness === host.composerHarness) ?? []}
-					localModel={host.localModel}
-					onlocalmodelchange={host.setLocalModel}
-					approvalModes={host.approvalModes}
-					approvalMode={host.approvalMode}
-					onapprovalmodechange={host.setApprovalMode}
+					runtime={host.composerRuntime}
 					thinkingLevelLabel={host.composerMode === "agent" ? host.activeSessionThinkingLevelLabel : null}
 					generationPolicyLabel={host.composerMode === "agent" ? host.generationPolicyLabel : null}
 					pricingMeta={host.composerPricingMeta}

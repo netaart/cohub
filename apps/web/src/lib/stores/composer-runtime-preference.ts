@@ -6,7 +6,10 @@ import {
 	resolveHarness,
 } from "@cohub/protocol";
 import { encodeKeyPart, getCacheUserKey } from "#lib/cache/keys.ts";
-import type { LocalModelSelection } from "#lib/model-catalog.ts";
+import type {
+	LocalModelRequest,
+	LocalModelSelection,
+} from "#lib/model-catalog.ts";
 
 const STORAGE_PREFIX = "cohub:composer-runtime:v1";
 
@@ -64,14 +67,14 @@ export function readComposerRuntime(
 export function rememberComposerRuntime(
 	key: string,
 	harness: HarnessKind,
-	model?: LocalModelSelection,
+	model?: LocalModelRequest,
 ): ComposerRuntimePreference {
-	const models = readComposerRuntime(key)?.models ?? {};
-	const next: ComposerRuntimePreference = {
-		harness,
-		models:
-			harness !== "cohub" && model ? { ...models, [harness]: model } : models,
-	};
+	const models = { ...readComposerRuntime(key)?.models };
+	if (isLocalHarness(harness) && model) {
+		if (model.id === undefined) delete models[harness];
+		else models[harness] = model;
+	}
+	const next: ComposerRuntimePreference = { harness, models };
 	try {
 		localStorage.setItem(
 			key,

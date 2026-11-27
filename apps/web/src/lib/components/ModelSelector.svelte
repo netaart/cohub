@@ -6,6 +6,7 @@ import type {
 } from "@cohub/protocol/generation";
 import type { ModelStatusEntry } from "@cohub/protocol/model/status";
 import { Brain, Check, ChevronDown, Image, Zap } from "lucide-svelte";
+import { type Snippet, untrack } from "svelte";
 import { minuteClock } from "#lib/clock.svelte.ts";
 import Dialog from "#lib/components/Dialog.svelte";
 import GenerationCategoryIcon from "#lib/components/generation/GenerationCategoryIcon.svelte";
@@ -65,6 +66,10 @@ type Props = {
 	/** Local catalogs share search/selection, without Cloud generation policy. */
 	showGeneration?: boolean;
 	title?: string;
+	header?: Snippet;
+	footer?: Snippet;
+	catalogKey?: string;
+	empty?: Snippet;
 	onClose: () => void;
 	onSelect: (item: {
 		provider: string;
@@ -118,6 +123,10 @@ const {
 	open,
 	showGeneration = true,
 	title,
+	header,
+	footer,
+	catalogKey,
+	empty,
 	onClose,
 	onSelect,
 	models,
@@ -694,6 +703,15 @@ $effect(() => {
 	}
 });
 
+$effect(() => {
+	void catalogKey;
+	untrack(() => {
+		selectedIndex = 0;
+		closeThinkingMenu();
+		containerEl?.scrollTo({ top: 0 });
+	});
+});
+
 function moveSelection(delta: number) {
 	if (activeTab !== "chat") return;
 	if (filteredModels.length === 0) {
@@ -744,6 +762,13 @@ function handleNavigationKeydown(e: KeyboardEvent) {
 		const selected = filteredModels[selectedIndex];
 		onSelect({ provider: selected.provider, id: selected.id });
 	}
+}
+
+function closeOnEscape(e: KeyboardEvent) {
+	if (e.key !== "Escape" || e.defaultPrevented || isComposingKeyboardEvent(e))
+		return;
+	e.preventDefault();
+	onClose();
 }
 
 function handleKeyDown(e: KeyboardEvent) {
@@ -962,7 +987,10 @@ const hoverCardPos = $derived.by(() => {
 	{/if}
 {/snippet}
 
-<Dialog {open} {onClose} title={title ?? m.model_selector_title({}, { locale })} maxWidth="540px">
+<Dialog {open} {onClose} title={title ?? m.model_selector_title({}, { locale })} maxWidth="540px" height={header ? "min(70vh, 480px)" : undefined} scrollable={!header} {footer}>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class={header ? "flex h-full flex-col" : "contents"} onkeydown={closeOnEscape}>
+	{@render header?.()}
 	{#if showGeneration}
 	<div class="border-b border-border-subtle/70 px-3 py-2">
 		<div class="inline-flex rounded-md bg-bg-subtle/70 p-0.5 text-[12px]">
@@ -991,7 +1019,7 @@ const hoverCardPos = $derived.by(() => {
 
 	{/if}
 	{#if activeTab === "chat" || !showGeneration}
-		<div class="border-b border-border-subtle/70 px-3 py-2">
+		<div class:hidden={empty && models.length === 0} class="shrink-0 border-b border-border-subtle/70 px-3 py-2">
 			<input
 				bind:this={searchInputEl}
 				data-model-selector-search="true"
@@ -1003,8 +1031,10 @@ const hoverCardPos = $derived.by(() => {
 			/>
 		</div>
 
-		<div bind:this={containerEl} class="flex-1 overflow-y-auto py-1">
-			{#if filteredModels.length === 0}
+		<div bind:this={containerEl} class="min-h-0 flex-1 overflow-y-auto py-1">
+			{#if empty && models.length === 0}
+				{@render empty()}
+			{:else if filteredModels.length === 0}
 				<div class="px-4 py-8 text-center text-[13px] text-text-tertiary">
 					{searchQuery
 						? m.model_selector_no_matching({}, { locale })
@@ -1343,6 +1373,7 @@ const hoverCardPos = $derived.by(() => {
 			{/if}
 		</div>
 	{/if}
+	</div>
 </Dialog>
 
 {#if hoveredModelId && hoverCardPos}

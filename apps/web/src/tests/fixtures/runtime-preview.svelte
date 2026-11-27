@@ -7,6 +7,7 @@ import {
 	type HarnessKind,
 	type RuntimeStatus,
 } from "@neta-art/cohub";
+import type { ComposerRuntime } from "#lib/components/composer/runtime-picker.ts";
 import SessionComposer from "#lib/components/SessionComposer.svelte";
 import SessionApprovals from "#lib/features/session-chat/SessionApprovals.svelte";
 import SpaceWorkspaceHeader, {
@@ -89,11 +90,18 @@ type PreviewState = "ready" | "limited" | "offline" | "unknown";
 let previewState = $state<PreviewState>("ready");
 let input = $state("");
 let harness = $state<HarnessKind>("pi");
-let model = $state<LocalModelSelection | null>(null);
-let approvalMode = $state<ApprovalMode | null>(null);
-const localModels = $derived(models.filter((item) => item.harness === harness));
+let chosenModels = $state<Record<string, LocalModelSelection>>({});
+let approvalModes = $state<Record<string, ApprovalMode>>({});
+const approvalMode = $derived(
+	harness === "cohub" ? null : (approvalModes[harness] ?? null),
+);
 // Mirrors the session host: the composer always shows a resolved model and level.
-const localModel = $derived(resolveLocalModel(localModels, model));
+const modelFor = (next: string) =>
+	resolveLocalModel(
+		models.filter((item) => item.harness === next),
+		chosenModels[next] ?? null,
+	);
+const localModel = $derived(harness === "cohub" ? null : modelFor(harness));
 let status = $state<RuntimeStatus>(makeStatus());
 function makeStatus(): RuntimeStatus {
 	return {
@@ -182,6 +190,40 @@ const context: SpaceWorkspaceHeaderContext = {
 	spaceIdentity: null,
 };
 const noop = () => {};
+const runtime: ComposerRuntime = {
+	get harness() {
+		return harness;
+	},
+	get model() {
+		return localModel;
+	},
+	get approvalMode() {
+		return approvalMode;
+	},
+	local: true,
+	get online() {
+		return status.online;
+	},
+	get harnesses() {
+		return status.capabilities?.harnesses ?? [];
+	},
+	get models() {
+		return status.capabilities?.models ?? [];
+	},
+	modelFor,
+	approvalFor: (next) => ({
+		modes: status.capabilities?.approvalModes?.[next] ?? [],
+		mode: approvalModes[next] ?? null,
+	}),
+	refresh: noop,
+	select: (next, model) => {
+		harness = next;
+		if (model) chosenModels = { ...chosenModels, [next]: model };
+	},
+	setApproval: (next, mode) => {
+		approvalModes = { ...approvalModes, [next]: mode };
+	},
+};
 </script>
 
 <svelte:head><title>Runtime UI verification</title></svelte:head>
@@ -198,6 +240,6 @@ const noop = () => {};
 		<output aria-label="Approval selection">{approvalMode ?? "unset"}</output>
 		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
 		<SessionApprovals {spaceId} sessionId="55555555-5555-4555-8555-555555555555" harnessOf={() => (harness === "cohub" ? "codex" : harness)} />
-		<SessionComposer bind:value={input} {harness} harnesses={["cohub", ...(status.capabilities?.harnesses ?? [])]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} approvalModes={harness === "cohub" ? [] : (status.capabilities?.approvalModes?.[harness] ?? [])} approvalMode={harness === "cohub" ? null : approvalMode} onapprovalmodechange={(next) => { approvalMode = next; }} onsubmit={noop} onpickattachment={noop} />
+		<SessionComposer bind:value={input} {runtime} onsubmit={noop} onpickattachment={noop} />
 	</main>
 </div>

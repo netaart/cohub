@@ -25,6 +25,7 @@ const {
 	mobile = true,
 	maxWidth = "480px",
 	maxHeight = "70vh",
+	height,
 	scrollable = true,
 }: {
 	open: boolean;
@@ -35,6 +36,7 @@ const {
 	mobile?: boolean;
 	maxWidth?: string;
 	maxHeight?: string;
+	height?: string;
 	/** Keep the dialog body fixed when the content provides its own layout. */
 	scrollable?: boolean;
 } = $props();
@@ -66,18 +68,18 @@ const sheet = $derived(mobile && useCompactShell());
       style="max-width: {sheet ? '480px' : maxWidth}"
       transition:overlay={{ kind: sheet ? "sheet" : "pop" }}
     >
-      <div class="flex flex-col" class:h-full={!sheet} style="max-height: {maxHeight}">
+      <div class="flex flex-col" class:h-full={!sheet} style:height style:max-height={maxHeight}>
         {#if title}
           <div class="h-9 flex items-center justify-between px-3 border-b border-border-subtle text-[10px] font-medium uppercase tracking-wider text-text-tertiary select-none shrink-0">
             <span>{title}</span>
             {@render closeButton()}
           </div>
         {/if}
-        <div class="min-h-0 flex-1" class:pb-safe={sheet} class:overflow-y-auto={scrollable} class:overflow-hidden={!scrollable}>
+        <div class="min-h-0 flex-1" class:pb-safe={sheet && !footer} class:overflow-y-auto={scrollable} class:overflow-hidden={!scrollable}>
           {@render children()}
         </div>
         {#if footer}
-          {@render footer()}
+          <div class="shrink-0" class:pb-safe={sheet}>{@render footer()}</div>
         {/if}
       </div>
     </div>

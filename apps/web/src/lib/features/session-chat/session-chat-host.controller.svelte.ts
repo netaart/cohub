@@ -7,6 +7,8 @@ import {
 	buildFileReferencesText,
 	buildImageReferencesText,
 	buildViewportContentBlock,
+	isLocalHarness,
+	type LocalHarness,
 } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { SpaceFsChangedPayload } from "@cohub/protocol/fs";
@@ -34,6 +36,7 @@ import { sessionTurnsRepo } from "#lib/cache/repositories/session-turns-repo.ts"
 import { shouldRefreshAgentCatalogs } from "#lib/cache/space-fs-invalidation.ts";
 import { minuteClock } from "#lib/clock.svelte.ts";
 import { noteViewerActivity } from "#lib/command-palette/palette-overview.ts";
+import type { ComposerRuntime } from "#lib/components/composer/runtime-picker.ts";
 import {
 	buildComposerTextContentBlock,
 	type ComposerFileAttachment,
@@ -61,6 +64,7 @@ import {
 	formatThinkingLevelShort,
 	getRequestedThinkingLevel,
 	getSupportedThinkingLevels,
+	type LocalModelRequest,
 	type LocalModelSelection,
 	type ModelThinkingLevel,
 	resolveLocalModel,
@@ -395,7 +399,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		model: null,
 	});
 	let harnessBySession = $state<Record<string, HarnessKind>>({});
-	let localModelsBySession = $state<Record<string, LocalModelSelection>>({});
+	let localModelsBySession = $state<Record<string, LocalModelRequest>>({});
 	const harnessSelectionKey = $derived(
 		`${spaceId}:${activeSessionId ?? "draft"}`,
 	);
@@ -428,47 +432,61 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	// Local Turns always name a model and, when the model has a choice, a level:
 	// a Harness keeps a requested level for later Turns, so leaving it out would
 	// not mean its default.
-	const localModel = $derived.by(() => {
-		if (composerHarness === "cohub") return null;
+	function localModelFor(harness: LocalHarness) {
 		const requested =
-			localModelsBySession[`${harnessSelectionKey}:${composerHarness}`] ??
+			localModelsBySession[`${harnessSelectionKey}:${harness}`] ??
 			(activeSessionId
-				? resolveLocalModelFromTurns(composerAgentTurns, composerHarness)
-				: (rememberedRuntime?.models[composerHarness] ?? null));
+				? resolveLocalModelFromTurns(composerAgentTurns, harness)
+				: (rememberedRuntime?.models[harness] ?? null));
 		const models = runtimeCatalog?.capabilities?.models.filter(
-			(model) => model.harness === composerHarness,
+			(model) => model.harness === harness,
 		);
 		if (models) return resolveLocalModel(models, requested);
 		return requested?.id !== undefined ? requested : null;
-	});
+	}
+	const localModel = $derived(
+		isLocalHarness(composerHarness) ? localModelFor(composerHarness) : null,
+	);
 	// Unsent choices only: once sent, the Turn's own record is the source, so other clients' choices show.
 	let approvalChoices = $state<Record<string, ApprovalMode | null>>({});
 	const approvalChoiceStorageKey = $derived(
 		approvalChoiceKey(spaceId, activeSessionId, composerHarness),
 	);
-	const approvalModes = $derived(
-		composerHarness === "cohub"
-			? []
-			: (runtimeCatalog?.capabilities?.approvalModes?.[composerHarness] ?? []),
+	function approvalFor(harness: LocalHarness) {
+		const key = approvalChoiceKey(spaceId, activeSessionId, harness);
+		return {
+			modes: runtimeCatalog?.capabilities?.approvalModes?.[harness] ?? [],
+			// Kept even when the Runtime stops offering it: sending then fails instead of dropping a limit.
+			mode:
+				(approvalChoices[key] ?? readApprovalChoice(key)) ||
+				resolveApprovalModeFromTurns(composerAgentTurns, harness),
+		};
+	}
+	const approval = $derived(
+		isLocalHarness(composerHarness)
+			? approvalFor(composerHarness)
+			: { modes: [], mode: null },
 	);
-	// Kept even when the Runtime stops offering it: sending then fails instead of dropping a limit.
-	const approvalMode = $derived(
-		composerHarness === "cohub"
-			? null
-			: (approvalChoices[approvalChoiceStorageKey] ??
-					readApprovalChoice(approvalChoiceStorageKey)) ||
-					resolveApprovalModeFromTurns(composerAgentTurns, composerHarness),
-	);
-	function refreshLocalModels() {
-		void loadRuntimeCatalog();
+	const approvalModes = $derived(approval.modes);
+	const approvalMode = $derived(approval.mode);
+	function setApprovalMode(harness: LocalHarness, mode: ApprovalMode) {
+		const key = approvalChoiceKey(spaceId, activeSessionId, harness);
+		writeApprovalChoice(key, mode);
+		approvalChoices = { ...approvalChoices, [key]: mode };
+	}
+	async function refreshLocalModels(harness: LocalHarness) {
+		const target = spaceId;
+		await loadRuntimeCatalog();
 		if (
-			spaceId &&
-			composerHarness !== "cohub" &&
-			runtimeCatalog?.client?.catalogRefresh
+			target &&
+			target === spaceId &&
+			runtimeCatalog?.online &&
+			runtimeCatalog.client?.catalogRefresh &&
+			runtimeCatalog.capabilities?.harnesses.includes(harness)
 		) {
-			void sdk
-				.space(spaceId)
-				.requestRuntimeCatalogRefresh(composerHarness)
+			await sdk
+				.space(target)
+				.requestRuntimeCatalogRefresh(harness)
 				.catch(() => undefined);
 		}
 	}
@@ -3109,11 +3127,50 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		}
 	}
 
-	function setComposerHarness(harness: HarnessKind) {
+	function selectComposerRuntime(
+		harness: HarnessKind,
+		model?: LocalModelSelection,
+	) {
 		if (sending || composerMode !== "agent") return;
 		harnessBySession = { ...harnessBySession, [harnessSelectionKey]: harness };
+		if (harness !== "cohub")
+			localModelsBySession = {
+				...localModelsBySession,
+				[`${harnessSelectionKey}:${harness}`]: model ?? {},
+			};
 		clearComposerError();
 	}
+
+	const composerRuntime: ComposerRuntime = {
+		get harness() {
+			return composerHarness;
+		},
+		get model() {
+			return localModel;
+		},
+		get approvalMode() {
+			return approvalMode;
+		},
+		get local() {
+			return runtimeCatalog?.kind === "local";
+		},
+		get online() {
+			return runtimeCatalog?.online ?? false;
+		},
+		get harnesses() {
+			return runtimeCatalog?.kind === "local"
+				? (runtimeCatalog.capabilities?.harnesses ?? [])
+				: [];
+		},
+		get models() {
+			return runtimeCatalog?.capabilities?.models ?? [];
+		},
+		modelFor: localModelFor,
+		approvalFor,
+		refresh: refreshLocalModels,
+		select: selectComposerRuntime,
+		setApproval: setApprovalMode,
+	};
 
 	function canUseHarness(harness: HarnessKind) {
 		if (harness === "cohub") return true;
@@ -4844,33 +4901,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		get composerHarness() {
 			return composerHarness;
 		},
-		setComposerHarness,
-		loadRuntimeCatalog,
-		refreshLocalModels,
+		composerRuntime,
 		get runtimeCatalog() {
 			return runtimeCatalog;
-		},
-		get localModel() {
-			return localModel;
-		},
-		get approvalModes() {
-			return approvalModes;
-		},
-		get approvalMode() {
-			return approvalMode;
-		},
-		setApprovalMode(mode: ApprovalMode) {
-			writeApprovalChoice(approvalChoiceStorageKey, mode);
-			approvalChoices = {
-				...approvalChoices,
-				[approvalChoiceStorageKey]: mode,
-			};
-		},
-		setLocalModel(model: LocalModelSelection) {
-			localModelsBySession = {
-				...localModelsBySession,
-				[`${harnessSelectionKey}:${composerHarness}`]: model,
-			};
 		},
 		get generationModelsCatalog() {
 			return generationModelsCatalog;
