@@ -7,7 +7,10 @@ import {
 	type HarnessKind,
 	type RuntimeStatus,
 } from "@neta-art/cohub";
-import type { ComposerRuntime } from "#lib/components/composer/runtime-picker.ts";
+import type {
+	CloudModels,
+	ComposerRuntime,
+} from "#lib/components/composer/runtime-picker.ts";
 import SessionComposer from "#lib/components/SessionComposer.svelte";
 import SessionApprovals from "#lib/features/session-chat/SessionApprovals.svelte";
 import SpaceWorkspaceHeader, {
@@ -190,6 +193,22 @@ const context: SpaceWorkspaceHeaderContext = {
 	spaceIdentity: null,
 };
 const noop = () => {};
+const cloudModels = [
+	{
+		provider: "anthropic",
+		id: "claude-sonnet-4-5",
+		model: { name: "Claude Sonnet 4.5", cost: { input: 3, output: 15 } },
+	},
+	{ provider: "openai", id: "gpt-5", model: { name: "GPT-5" } },
+];
+let showPicker = $state(false);
+let cloudOnly = $state(false);
+let cloudModel = $state<{ provider: string; id: string; name?: string } | null>(
+	cloudModels[0],
+);
+const cloud = $derived<Pick<CloudModels, "list" | "onOpen">>({
+	list: { models: cloudModels, currentModel: cloudModel, generationModels: [] },
+});
 const runtime: ComposerRuntime = {
 	get harness() {
 		return harness;
@@ -200,12 +219,14 @@ const runtime: ComposerRuntime = {
 	get approvalMode() {
 		return approvalMode;
 	},
-	local: true,
+	get local() {
+		return !cloudOnly;
+	},
 	get online() {
-		return status.online;
+		return !cloudOnly && status.online;
 	},
 	get harnesses() {
-		return status.capabilities?.harnesses ?? [];
+		return cloudOnly ? [] : (status.capabilities?.harnesses ?? []);
 	},
 	get models() {
 		return status.capabilities?.models ?? [];
@@ -217,8 +238,12 @@ const runtime: ComposerRuntime = {
 	}),
 	refresh: noop,
 	select: (next, model) => {
+		console.log("select", next, JSON.stringify(model));
 		harness = next;
-		if (model) chosenModels = { ...chosenModels, [next]: model };
+		if (!model) return;
+		if (next === "cohub")
+			cloudModel = cloudModels.find((item) => item.id === model.id) ?? null;
+		else chosenModels = { ...chosenModels, [next]: model };
 	},
 	setApproval: (next, mode) => {
 		approvalModes = { ...approvalModes, [next]: mode };
@@ -237,9 +262,11 @@ const runtime: ComposerRuntime = {
 			<button class="rounded border border-border-subtle px-2 py-1" onclick={() => document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"}>Theme</button>
 		</div>
 		<div class="flex-1 text-sm text-text-tertiary">Isolated fixtures · no account or model requests</div>
+		<button class="rounded border border-border-subtle px-2 py-1" onclick={() => { showPicker = true; }}>open picker</button>
+		<button class="rounded border border-border-subtle px-2 py-1" onclick={() => { cloudOnly = !cloudOnly; if (cloudOnly) harness = "cohub"; }}>cloud only</button>
 		<output aria-label="Approval selection">{approvalMode ?? "unset"}</output>
 		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
 		<SessionApprovals {spaceId} sessionId="55555555-5555-4555-8555-555555555555" harnessOf={() => (harness === "cohub" ? "codex" : harness)} />
-		<SessionComposer bind:value={input} {runtime} onsubmit={noop} onpickattachment={noop} />
+		<SessionComposer bind:value={input} bind:modelOpen={showPicker} {runtime} {cloud} currentModel={cloudModel} onsubmit={noop} onpickattachment={noop} />
 	</main>
 </div>

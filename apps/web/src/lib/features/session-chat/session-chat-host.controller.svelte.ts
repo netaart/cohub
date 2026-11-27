@@ -3133,11 +3133,14 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	) {
 		if (sending || composerMode !== "agent") return;
 		harnessBySession = { ...harnessBySession, [harnessSelectionKey]: harness };
-		if (harness !== "cohub")
+		if (harness === "cohub") {
+			if (model) handleModelSelect(model);
+		} else {
 			localModelsBySession = {
 				...localModelsBySession,
 				[`${harnessSelectionKey}:${harness}`]: model ?? {},
 			};
+		}
 		clearComposerError();
 	}
 

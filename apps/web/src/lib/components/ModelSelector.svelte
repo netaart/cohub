@@ -69,7 +69,9 @@ type Props = {
 	header?: Snippet;
 	footer?: Snippet;
 	catalogKey?: string;
-	empty?: Snippet;
+	/** Shown in place of the list and search while the catalog is empty. */
+	emptyText?: string;
+	emptyAction?: { label: string; onclick: () => void };
 	onClose: () => void;
 	onSelect: (item: {
 		provider: string;
@@ -126,7 +128,8 @@ const {
 	header,
 	footer,
 	catalogKey,
-	empty,
+	emptyText,
+	emptyAction,
 	onClose,
 	onSelect,
 	models,
@@ -1019,7 +1022,7 @@ const hoverCardPos = $derived.by(() => {
 
 	{/if}
 	{#if activeTab === "chat" || !showGeneration}
-		<div class:hidden={empty && models.length === 0} class="shrink-0 border-b border-border-subtle/70 px-3 py-2">
+		<div class:hidden={emptyText && models.length === 0} class="shrink-0 border-b border-border-subtle/70 px-3 py-2">
 			<input
 				bind:this={searchInputEl}
 				data-model-selector-search="true"
@@ -1032,8 +1035,13 @@ const hoverCardPos = $derived.by(() => {
 		</div>
 
 		<div bind:this={containerEl} class="min-h-0 flex-1 overflow-y-auto py-1">
-			{#if empty && models.length === 0}
-				{@render empty()}
+			{#if emptyText && models.length === 0}
+				<div class="flex flex-col items-center gap-3 px-4 py-8 text-center text-[13px] text-text-tertiary">
+					<p>{emptyText}</p>
+					{#if emptyAction}
+						<button type="button" class="secondary-key h-8 px-3 text-[12px]" onclick={emptyAction.onclick}>{emptyAction.label}</button>
+					{/if}
+				</div>
 			{:else if filteredModels.length === 0}
 				<div class="px-4 py-8 text-center text-[13px] text-text-tertiary">
 					{searchQuery

@@ -19,6 +19,7 @@ import AccessStateView from "#lib/components/AccessStateView.svelte";
 import CenteredLoading from "#lib/components/CenteredLoading.svelte";
 import ChatTimeline from "#lib/components/ChatTimeline.svelte";
 import CreateModelSelectorDialog from "#lib/components/CreateModelSelectorDialog.svelte";
+import type { CloudModels } from "#lib/components/composer/runtime-picker.ts";
 import NewChatBackground from "#lib/components/NewChatBackground.svelte";
 import PricingNotice, {
 	type AnnouncedModel,
@@ -33,7 +34,6 @@ import {
 	readCohubPathFromDataTransfer,
 } from "#lib/drag/chat-draft-drop.ts";
 import { setSessionArchived } from "#lib/features/sessions/session-archive.ts";
-import SessionModelSelectorDialog from "#lib/features/space/modules/SessionModelSelectorDialog.svelte";
 import { takeHostShare } from "#lib/host-share.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { provideMarkdownWorkspaceAsset } from "#lib/markdown-asset-context.ts";
@@ -148,6 +148,35 @@ const generationBooleanConstraints = $derived(
 	host.generationBooleanConstraints,
 );
 const activeSessionModel = $derived(host.activeSessionModel);
+// The Cloud catalog the composer's Cohub tab lists; loaded when that tab opens.
+const cloudCatalog = $derived<Pick<CloudModels, "list" | "onOpen">>({
+	onOpen: () => {
+		void host.loadModelsCatalog();
+		void host.loadGenerationModelsCatalog();
+		void modelsStatusStore.load();
+	},
+	list: {
+		models: modelsCatalog ?? [],
+		currentModel: activeSessionModel,
+		thinkingLevelModel: host.activeSessionTurnModel ?? activeSessionModel,
+		currentThinkingLevel: host.activeSessionThinkingLevel,
+		modelStatus: modelsStatus?.models ?? null,
+		generationModels: generationModelsCatalog ?? [],
+		generationPolicyMode,
+		selectedGenerationModels,
+		generationEnumSelections,
+		generationNumericConstraints,
+		generationBooleanConstraints,
+		onGenerationTabOpen: () => {
+			void host.loadGenerationModelsCatalog();
+		},
+		onGenerationPolicyModeChange: host.setGenerationPolicyMode,
+		onGenerationModelToggle: host.setGenerationModelSelected,
+		onGenerationEnumValueToggle: host.setGenerationEnumValueSelected,
+		onGenerationNumericConstraintChange: host.setGenerationNumericConstraint,
+		onGenerationBooleanConstraintChange: host.setGenerationBooleanConstraint,
+	},
+});
 const announcedModels = $derived<AnnouncedModel[]>(
 	host.isNewSessionRoute
 		? [
@@ -607,16 +636,11 @@ async function handleDraftDrop(event: DragEvent) {
 					onremoveviewport={host.handleRemoveViewportContext}
 					onsubmit={host.handleSend}
 					onabort={host.handleAbort}
-					onModelSelect={host.composerMode === "create" || (host.composerMode === "agent" && host.composerHarness === "cohub") ? () => {
-						if (host.composerMode === "create") {
-							void host.loadGenerationModelsCatalog();
-							showCreateModelSelector = true;
-							return;
-						}
-						void host.loadModelsCatalog();
+					bind:modelOpen={showModelSelector}
+					cloud={cloudCatalog}
+					onModelSelect={host.composerMode === "create" ? () => {
 						void host.loadGenerationModelsCatalog();
-						void modelsStatusStore.load();
-						showModelSelector = true;
+						showCreateModelSelector = true;
 					} : undefined}
 				/>
 			</div>
@@ -735,32 +759,6 @@ async function handleDraftDrop(event: DragEvent) {
 			onRetry={() => {
 				void host.loadGenerationModelsCatalog();
 			}}
-		/>
-		<SessionModelSelectorDialog
-			open={showModelSelector}
-			onClose={() => {
-				showModelSelector = false;
-			}}
-			onSelect={host.handleModelSelect}
-			models={modelsCatalog ?? []}
-			currentModel={activeSessionModel}
-			thinkingLevelModel={host.activeSessionTurnModel ?? activeSessionModel}
-			currentThinkingLevel={host.activeSessionThinkingLevel}
-			modelStatus={modelsStatus?.models ?? null}
-			generationModels={generationModelsCatalog ?? []}
-			{generationPolicyMode}
-			{selectedGenerationModels}
-			{generationEnumSelections}
-			{generationNumericConstraints}
-			{generationBooleanConstraints}
-			onGenerationTabOpen={() => {
-				void host.loadGenerationModelsCatalog();
-			}}
-			onGenerationPolicyModeChange={host.setGenerationPolicyMode}
-			onGenerationModelToggle={host.setGenerationModelSelected}
-			onGenerationEnumValueToggle={host.setGenerationEnumValueSelected}
-			onGenerationNumericConstraintChange={host.setGenerationNumericConstraint}
-			onGenerationBooleanConstraintChange={host.setGenerationBooleanConstraint}
 		/>
 	</div>
 {/if}

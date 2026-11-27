@@ -20,7 +20,10 @@ import ComposerModelTrigger from "#lib/components/composer/ComposerModelTrigger.
 import ComposerRuntimePicker from "#lib/components/composer/ComposerRuntimePicker.svelte";
 import ComposerSubmitButton from "#lib/components/composer/ComposerSubmitButton.svelte";
 import ComposerSurface from "#lib/components/composer/ComposerSurface.svelte";
-import type { ComposerRuntime } from "#lib/components/composer/runtime-picker.ts";
+import type {
+	CloudModels,
+	ComposerRuntime,
+} from "#lib/components/composer/runtime-picker.ts";
 import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
 import SessionChatQuickActions from "#lib/components/SessionChatQuickActions.svelte";
 import SlashCommandMenu, {
@@ -125,7 +128,10 @@ type Props = {
 	attachments?: ComposerAttachment[];
 	viewportContexts?: ViewportContext[];
 	currentModel?: SelectedModel | null;
+	/** Where agent Turns run, with the Cloud catalog its Cohub tab lists. */
 	runtime?: ComposerRuntime;
+	cloud?: Pick<CloudModels, "list" | "onOpen">;
+	modelOpen?: boolean;
 	/** Compact thinking level suffix; null/empty hides. */
 	thinkingLevelLabel?: string | null;
 	/** Compact generation-policy suffix; null/empty hides (Auto). */
@@ -167,6 +173,8 @@ let {
 	viewportContexts = [],
 	currentModel = null,
 	runtime,
+	cloud,
+	modelOpen = $bindable(false),
 	thinkingLevelLabel = null,
 	generationPolicyLabel = null,
 	pricingMeta = [],
@@ -1654,11 +1662,24 @@ $effect(() => {
 								</div>
 							{/if}
 
-							{#if runtime && mode === "agent" && (runtime.local || runtime.harness !== "cohub")}
-								<ComposerRuntimePicker {runtime} disabled={disabled || sending} />
-							{/if}
-
-							{#if onModelSelect}
+							{#if runtime && cloud && mode === "agent"}
+								<ComposerRuntimePicker
+									bind:open={modelOpen}
+									{runtime}
+									cloud={{
+										...cloud,
+										label: modelControlLabel,
+										ariaLabel: modelControlAriaLabel,
+										meta: [
+											...pricingMeta,
+											...[thinkingLevelLabel, generationPolicyLabel].filter(
+												(value): value is string => Boolean(value),
+											),
+										],
+									}}
+									disabled={disabled || sending}
+								/>
+							{:else if onModelSelect}
 								<ComposerModelTrigger
 									label={modelControlLabel}
 									meta={[
