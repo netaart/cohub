@@ -126,6 +126,7 @@ export function createBrowserBoardScriptExport(
           else {
             outputs.delete(id);
             started.greeted.delete(id);
+            started.views.delete(id);
           }
         },
       }),
@@ -151,7 +152,6 @@ export function createBrowserBoardScriptExport(
     current.ranks.clear();
     for (const [index, id] of ids.entries()) current.ranks.set(id, index);
     const viewKey = view ? JSON.stringify(view) : null;
-    let viewed = false;
     let rounds = 0;
     const inputs = current.inputsAt < time ? boardScriptInputsBetween(options.inputs, current.inputsAt, time) : [];
     current.inputsAt = Math.max(current.inputsAt, time);
@@ -169,21 +169,23 @@ export function createBrowserBoardScriptExport(
           for (const id of ids) host.event(id, event);
       };
       if (ids.every((id) => host.output(id))) deliver();
+      const showView = (started: boolean) => {
+        if (!viewKey) return;
+        for (const id of ids) {
+          if (current.views.get(id) === viewKey || Boolean(host.output(id)) !== started) continue;
+          if (host.event(id, { type: "viewchange", data: view })) current.views.set(id, viewKey);
+        }
+      };
       const sync = () => {
         queued = false;
         try {
           // Scripts moving the camera or items change what the view shows, so then all run, at 2× or more.
           const moving = [...outputs.values()].some((output) => output.camera || Object.keys(output.patches).length > 0);
           const camera = area && !moving ? area.camera : { x: 0, y: 0, zoom: Math.max(2, area?.camera.zoom ?? 0) };
+          // Before the step, so the frame drawn already sees the view.
+          showView(true);
           host.sync(document, scene, camera, time, false, moving || !host.waiting() ? null : shown());
-          if (viewKey && !viewed) {
-            viewed = true;
-            for (const id of ids) {
-              if (current.views.get(id) === viewKey) continue;
-              if (host.event(id, { type: "viewchange", data: view })) current.views.set(id, viewKey);
-              else viewed = false;
-            }
-          }
+          showView(false);
           let greeting = false;
           for (const id of ids) {
             const pending = current.greeted.get(id) ?? boardScriptModelsLoaded(document, id);
@@ -251,21 +253,21 @@ export function createBrowserBoardScriptExport(
         let before = { at: current.time, document: options.documentAt(current.time) };
         let previous = boardScriptParamsKey(before.document);
         let ran = current.time;
-        if (fresh) await settle(current, before.document, before.at);
+        if (fresh) await settle(current, before.document, before.at, view);
         // Only onFrame() builds state from the params it ran with; other scripts draw from the latest.
         const stepping = [...outputs.values()].some((output) => output.updating);
         for (let at = current.time + BOARD_SCRIPT_HISTORY_MS; stepping && at < time; at += BOARD_SCRIPT_HISTORY_MS) {
           const sample = options.documentAt(at);
           const key = boardScriptParamsKey(sample);
           if (key !== previous) {
-            if (before.at > ran) await settle(current, before.document, before.at);
-            await settle(current, sample, at);
+            if (before.at > ran) await settle(current, before.document, before.at, view);
+            await settle(current, sample, at, view);
             previous = key;
             ran = at;
           }
           before = { at, document: sample };
         }
-        if (stepping && boardScriptParamsKey(document) !== previous && before.at > ran) await settle(current, before.document, before.at);
+        if (stepping && boardScriptParamsKey(document) !== previous && before.at > ran) await settle(current, before.document, before.at, view);
       }
       await settle(current, document, time, view);
       return {
