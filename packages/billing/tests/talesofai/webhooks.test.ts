@@ -29,7 +29,7 @@ const envelope = (type: string, resource: "order" | "subscription", data: object
   data,
 });
 
-const orderPaid = (overrides: { paid?: number; source?: string; businessKey?: string } = {}) =>
+const orderPaid = (overrides: { paid?: number; source?: string; reason?: string; businessKey?: string } = {}) =>
   envelope(
     "order.paid",
     "order",
@@ -43,20 +43,16 @@ const orderPaid = (overrides: { paid?: number; source?: string; businessKey?: st
         paid_amount_snapshot: overrides.paid ?? 1000,
         currency_snapshot: "USD",
         paid_at: paidAt,
-        billing_reason: "purchase",
+        billing_reason: overrides.reason ?? "purchase",
         fulfillment_source: overrides.source ?? "checkout",
       },
     },
     overrides.businessKey,
   );
 
-const subscriptionPaid = (source: string, type = "subscription.activated") => {
+const subscriptionActivated = () => {
   const period = { start: paidAt, end: "2026-12-26T08:00:00.000Z" };
-  const renewal =
-    type === "subscription.renewed"
-      ? { previous_attributes: { status: "active", current_period_start: "2026-10-26T08:00:00.000Z", current_period_end: paidAt } }
-      : {};
-  const event = envelope(type, "subscription", {
+  return envelope("subscription.activated", "subscription", {
     object: {
       id: randomUUID(),
       status: "active",
@@ -84,10 +80,9 @@ const subscriptionPaid = (source: string, type = "subscription.activated") => {
       discount_amount_snapshot: 0,
       paid_amount_snapshot: 2000,
       currency: "USD",
-      fulfillment_source: source,
+      fulfillment_source: "provider",
     },
   });
-  return { ...event, ...renewal };
 };
 
 const deliver = (event: { id: string }, signingKey = key) => {
@@ -102,8 +97,8 @@ test("real payments carry the payer and payment time", async () => {
   for (const event of [
     orderPaid(),
     orderPaid({ source: "provider_payment" }),
-    subscriptionPaid("provider"),
-    subscriptionPaid("provider", "subscription.renewed"),
+    orderPaid({ reason: "subscription_create" }),
+    orderPaid({ reason: "subscription_cycle" }),
   ]) {
     const parsed = await deliver(event);
     assert.equal(parsed.id, event.id);
@@ -111,14 +106,13 @@ test("real payments carry the payer and payment time", async () => {
   }
 });
 
-test("redemptions, manual grants, free orders and other businesses are not payments", async () => {
+test("redemptions, manual grants, free orders, other businesses and subscription events are not payments", async () => {
   for (const event of [
     orderPaid({ source: "redemption" }),
     orderPaid({ source: "manual" }),
     orderPaid({ paid: 0 }),
     orderPaid({ businessKey: "cohub-space-wallet" }),
-    subscriptionPaid("manual"),
-    subscriptionPaid("redemption", "subscription.renewed"),
+    subscriptionActivated(),
   ]) {
     assert.equal((await deliver(event)).payment, null);
   }
