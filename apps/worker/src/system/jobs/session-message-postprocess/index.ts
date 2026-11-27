@@ -1,8 +1,7 @@
 import { billingOperations, spaceWalletBillingOperations, COHUB_BILLING_TOKEN_TYPES, COHUB_BILLING_USAGE_TYPES, normalizePositiveUsd } from "@cohub/billing";
 import { claimMessageWalletBilling } from "@cohub/core/space-wallet";
-import { qualifyAndRewardReferral } from "@cohub/core/referrals";
 import { readImageToTextCalls } from "@cohub/core/sessions";
-import { sessionMessages, sessionTurns, spaceSessions, tokenUsageStatsHourly } from "@cohub/db";
+import { sessionMessages, spaceSessions, tokenUsageStatsHourly } from "@cohub/db";
 import {
   isLlmUsageMessage,
   SESSION_MESSAGE_POSTPROCESS_JOB,
@@ -88,34 +87,6 @@ const recordBilling = async (input: {
     return result.status === "overage";
   }));
   return results.includes(true);
-};
-
-const maybeQualifyReferral = async (message: typeof sessionMessages.$inferSelect) => {
-  const meta = message.meta as Record<string, unknown> | null;
-  const turnId = typeof meta?.turnId === "string" ? meta.turnId : null;
-  if (!turnId || meta?.messageKind !== "assistant_final" || meta.runtime === "local") return;
-
-  // Prefer turn owner; fall back to actor stamped on the assistant message.
-  const actorUserId = await resolveActorUserId(message);
-  const [turn] = await db
-    .select({ userUuid: sessionTurns.userUuid, status: sessionTurns.status, completedAt: sessionTurns.completedAt })
-    .from(sessionTurns)
-    .where(and(eq(sessionTurns.id, turnId), eq(sessionTurns.sessionId, message.sessionId)))
-    .limit(1);
-  if (turn?.status !== "completed") return;
-  const inviteeUserId = turn.userUuid?.trim() || actorUserId;
-  if (!inviteeUserId) return;
-
-  await qualifyAndRewardReferral({
-    db,
-    billing: billingOperations,
-    inviteeUserId,
-    completedAt: turn.completedAt,
-    logger: {
-      warn: (messageText, metaFields) => logger.warn(messageText, metaFields),
-      info: (messageText, metaFields) => logger.info(messageText, metaFields),
-    },
-  });
 };
 
 const aggregateUsage = async (
@@ -274,7 +245,6 @@ registerSystemJob(SESSION_MESSAGE_POSTPROCESS_JOB, async (job: Job) => {
       if (turnIds.length) logger.info("[Billing] stopping Agent Turns on insufficient balance", { spaceId, sessionId, turnIds });
     }).catch((error: unknown) => logger.warn("[Billing] failed to stop Agent Turns on insufficient balance", { spaceId, sessionId, turnId: message.turnId, error }));
   }
-  await maybeQualifyReferral(message);
   await aggregateUsage(message, spaceId, userId, usage);
 
   return { ok: true };

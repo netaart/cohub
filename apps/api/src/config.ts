@@ -13,6 +13,7 @@ export type AppConfig = {
   talesofaiBillingBusinessKey?: string;
   talesofaiBillingSpaceWalletBusinessKey?: string;
   talesofaiBillingAdminApiKey?: string;
+  talesofaiBillingWebhookSecret?: string;
   env: "dev" | "prod";
   appEncryptionKey: string;
   /** Optional checkpoint to bootstrap first-time Home spaces from; blank when unset. */
@@ -195,6 +196,7 @@ export const config: AppConfig = {
   talesofaiBillingBusinessKey: process.env.TALESOFAI_BILLING_BUSINESS_KEY,
   talesofaiBillingSpaceWalletBusinessKey: process.env.TALESOFAI_BILLING_SPACE_WALLET_BUSINESS_KEY,
   talesofaiBillingAdminApiKey: process.env.TALESOFAI_BILLING_ADMIN_API_KEY,
+  talesofaiBillingWebhookSecret: process.env.TALESOFAI_BILLING_WEBHOOK_SECRET,
   env,
   appEncryptionKey: process.env.APP_ENCRYPTION_KEY ?? "",
   homeBootstrapCheckpointId: process.env.HOME_BOOTSTRAP_CHECKPOINT_ID?.trim() || undefined,

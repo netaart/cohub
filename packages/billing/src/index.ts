@@ -14,6 +14,7 @@ export {
   createTalesofaiCommerceSdk,
   getBillingOperations,
   isBillingConfigured,
+  parseBillingWebhook,
   resolveBillingClientConfig,
 } from "./client.js";
 export type { BillingClientConfig, BillingRedisClient, BillingRuntimeConfig, SpaceWalletBillingOperations } from "./client.js";
@@ -67,6 +68,7 @@ export type {
   BillingUsageRecordInput,
   BillingUsageRecordResult,
   BillingUserRef,
+  BillingWebhookEvent,
   BillingBalanceActivityFilter,
   BillingCreditGrantScope,
   BusinessBillingOperations,
@@ -116,6 +118,7 @@ export type {
 export {
   BillingAccessBlockedError,
   BillingUsageGateUnavailableError,
+  BillingWebhookVerificationError,
   isBillingAccessBlockedError,
   isBillingUsageGateUnavailableError,
 } from "./errors.js";

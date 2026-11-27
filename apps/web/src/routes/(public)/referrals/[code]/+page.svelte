@@ -103,9 +103,7 @@ async function claim() {
 				</div>
 				<h1 class="mt-6 text-[22px] font-semibold tracking-tight text-text-primary">{m.referral_referred_you({ name: referral.inviter.displayName }, { locale })}</h1>
 				<p class="mt-2 text-[13px] leading-5 text-text-tertiary">{m.referral_tagline({}, { locale })}</p>
-				{#if referral.rewardAvailable}
-					<div class="mt-6 flex items-center gap-2 border-y border-border-subtle py-4 text-[13px] text-text-secondary"><Gift class="h-4 w-4 text-brand" /><span>{m.referral_get_credits({ amount: `$${referral.reward.inviteeUsd}` }, { locale })}</span></div>
-				{/if}
+				<div class="mt-6 flex items-center gap-2 border-y border-border-subtle py-4 text-[13px] text-text-secondary"><Gift class="h-4 w-4 text-brand" /><span>{m.referral_get_credits({ amount: `$${referral.reward.inviteeUsd}`, days: referral.reward.paymentWindowDays }, { locale })}</span></div>
 
 				{#if action === "self"}
 					<div class="mt-6"><p class="text-[13px] text-text-secondary">{m.referral_self({}, { locale })}</p><a href="/settings/referrals" class="primary-key mt-3 h-9 gap-1.5 px-4 text-[12px]">{m.referral_view_referrals({}, { locale })} <ArrowRight class="h-3.5 w-3.5" /></a></div>

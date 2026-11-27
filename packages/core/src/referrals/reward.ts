@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { BillingOperations } from "@cohub/billing";
 import { referrals, type ReferralStatus } from "@cohub/db";
-import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 export const REFERRAL_REWARD_LEASE_MS = 5 * 60_000;
@@ -23,13 +23,10 @@ export type RewardQualifiedReferralInput = {
   leaseMs?: number;
 };
 
-export type QualifyAndRewardReferralInput = {
+export type QualifyReferralInput = {
   db: ReferralsDb;
-  billing: Pick<BillingOperations, "status" | "grantReferralReward">;
   inviteeUserId: string;
-  completedAt?: Date | null;
-  logger?: ReferralRewardLogger;
-  leaseMs?: number;
+  paidAt: Date;
 };
 
 export type RetryQualifiedReferralRewardsInput = {
@@ -264,46 +261,24 @@ export async function rewardQualifiedReferral(
 }
 
 /**
- * CAS pending → qualified (if needed), then grant rewards under lease.
- * Safe to call from system worker after a successful invitee turn.
+ * Qualify the invitee's referral when their first payment falls inside the claim window, and return its current row.
+ * Redelivered payment events are no-ops.
  */
-export async function qualifyAndRewardReferral(
-  input: QualifyAndRewardReferralInput,
-): Promise<ReferralRow | null> {
-  const { db, inviteeUserId } = input;
-  const qualifiedAt = input.completedAt ?? new Date();
+export async function qualifyReferral(input: QualifyReferralInput): Promise<ReferralRow | null> {
+  const { db, inviteeUserId, paidAt } = input;
   const [qualified] = await db
     .update(referrals)
-    .set({ status: "qualified", qualifiedAt, updatedAt: new Date() })
+    .set({ status: "qualified", qualifiedAt: paidAt, updatedAt: new Date() })
     .where(
       and(
         eq(referrals.inviteeUserId, inviteeUserId),
         inArray(referrals.status, ["pending", "expired"]),
-        or(isNull(referrals.expiresAt), gt(referrals.expiresAt, qualifiedAt)),
+        lte(referrals.claimedAt, paidAt),
+        gt(referrals.expiresAt, paidAt),
       ),
     )
     .returning();
-
-  if (qualified) {
-    return rewardQualifiedReferral({
-      db,
-      billing: input.billing,
-      referral: qualified,
-      logger: input.logger,
-      leaseMs: input.leaseMs,
-    });
-  }
-
-  // Already qualified (or rewarded) — still try to finish incomplete grants.
-  const existing = await loadReferralByInvitee(db, inviteeUserId);
-  if (existing?.status !== "qualified") return existing;
-  return rewardQualifiedReferral({
-    db,
-    billing: input.billing,
-    referral: existing,
-    logger: input.logger,
-    leaseMs: input.leaseMs,
-  });
+  return qualified ?? (await loadReferralByInvitee(db, inviteeUserId));
 }
 
 export async function retryQualifiedReferralRewards(

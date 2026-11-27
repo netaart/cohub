@@ -16,6 +16,7 @@ import {
   type BillingFeatureLimitInput,
   type BillingHistoryListInput,
   type BillingOperations,
+  type BillingWebhookEvent,
   type BillingPluginStatus,
   type BillingRedemptionInput,
   type BillingRedemptionResult,
@@ -498,6 +499,7 @@ export type TalesofaiProviderModule = {
     businessKey: string;
   }) => BusinessBillingOperations;
   createCommerceSdk: (clientConfig: SdkClientConfig) => CommerceSdk;
+  parseWebhook: (input: { rawBody: Uint8Array; headers: Headers; secret: string; businessKey: string }) => BillingWebhookEvent;
 };
 
 // Non-literal so tsc never follows it into the SDK-backed adapter.
@@ -514,6 +516,15 @@ function loadTalesofaiProviderModule(): Promise<TalesofaiProviderModule> {
 
 export async function assertBillingProviderAvailable(): Promise<void> {
   if (isBillingConfigured()) await loadTalesofaiProviderModule();
+}
+
+/** Verify a signed billing webhook delivery against its exact bytes and normalize it. */
+export async function parseBillingWebhook(input: { rawBody: Uint8Array; headers: Headers }): Promise<BillingWebhookEvent> {
+  const clientConfig = resolveBillingClientConfig();
+  const secret = runtimeConfig.talesofaiBillingWebhookSecret?.trim();
+  if (!clientConfig || !secret) throw new BillingConfigurationError("Billing webhooks are not configured");
+  const provider = await loadTalesofaiProviderModule();
+  return provider.parseWebhook({ ...input, secret, businessKey: clientConfig.businessKey });
 }
 
 export async function createTalesofaiCommerceSdk(clientConfig: SdkClientConfig): Promise<CommerceSdk> {

@@ -1,10 +1,5 @@
 import { Hono } from "hono";
-import {
-  claimReferral,
-  getPublicReferral,
-  isReferralRewardAvailable,
-  REFERRAL_REWARD_USD,
-} from "../referrals.js";
+import { claimReferral, getPublicReferral, REFERRAL_REWARD } from "../referrals.js";
 import { useAuth } from "../lib/middleware.js";
 
 const router = new Hono();
@@ -27,8 +22,7 @@ router.get("/:code", async (c) => {
           displayName: "A Cohub user",
           avatarUrl: null,
         },
-    reward: { inviterUsd: REFERRAL_REWARD_USD, inviteeUsd: REFERRAL_REWARD_USD },
-    rewardAvailable: await isReferralRewardAvailable(referral.inviterUserId),
+    reward: REFERRAL_REWARD,
   });
 });
 

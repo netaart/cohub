@@ -9,4 +9,5 @@ export type BillingRuntimeConfig = {
   talesofaiBillingBusinessKey?: string;
   talesofaiBillingSpaceWalletBusinessKey?: string;
   talesofaiBillingAdminApiKey?: string;
+  talesofaiBillingWebhookSecret?: string;
 };

@@ -668,6 +668,13 @@ export interface BusinessBillingOperations {
   consume(input: BusinessCreditConsumeInput): Promise<BusinessCreditConsumeResult>;
 }
 
+export type BillingWebhookEvent = {
+  id: string;
+  type: string;
+  /** Set when the event is a real-money payment by a personal-business customer. */
+  payment: { userId: string; paidAt: Date } | null;
+};
+
 export interface BillingOperations {
   readonly status: BillingPluginStatus;
   ensureCustomer(input: BillingUserRef): Promise<BillingUserRef>;
