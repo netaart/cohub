@@ -60,7 +60,8 @@ app/src/main/kotlin/live/cohub/android/
   ui/
     SurfaceContainer.kt      holds the WebView, pads insets it misreports
     ShellAppearance.kt       the page's edge color, persisted for cold start
-    LaunchCover.kt           the splash's twin: the turning C, slow and failed starts
+    LaunchCover.kt           the splash's twin, slow and failed starts
+    LaunchNet.kt             the launch mark growing into a woven context network
 ```
 
 The device Runtime is described in `docs/local-runtime.md` ("Android device").

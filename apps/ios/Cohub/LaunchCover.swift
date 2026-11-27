@@ -38,8 +38,9 @@ final class LaunchCover: UIView {
 
     var onAction: (() -> Void)?
 
-    private static let spinKey = "spin"
-    private let mark = UIImageView(image: UIImage(named: "LaunchMark"))
+    var lifting: Bool { net.lifting }
+
+    private let net = LaunchNet()
     private let title = UILabel()
     private let detail = UILabel()
     private let action = UIButton(configuration: .plain())
@@ -47,10 +48,9 @@ final class LaunchCover: UIView {
 
     init() {
         super.init(frame: .zero)
-        backgroundColor = UIColor(named: "LaunchBackground")
-        let tile = UIImageView(image: UIImage(named: "LaunchTile"))
         accessibilityViewIsModal = true
-        mark.accessibilityLabel = L("Loading")
+        net.isAccessibilityElement = true
+        net.accessibilityLabel = L("Loading")
         title.font = .preferredFont(forTextStyle: .headline)
         detail.font = .preferredFont(forTextStyle: .subheadline)
         detail.textColor = .secondaryLabel
@@ -64,17 +64,13 @@ final class LaunchCover: UIView {
         status.alignment = .center
         status.spacing = 16
         status.isHidden = true
-        for view in [tile, mark, status] as [UIView] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(view)
-        }
-        let below = status.topAnchor.constraint(equalTo: tile.bottomAnchor, constant: 32)
+        net.frame = bounds
+        net.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(net)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(status)
         below.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            tile.centerXAnchor.constraint(equalTo: centerXAnchor),
-            tile.centerYAnchor.constraint(equalTo: centerYAnchor),
-            mark.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
-            mark.centerYAnchor.constraint(equalTo: tile.centerYAnchor),
             below,
             status.bottomAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.bottomAnchor, constant: -16),
             status.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -86,25 +82,52 @@ final class LaunchCover: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        mark.layer.removeAnimation(forKey: Self.spinKey)
-        render()
+    private lazy var below = status.topAnchor.constraint(equalTo: centerYAnchor)
+
+    override func layoutSubviews() {
+        below.constant = net.clearance + 32
+        super.layoutSubviews()
+        net.clear(status.isHidden ? nil : status.frame)
+    }
+
+    func lift(_ done: @escaping () -> Void) {
+        guard !lifting else { return }
+        accessibilityViewIsModal = false
+        accessibilityElementsHidden = true
+        UIAccessibility.post(notification: .screenChanged, argument: nil)
+        UIView.animate(withDuration: 0.15) { self.status.alpha = 0 }
+        net.lift(done)
+    }
+
+    func hold() {
+        status.layer.removeAllAnimations()
+        status.alpha = 1
+        accessibilityViewIsModal = true
+        accessibilityElementsHidden = false
+        net.hold()
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard lifting else { return super.hitTest(point, with: event) }
+        return net.reveals(convert(point, to: net)) ? nil : self
     }
 
     private func render() {
         switch state {
         case .loading:
             show(nil)
+            net.phase = .loading
         case .slow:
             show(L("Taking longer than usual"), action: L("Reload"))
+            net.phase = .slow
         case .failed(.offline):
             show(L("Can't reach Cohub"), note: L("Cohub will try again when you're back online."), action: L("Try again"), prominent: true)
+            net.phase = .offline
         case .failed(.broken):
             show(L("Couldn't load Cohub"), action: L("Try again"), prominent: true)
+            net.phase = .broken
         }
-        spin(failure == nil && window != nil)
-        mark.isAccessibilityElement = failure == nil
+        net.isAccessibilityElement = failure == nil
     }
 
     private func show(_ heading: String?, note: String? = nil, action label: String? = nil, prominent: Bool = false) {
@@ -118,23 +141,9 @@ final class LaunchCover: UIView {
         button.cornerStyle = .capsule
         action.configuration = button
         status.isHidden = heading == nil
+        setNeedsLayout()
         guard appearing else { return }
         status.alpha = 0
         UIView.animate(withDuration: 0.2) { self.status.alpha = 1 }
-    }
-
-    private func spin(_ on: Bool) {
-        let layer = mark.layer
-        guard on else { return layer.removeAnimation(forKey: Self.spinKey) }
-        guard layer.animation(forKey: Self.spinKey) == nil else { return }
-        let turn = CAKeyframeAnimation(keyPath: "transform.rotation.z")
-        turn.values = [0, 2 * Double.pi, 2 * Double.pi]
-        turn.keyTimes = [0, NSNumber(value: 2.0 / 3), 1]
-        turn.timingFunctions = [CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1), CAMediaTimingFunction(name: .linear)]
-        turn.duration = UIAccessibility.isReduceMotionEnabled ? 2.4 : 0.9
-        turn.repeatCount = .infinity
-        turn.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) + 0.3
-        turn.isRemovedOnCompletion = false
-        layer.add(turn, forKey: Self.spinKey)
     }
 }

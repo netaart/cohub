@@ -1,25 +1,20 @@
 package live.cohub.android.ui
 
-import android.animation.TimeInterpolator
-import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
-import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.RectF
 import android.graphics.Typeface
-import android.graphics.drawable.AdaptiveIconDrawable
-import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
-import android.graphics.drawable.ShapeDrawable
-import android.graphics.drawable.shapes.OvalShape
 import android.os.Build
+import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -41,13 +36,11 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
     }
 
     private var state: State = State.Loading
-    private var lifting = false
-    private var onScreen = false
 
     val failure: LaunchFailure? get() = (state as? State.Failed)?.failure
 
     private val brand = context.getColor(R.color.ic_launcher_background)
-    private val mark = Mark(context).apply { contentDescription = context.getString(R.string.launch_loading) }
+    private val net = LaunchNet(context).apply { contentDescription = context.getString(R.string.launch_loading) }
     private val title = TextView(context).apply {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
         setTypeface(typeface, Typeface.BOLD)
@@ -80,18 +73,9 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
         addView(button, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = 12.dp })
     }
 
-    private val spin = ValueAnimator.ofFloat(0f, 360f).apply {
-        duration = TURN_MS
-        startDelay = HOLD_MS
-        repeatCount = ValueAnimator.INFINITE
-        interpolator = Tick
-        addUpdateListener { mark.turn = it.animatedValue as Float }
-    }
-
     init {
-        setBackgroundColor(context.getColor(R.color.shell_background))
         isClickable = true
-        addView(mark, LayoutParams(160.dp, 160.dp, Gravity.CENTER))
+        addView(net, LayoutParams(MATCH_PARENT, MATCH_PARENT))
         addView(status, LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER_HORIZONTAL).apply {
             leftMargin = 24.dp
             rightMargin = 24.dp
@@ -105,41 +89,50 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
         if (size <= 0) return@doOnLayout
         val at = IntArray(2).also(icon::getLocationInWindow)
         val own = IntArray(2).also(::getLocationInWindow)
-        mark.layoutParams = mark.layoutParams.apply {
-            width = size
-            height = size
-        }
-        mark.translationX = at[0] + icon.width / 2f - own[0] - width / 2f
-        mark.translationY = at[1] + icon.height / 2f - own[1] - height / 2f
+        net.anchor(at[0] + icon.width / 2f - own[0], at[1] + icon.height / 2f - own[1], size.toFloat())
         requestLayout()
     }
 
     fun show(next: State) {
-        animate().cancel()
-        alpha = 1f
-        lifting = false
+        if (net.lifting) {
+            status.animate().cancel()
+            status.alpha = 1f
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            net.hold()
+        }
         val appearing = !isVisible
         isVisible = true
         behind.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        if (appearing) net.restart()
         if (!appearing && next == state) return
         state = next
         render()
     }
 
     fun dismiss() {
-        if (!isVisible || lifting) return
-        lifting = true
-        animate().alpha(0f).setDuration(FADE_MS).withEndAction {
-            isVisible = false
-            behind.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
-        }.start()
+        if (!isVisible || net.lifting) return
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        behind.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        val now = SystemClock.uptimeMillis()
+        MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0).run {
+            super.dispatchTouchEvent(this)
+            recycle()
+        }
+        status.animate().alpha(0f).setDuration(FADE_MS).start()
+        net.lift { isVisible = false }
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (!net.lifting) return super.dispatchTouchEvent(event)
+        return event.actionMasked != MotionEvent.ACTION_DOWN || !net.reveals(event.x, event.y)
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
         val inset = ViewCompat.getRootWindowInsets(this)?.getInsets(WindowInsetsCompat.Type.systemBars())?.bottom ?: 0
-        val below = (mark.bottom + mark.translationY).toInt() + 32.dp
+        val below = (net.originY + net.clearance).toInt() + 32.dp
         status.offsetTopAndBottom(min(below, height - inset - 16.dp - status.height) - status.top)
+        net.clear(if (status.isVisible) RectF(status.left.toFloat(), status.top.toFloat(), status.right.toFloat(), status.bottom.toFloat()) else null)
     }
 
     private fun render() {
@@ -152,24 +145,15 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
                 LaunchFailure.BROKEN -> explain(R.string.launch_failed, action = R.string.launch_retry, prominent = true)
             }
         }
-        val failed = failure != null
-        mark.importantForAccessibility = if (failed) IMPORTANT_FOR_ACCESSIBILITY_NO else IMPORTANT_FOR_ACCESSIBILITY_YES
-        updateSpin()
-    }
-
-    override fun onVisibilityAggregated(isVisible: Boolean) {
-        super.onVisibilityAggregated(isVisible)
-        onScreen = isVisible
-        updateSpin()
-    }
-
-    private fun updateSpin() {
-        if (onScreen && failure == null) {
-            if (!spin.isStarted) spin.start()
-        } else {
-            spin.cancel()
-            mark.turn = 0f
+        net.phase = when (val current = state) {
+            State.Loading -> LaunchNet.Phase.LOADING
+            State.Slow -> LaunchNet.Phase.SLOW
+            is State.Failed -> when (current.failure) {
+                LaunchFailure.OFFLINE -> LaunchNet.Phase.OFFLINE
+                LaunchFailure.BROKEN -> LaunchNet.Phase.BROKEN
+            }
         }
+        net.importantForAccessibility = if (failure != null) IMPORTANT_FOR_ACCESSIBILITY_NO else IMPORTANT_FOR_ACCESSIBILITY_YES
     }
 
     private fun explain(
@@ -210,45 +194,8 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
 
     private val Int.dp: Int get() = (this * resources.displayMetrics.density).toInt()
 
-    private class Mark(context: Context) : View(context) {
-        var turn = 0f
-            set(value) {
-                field = value
-                invalidate()
-            }
-
-        private val glyph = requireNotNull(context.getDrawable(R.drawable.ic_launcher_foreground))
-
-        // From Android 12 the splash masks its tile like a launcher icon; before, with a circle.
-        private val tile: Drawable = context.getColor(R.color.ic_launcher_background).let { brand ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                AdaptiveIconDrawable(ColorDrawable(brand), null)
-            } else {
-                ShapeDrawable(OvalShape()).apply { paint.color = brand }
-            }
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            tile.setBounds(0, 0, width, height)
-            tile.draw(canvas)
-            // As in an adaptive icon, the glyph's canvas is 1.5× the tile.
-            glyph.setBounds(-width / 4, -height / 4, width + width / 4, height + height / 4)
-            canvas.rotate(turn, width / 2f, height / 2f)
-            glyph.draw(canvas)
-        }
-    }
-
-    private object Tick : TimeInterpolator {
-        private const val TURN = 2f / 3
-        private val ease = PathInterpolator(0.16f, 1f, 0.3f, 1f)
-
-        override fun getInterpolation(input: Float): Float = if (input < TURN) ease.getInterpolation(input / TURN) else 1f
-    }
-
     private companion object {
-        const val TURN_MS = 900L
-        const val HOLD_MS = 300L
-        const val FADE_MS = 180L
+        const val FADE_MS = 150L
         const val STATUS_FADE_MS = 200L
     }
 }

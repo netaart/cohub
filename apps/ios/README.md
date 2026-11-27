@@ -16,7 +16,8 @@ Cohub/
   AppDelegate.swift        app and scene entry: links, quick actions, foreground
   Shell.swift              app-wide state: session, inbox, sign-in, where pages go
   ShellViewController.swift the WKWebView, when its cover shows, navigation policy, dialogs, crash recovery
-  LaunchCover.swift        the launch screen's twin: the turning C, slow and failed starts
+  LaunchCover.swift        the launch screen's twin, slow and failed starts
+  LaunchNet.swift          the launch mark growing into a woven context network
   HostBridge.swift         what each bridge method does here; haptics, About
   SignIn.swift             ASWebAuthenticationSession + PKCE, HTTPS callback
   KeychainStore.swift      the session's only copy, this device only
@@ -71,8 +72,8 @@ Android uses).
 - **Start-up.** The first launch after an install clears any Keychain session an
   earlier install left. The session loads while the window is made; the WebView is
   created and starts loading at once, over the last edge color the page reported for
-  the current appearance, under a twin of the launch screen whose C turns until
-  `app.ready`; a slow or failed start is explained there (see the bridge doc's Launch
+  the current appearance, under a twin of the launch screen whose mark grows into
+  a context network until `app.ready`; a slow or failed start is explained there (see the bridge doc's Launch
   section). A cold start opens a link if there is one, else the last page, else `/`.
 - **Pages.** Only the web origin loads in the WebView; other links open in their app or
   Safari. `WKAppBoundDomains` names the origin, which lets its service worker cache the

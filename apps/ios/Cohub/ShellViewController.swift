@@ -129,8 +129,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     }
 
     private func present() {
-        cover.layer.removeAllAnimations()
-        cover.alpha = 1
+        cover.hold()
         guard cover.superview == nil else { return }
         cover.frame = view.bounds
         view.addSubview(cover)
@@ -140,18 +139,17 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     private func lift() {
         coverClock?.cancel()
         watchNetwork(false)
-        guard cover.superview != nil, cover.alpha > 0 else { return }
-        UIView.animate(withDuration: 0.18, animations: { self.cover.alpha = 0 }) { finished in
-            guard finished else { return }
-            self.cover.removeFromSuperview()
-            self.setNeedsStatusBarAppearanceUpdate()
+        guard cover.superview != nil else { return }
+        cover.lift { [weak self] in
+            self?.cover.removeFromSuperview()
+            self?.setNeedsStatusBarAppearanceUpdate()
         }
     }
 
     private func failed(_ error: Error) {
         guard let failure = LaunchFailure(error) else { return }
         // WebKit keeps a page that is on screen; only an empty surface needs the cover.
-        guard cover.superview != nil, cover.alpha > 0 else { return Toast.show(L("Can't reach Cohub"), in: view) }
+        guard cover.superview != nil, !cover.lifting else { return Toast.show(L("Can't reach Cohub"), in: view) }
         let path = (error as? URLError)?.failingURL.flatMap(shell.config.origin.path(of:))
         fail(failure, path: path ?? retryPath)
     }

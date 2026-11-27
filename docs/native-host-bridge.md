@@ -131,19 +131,22 @@ local data, not after the network. Until then iOS and Android hold a cover over
 the WebView: a twin of the system launch screen, drawn in its place before that
 one leaves, so the hand-over shows nothing.
 
-The logo's C is the app's spinner. Nothing waits for the animation, and it
-only plays on a cover, never on navigation inside the app:
+The logo grows into a context network while the page loads. Nothing waits for
+the animation, and it only plays on a cover, never on navigation inside the app.
+iOS (`LaunchNet.swift`) and Android (`LaunchNet.kt`) share its timing and layout;
+each measures the C from its own launch asset:
 
 | When | The cover |
 | --- | --- |
 | 0–300 ms | Still, as the system drew it; a fast start lifts before anything moves |
-| After 300 ms | The C turns once every 900 ms: 600 ms on the app's ease-out, 300 ms at rest |
-| `app.ready` | Fades out over 180 ms from wherever the C is |
+| 300–750 ms | The tile collapses onto the C, the C closes into an O and takes the brand color |
+| From 700 ms | Rings grow out of the O layer by layer, woven over and under their neighbours, and fill the screen by about 3.3 s |
+| `app.ready` | The O opens into a circular window onto the page while the rings swell away over 420 ms (300 ms if the rings haven't appeared yet); the page takes focus at once and touches wherever it shows through |
 | 2.5 s | Lifts anyway, once the document has committed |
-| 8 s, nothing committed | Adds “Taking longer than usual” and Reload; the logo stays where it is |
-| The document fails to load | The C stops; a title and Try again. A connection failure also retries when the network changes for the better or the app returns to the front, a TLS failure only by hand |
-| Reduce Motion (iOS) | One turn every 2.4 s |
-| Animations off (Android) | Still |
+| 8 s, nothing committed | Adds “Taking longer than usual” and Reload; a wave of light runs out through the rings |
+| The document fails to load | A connection failure drifts the rings apart into grey, unwoven, and they rejoin when it retries; other failures draw the rings back and reopen the O into a C. A title and Try again. A connection failure also retries when the network changes for the better or the app returns to the front, a TLS failure only by hand |
+| Reduce Motion (iOS) | The mark stays still and breathes; the cover fades |
+| Animations off (Android) | Still; the cover leaves at once |
 
 A page whose process dies in front reloads under the same cover. If it dies again
 before `app.ready`, the cover stops and offers a restart from `/` instead of looping.
