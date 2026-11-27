@@ -42,8 +42,20 @@ const NATIVE_QUIET_ATTENTION_MS = 30 * 60_000;
 
 type RuntimeTurn = NonNullable<Awaited<ReturnType<typeof getSessionRuntimeTurn>>>;
 
+/** A stop asks sooner than silence alone: a live run that writes reports in every few minutes. */
+const NATIVE_STOP_QUIET_MS = 10 * 60_000;
+
 const isExecutingNativeTurn = (turn: RuntimeTurn) => isNativeClientTurn(turn.meta) && readRuntimeRecovery(turn.meta)?.state === "executing";
 const nativeSync = (turn: RuntimeTurn) => (turn.meta as { nativeSync?: { observedAt?: string; controllable?: boolean } }).nativeSync ?? {};
+
+/** Whether a native Turn has been silent too long to still be running: quickly once its Runtime is gone. */
+async function nativeTurnSilent(spaceId: string, turn: RuntimeTurn, connectedQuietMs: number) {
+  // A native Turn is alive while its owner's Runtime holds the Space's lease.
+  const registration = await getRuntimeRegistration(spaceId);
+  const connected = registration?.ownerUserId === readRuntimeRecovery(turn.meta)?.ownerUserId;
+  const { observedAt } = nativeSync(turn);
+  return !observedAt || Date.now() - Date.parse(observedAt) > (connected ? connectedQuietMs : NATIVE_DISCONNECTED_ATTENTION_MS);
+}
 
 /** Clients show the Turn's recovery state from its meta, so every change to it is published. */
 export async function publishRuntimeTurn(spaceId: string, sessionId: string, turnId: string) {
@@ -66,13 +78,8 @@ async function requestNativeStopConfirmation(spaceId: string, turn: RuntimeTurn)
 
 export async function getSessionRuntimeRecovery(spaceId: string, sessionId: string) {
   let turn = await getSessionRuntimeTurn(spaceId, sessionId);
-  if (turn && isExecutingNativeTurn(turn)) {
-    const { observedAt, controllable } = nativeSync(turn);
-    // A native Turn is alive while its owner's Runtime holds the Space's lease.
-    const registration = await getRuntimeRegistration(spaceId);
-    const connected = registration?.ownerUserId === readRuntimeRecovery(turn.meta)?.ownerUserId;
-    const quietMs = !connected ? NATIVE_DISCONNECTED_ATTENTION_MS : controllable ? Number.POSITIVE_INFINITY : NATIVE_QUIET_ATTENTION_MS;
-    if (!observedAt || Date.now() - Date.parse(observedAt) > quietMs) turn = await requestNativeStopConfirmation(spaceId, turn);
+  if (turn && isExecutingNativeTurn(turn) && await nativeTurnSilent(spaceId, turn, nativeSync(turn).controllable ? Number.POSITIVE_INFINITY : NATIVE_QUIET_ATTENTION_MS)) {
+    turn = await requestNativeStopConfirmation(spaceId, turn);
   }
   const pending = turn ? readRuntimeRecovery(turn.meta)?.state === "attention" : false;
   const snapshot = runtimeRecoverySnapshot(pending && turn ? [turn] : []);
@@ -80,13 +87,13 @@ export async function getSessionRuntimeRecovery(spaceId: string, sessionId: stri
 }
 
 /**
- * A stop of a native Turn Cohub cannot reach: whether it still runs is only known in its terminal,
- * so the user is asked to confirm it has stopped. False when there is nothing to confirm.
+ * A stop of a native Turn Cohub cannot reach: once it looks gone, the user is asked to confirm it
+ * has stopped. False while it may still run, which only its terminal can stop.
  */
 export async function requestUnreachableNativeStop(spaceId: string, turn: RuntimeTurn): Promise<boolean> {
   const state = readRuntimeRecovery(turn.meta)?.state;
-  if (state === "executing") return readRuntimeRecovery((await requestNativeStopConfirmation(spaceId, turn)).meta)?.state === "attention";
-  return state === "attention";
+  if (state === "executing" && await nativeTurnSilent(spaceId, turn, NATIVE_STOP_QUIET_MS)) turn = await requestNativeStopConfirmation(spaceId, turn);
+  return readRuntimeRecovery(turn.meta)?.state === "attention";
 }
 
 export async function confirmRuntimeStopped(spaceId: string, sessionId: string, actorUserId: string, request: RuntimeStopConfirmation) {

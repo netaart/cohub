@@ -94,6 +94,8 @@ export async function recoverRuntime(input: AgentRuntimeRecoveryJobData) {
       throw new Error("Runtime recovery execution identity changed");
     }
 
+    // The Turn reported in after the confirmation was asked for: it is running, not orphaned.
+    if (input.confirmation && recovery.state === "executing") return { recovered: 0, attention: 0 };
     const confirmedBy = input.confirmation && recovery.state === "attention" ? input.confirmation.actorUserId : undefined;
     if (confirmedBy || recovery.state === "confirmed_stopped") {
       if (await recordConfirmedStop({ spaceId: input.spaceId, turn, harness, recovery, confirmedBy, lock })) drain = true;

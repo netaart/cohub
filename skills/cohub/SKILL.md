@@ -144,6 +144,7 @@ cohub spaces sessions turns get <sessionId> <turnId>
 cohub spaces sessions turns wait <sessionId> <turnId> --json
 cohub spaces sessions turns speak <sessionId> <turnId>   # read the reply aloud; prints audio URLs
 cohub spaces sessions turns fork <sessionId> <turnId>    # new Chat continuing from that turn
+cohub spaces sessions turns stop <sessionId> <turnId>    # stop a running turn; --confirm-stopped settles a terminal run Cohub cannot reach
 ```
 
 Send to a Chat with `spaces prompt --session <sessionId>`.

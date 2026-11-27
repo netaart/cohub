@@ -498,10 +498,10 @@ router.post("/:id/abort", async (c) => {
   const turnId = body?.turnId?.trim() || null;
   if (turnId && !requireValidId(turnId)) return c.json({ message: "invalid turn id" }, 400);
   const target = turnId ? await getSessionTurnById(session.id, turnId) : await getSessionRuntimeTurn(session.spaceId, session.id);
-  // A terminal client without Cohub's link cannot be stopped from here: its run may already be
-  // gone, so the user is asked to confirm that instead.
+  // A terminal client without Cohub's link cannot be stopped from here: once its run looks gone,
+  // whoever can settle it is asked to confirm that instead.
   if (target && isNativeClientTurn(target.meta) && (target.meta as { nativeSync?: { controllable?: boolean } }).nativeSync?.controllable === false && ["running", "abort_requested"].includes(target.status)) {
-    const active = await getSessionRuntimeTurn(session.spaceId, session.id);
+    const active = await hasPermission(user, "sandbox.manage", { spaceId: session.spaceId }) ? await getSessionRuntimeTurn(session.spaceId, session.id) : null;
     const confirmable = active?.id === target.id && await requestUnreachableNativeStop(session.spaceId, active);
     return c.json(confirmable
       ? { message: "Stop this native run in its terminal, or confirm in Cohub that it has stopped", code: NATIVE_STOP_CONFIRMATION_REQUIRED }

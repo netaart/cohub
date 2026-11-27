@@ -274,10 +274,15 @@ export async function observeNativeTurn(spaceId: string, userId: string, session
   let meta = sql`jsonb_set(jsonb_set(${sessionTurns.meta}, '{nativeSync,observedAt}', to_jsonb(${new Date().toISOString()}::text)), '{runtimeRecovery,state}', '"executing"'::jsonb)`;
   if (controllable !== undefined) meta = sql`jsonb_set(${meta}, '{nativeSync,controllable}', ${controllable ? sql`'true'::jsonb` : sql`'false'::jsonb`})`;
   // Restore liveness and the executing state so the attention watchdog only fires on real silence.
-  const [updated] = await db.update(sessionTurns).set({ meta })
-    .where(and(eq(sessionTurns.id, turnId), inArray(sessionTurns.status, ["running", "abort_requested"]), runtimeResolutionOpen)).returning({ id: sessionTurns.id });
+  const resumed = await db.transaction(async (tx) => {
+    // Locked so a concurrent stop request is either seen here or applied after this.
+    const [current] = await tx.select({ state: sql<string | null>`${sessionTurns.meta}->'runtimeRecovery'->>'state'` }).from(sessionTurns).where(eq(sessionTurns.id, turnId)).for("update");
+    const [updated] = await tx.update(sessionTurns).set({ meta })
+      .where(and(eq(sessionTurns.id, turnId), inArray(sessionTurns.status, ["running", "abort_requested"]), runtimeResolutionOpen)).returning({ id: sessionTurns.id });
+    return Boolean(updated) && current?.state === "attention";
+  });
   // A Turn that was waiting for a stop confirmation is alive after all; clients drop the request.
-  if (updated && record(record(turn.meta).runtimeRecovery).state === "attention") {
+  if (resumed) {
     await publishRuntimeTurn(spaceId, sessionId, turnId).catch((error) => nativeLogger.warn("[NativeTurn] recovery publish failed", { spaceId, turnId, error }));
   }
   return { abortRequested: turn.status === "abort_requested", status: turn.status };
