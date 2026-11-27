@@ -2115,15 +2115,18 @@ function registerTurns(sessionsCmd: Command): void {
         return ok(`Stop requested: ${turnId}`);
       } catch (e: unknown) {
         if ((e as { code?: unknown }).code !== NATIVE_STOP_CONFIRMATION_REQUIRED) handleHttp(e);
-        if (!opts.confirmStopped) return error("this run cannot be reached from Cohub", "stop it in its terminal, or rerun with --confirm-stopped once it has stopped");
+        if (!opts.confirmStopped) {
+          if (jsonRequested(opts)) handleHttp(e);
+          error("this run cannot be reached from Cohub", "stop it in its terminal, or rerun with --confirm-stopped once it has stopped");
+        }
       }
       try {
         const space = client.space(spaceId);
         const status = await space.getSessionRuntime(sessionId);
         if (!status.pending || status.turnId !== turnId) return error("the turn no longer awaits a stop confirmation", `check it with \`cohub spaces sessions turns get ${sessionId} ${turnId}\``);
         await space.confirmRuntimeStopped(sessionId, { confirmed: true, expectedTurnId: turnId, revision: status.revision });
-        if (jsonRequested(opts)) return outJson({ ok: true, turnId, confirmedStopped: true });
-        ok(`Turn confirmed stopped: ${turnId}`);
+        if (jsonRequested(opts)) return outJson({ ok: true, turnId, stopConfirmed: true });
+        ok(`Stop confirmation accepted: ${turnId}`);
       } catch (e: unknown) {
         handleHttp(e);
       }

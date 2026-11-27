@@ -275,7 +275,7 @@ export async function observeNativeTurn(spaceId: string, userId: string, session
   if (controllable !== undefined) meta = sql`jsonb_set(${meta}, '{nativeSync,controllable}', ${controllable ? sql`'true'::jsonb` : sql`'false'::jsonb`})`;
   // Restore liveness and the executing state so the attention watchdog only fires on real silence.
   const resumed = await db.transaction(async (tx) => {
-    // Locked so a concurrent stop request is either seen here or applied after this.
+    // Locked to read the state this replaces; a stop request after this fails its observedAt fence.
     const [current] = await tx.select({ state: sql<string | null>`${sessionTurns.meta}->'runtimeRecovery'->>'state'` }).from(sessionTurns).where(eq(sessionTurns.id, turnId)).for("update");
     const [updated] = await tx.update(sessionTurns).set({ meta })
       .where(and(eq(sessionTurns.id, turnId), inArray(sessionTurns.status, ["running", "abort_requested"]), runtimeResolutionOpen)).returning({ id: sessionTurns.id });

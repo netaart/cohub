@@ -74,7 +74,7 @@ mock.module("../src/session-turns.js", { exports: {
   },
 } });
 const { startNativeTurn, completeNativeTurn, getOwnedNativeTurn, ingestNativeTurns, knownNativeTurns, stageNativeMessages, observeNativeTurn } = await import("../src/native-turns.js");
-const { getSessionRuntimeTurn, getSessionRuntimeRecovery, requestUnreachableNativeStop, confirmRuntimeStopped } = await import("../src/runtime.js");
+const { getSessionRuntimeRecovery, confirmRuntimeStopped } = await import("../src/runtime.js");
 const { publishNativeIngest } = await import("../src/native-ingest-events.js");
 const { createSessionFork } = await import("../src/session-forks.js");
 after(() => engine.close());
@@ -245,48 +245,37 @@ async function silentNativeTurn(silentMs) {
   const turn = await getOwnedNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId);
   await database.update(sessionTurns).set({ meta: { ...turn.meta, nativeSync: { ...turn.meta.nativeSync, observedAt: new Date(Date.now() - silentMs).toISOString(), controllable: false } } }).where(eq(sessionTurns.id, binding.turnId));
   const recoveryState = async () => (await getOwnedNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId)).meta.runtimeRecovery.state;
-  const stop = async () => requestUnreachableNativeStop(spaceId, await getSessionRuntimeTurn(spaceId, binding.sessionId));
   published.length = 0;
-  return { spaceId, binding, recoveryState, stop };
+  return { spaceId, binding, recoveryState, recovery: () => getSessionRuntimeRecovery(spaceId, binding.sessionId) };
 }
 
-test("stopping a native Turn that looks gone asks to confirm it stopped; a sign of life withdraws the request", async () => {
+test("a silent native Turn asks to confirm it stopped; a sign of life withdraws the request", async () => {
   runtimeOwner = null;
-  const { spaceId, binding, recoveryState, stop } = await silentNativeTurn(60_000);
-  assert.equal(await stop(), true);
+  const { spaceId, binding, recoveryState, recovery } = await silentNativeTurn(60_000);
+  assert.equal((await recovery()).pending, true);
   assert.equal(await recoveryState(), "attention");
   assert.deepEqual(published, [["turn.updated", binding.turnId]], "clients learn the Turn asks for confirmation");
 
   await observeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId);
   assert.equal(await recoveryState(), "executing");
-  assert.deepEqual(published.at(-1), ["turn.updated", binding.turnId], "clients drop the request when the run reports in");
+  assert.deepEqual(published, [["turn.updated", binding.turnId], ["turn.updated", binding.turnId]], "clients drop the request when the run reports in");
+  await observeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId);
+  assert.equal(published.length, 2, "routine liveness publishes nothing");
 });
 
-test("a native Turn that may still run on a connected Runtime is only stopped in its terminal", async () => {
+test("a quiet native Turn on a connected Runtime may still run, until it is silent past the watchdog", async () => {
   runtimeOwner = "owner";
-  const { recoveryState, stop } = await silentNativeTurn(60_000);
-  assert.equal(await stop(), false);
-  assert.equal(await recoveryState(), "executing");
+  const quiet = await silentNativeTurn(20 * 60_000);
+  assert.equal((await quiet.recovery()).pending, false, "a long tool call writes nothing for a while");
+  assert.equal(await quiet.recoveryState(), "executing");
   assert.deepEqual(published, []);
-  runtimeOwner = null;
-});
 
-test("a confirmed stop of a native Turn enqueues its settlement", async () => {
-  runtimeOwner = "owner";
-  const { spaceId, binding, stop } = await silentNativeTurn(11 * 60_000);
-  assert.equal(await stop(), true, "a run silent past the stop window looks gone even on a connected Runtime");
-  const recovery = await getSessionRuntimeRecovery(spaceId, binding.sessionId);
-  assert.equal(recovery.pending, true);
-  assert.equal(await confirmRuntimeStopped(spaceId, binding.sessionId, "owner", { confirmed: true, expectedTurnId: binding.turnId, revision: recovery.revision }), true);
+  const { spaceId, binding, recovery } = await silentNativeTurn(31 * 60_000);
+  const status = await recovery();
+  assert.equal(status.pending, true);
+  assert.equal(await confirmRuntimeStopped(spaceId, binding.sessionId, "owner", { confirmed: true, expectedTurnId: binding.turnId, revision: status.revision }), true);
   assert.equal(recoveries.at(-1)?.expectedTurnId, binding.turnId);
   runtimeOwner = null;
-});
-
-test("a silent native Turn asks for confirmation once the Runtime is gone, and says so", async () => {
-  runtimeOwner = null;
-  const { binding, spaceId } = await silentNativeTurn(60_000);
-  assert.equal((await getSessionRuntimeRecovery(spaceId, binding.sessionId)).pending, true);
-  assert.deepEqual(published, [["turn.updated", binding.turnId]]);
 });
 
 test("session prompt permission gates native turns even with a space-level Runtime lease", async () => {

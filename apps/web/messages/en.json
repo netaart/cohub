@@ -224,7 +224,7 @@
 	"runtime_watcher_unknown": "Unknown",
 	"runtime_online": "Online",
 	"runtime_offline": "Offline",
-	"runtime_session_attention": "This local execution disconnected with an unknown result. Reconnect the Runtime to recover it, or confirm it has stopped.",
+	"runtime_session_attention": "This local execution stopped reporting, and its result is unknown. Reconnect the Runtime to recover it, or confirm it has stopped.",
 	"runtime_confirm_stopped": "I confirm this execution has stopped.",
 	"runtime_end_unknown": "End execution",
 	"runtime_confirmation_queued": "Confirmation submitted",

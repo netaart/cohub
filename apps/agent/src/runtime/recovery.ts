@@ -26,7 +26,8 @@ async function recordConfirmedStop(input: { spaceId: string; turn: typeof sessio
     ? input.recovery
     : { ...input.recovery, state: "confirmed_stopped" as const, resolvedBy: input.confirmedBy, resolvedAt: new Date().toISOString() };
   const [confirmed] = await db.update(sessionTurns).set({ meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify({ runtimeRecovery: resolution })}::jsonb` })
-    .where(and(eq(sessionTurns.id, turn.id), runtimeRecoveryActive)).returning({ id: sessionTurns.id });
+    // A Turn that reported in since it was read is running after all, and is not settled.
+    .where(and(eq(sessionTurns.id, turn.id), runtimeRecoveryActive, sql`${sessionTurns.meta}->'runtimeRecovery'->>'state' = ${input.recovery?.state ?? null}`)).returning({ id: sessionTurns.id });
   if (!confirmed) return false;
   const userMessageId = turnUserMessageId(turn);
   const batch = await loadClaimedTurnBatch({ ...turn, intent: turn.intent ?? "followup" });
