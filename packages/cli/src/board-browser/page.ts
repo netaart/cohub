@@ -4,7 +4,6 @@ import {
   type BoardSceneItem,
   boardAnimatesScriptParams,
   boardAssetKey,
-  boardDocumentUsesDepth,
   boardExportView,
   boardShaderParameters,
   boardAssetKeySource,
@@ -13,12 +12,11 @@ import {
   boardTextureEdge,
   boardTimedMedia,
   isBoardModelObject,
-  isBoardViewLevel,
   normalizeBoardDocument,
   parseBoardScriptInputs,
   selectBoardExportAssets,
 } from "@neta-art/cohub/board";
-import { createBoardExportScene, prepareBoardExport, renderBoardExport } from "@neta-art/cohub/board/export";
+import { boardExportShaders, boardExportUsesDepth, createBoardExportScene, prepareBoardExport, renderBoardExport } from "@neta-art/cohub/board/export";
 import {
   type BoardDepthStage,
   type BoardScriptCost,
@@ -94,10 +92,6 @@ async function releaseImages() {
   background?.destroy(true);
   background = undefined;
   await releaseModels();
-}
-
-function usesDepth(prepared: NonNullable<ReturnType<typeof prepareBoardExport>>): boolean {
-  return boardDocumentUsesDepth(prepared.document) || (prepared.camera !== undefined && !isBoardViewLevel(prepared.camera.view));
 }
 
 function depthStage(target: Renderer): Promise<BoardDepthStage | undefined> {
@@ -223,9 +217,9 @@ async function draw(target: Renderer, input: Draw): Promise<BoardBrowserFrameInf
   const loaded = input.withImages ? await loadTextures(visible, prepared.plan.scale, input.imageMemory, overrides) : new Map<string, Texture>();
   if (input.withImages && input.background === "paper" && document.board.background.image && background === undefined)
     background = await fetchTexture("background=1").catch(() => null);
-  const lifted = usesDepth(prepared) ? await depthStage(target) : undefined;
+  const lifted = boardExportUsesDepth(prepared) ? await depthStage(target) : undefined;
   const drawn = lifted ? await objectModels(prepared.plan.items) : undefined;
-  const shaded = (input.scripts?.shaders?.(prepared.document, time ?? 0) ?? []).length > 0;
+  const shaded = boardExportShaders(prepared, input.scripts?.shaders?.(prepared.document, time ?? 0) ?? []).length > 0;
   const result = renderBoardExport(lifted || shaded ? target : await flatRenderer(), document, {
     ...options,
     ...input.theme,
@@ -348,7 +342,7 @@ const api = {
     const inside = new Set(prepared.plan.items.map((item) => item.id));
     const owners = (scripts.shaders?.(prepared.document, time) ?? []).filter((owner) => owner.root || inside.has(owner.id));
     const layers = createBoardShaderLayers({ wait: true });
-    const lifted = usesDepth(prepared) ? await depthStage(target) : undefined;
+    const lifted = boardExportUsesDepth(prepared) ? await depthStage(target) : undefined;
     const drawn = lifted ? await objectModels(prepared.plan.items) : undefined;
     const scene = createBoardExportScene({
       settings: prepared.document.board,

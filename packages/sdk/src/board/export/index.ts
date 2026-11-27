@@ -154,6 +154,20 @@ export function prepareBoardExport(input: BoardDocument, options: BoardExportOpt
   return { document, scene, plan, sampler, camera: view };
 }
 
+type PreparedBoardExport = NonNullable<ReturnType<typeof prepareBoardExport>>;
+
+export function boardExportUsesDepth({ scene, plan, camera }: PreparedBoardExport): boolean {
+  if (camera && !isBoardViewLevel(camera.view)) return true;
+  const planned = new Set(plan.items.map((item) => item.id));
+  return boardDepthRoots(scene).some((root) => planned.has(root.id) && scene.opacity(root.id) > 0);
+}
+
+export function boardExportShaders({ scene, plan }: PreparedBoardExport, owners: readonly BoardShaderOwner[]): BoardShaderOwner[] {
+  const planned = new Set(plan.items.map((item) => item.id));
+  return owners.filter(({ id, root, output: { shader, passes } }) => Boolean(shader?.state)
+    || (Boolean(shader?.passes.some((pass) => boardShaderPassOn(pass, passes))) && (root || (planned.has(id) && scene.opacity(id) > 0))));
+}
+
 export function renderBoardExport(renderer: Renderer, input: BoardDocument, options: BoardExportOptions = {}): BoardExportResult | null {
   const prepared = prepareBoardExport(input, options);
   if (!prepared) return null;
@@ -224,21 +238,22 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     if (plan.items.length > BOARD_EXPORT_ITEM_WARN_THRESHOLD) {
       warnings.push({ kind: "many-items", count: plan.items.length });
     }
-    if (owners.length && !gpu) {
-      const drawn = owners.filter((owner) => !owner.root && owner.output.draws).map((owner) => owner.id);
-      warnings.push({ kind: "shaders-unsupported", drawn, omitted: owners.map((owner) => owner.id).filter((id) => !drawn.includes(id)) });
+    const drawing = gpu ? [] : boardExportShaders(prepared, owners);
+    if (drawing.length) {
+      const drawn = drawing.filter((owner) => !owner.root && owner.output.draws).map((owner) => owner.id);
+      warnings.push({ kind: "shaders-unsupported", drawn, omitted: drawing.map((owner) => owner.id).filter((id) => !drawn.includes(id)) });
     }
     for (const failure of exportScene.shaderErrors) warnings.push({ kind: "shader-failed", ...failure });
     const planned = new Set(plan.items.map((item) => item.id));
     if ((!gpu || !options.depth) && camera && !isBoardViewLevel(camera.view)) warnings.push({ kind: "camera-level" });
     if (!gpu || !options.depth) {
-      const flat = boardDepthRoots(scene).filter((item) => planned.has(item.id) && isBoardDepthActive(resolveBoardDepth(item.depth))).map((item) => item.id);
+      const flat = boardDepthRoots(scene).filter((item) => planned.has(item.id) && scene.opacity(item.id) > 0 && isBoardDepthActive(resolveBoardDepth(item.depth))).map((item) => item.id);
       if (flat.length) warnings.push({ kind: "depth-flat", ids: flat });
     }
     const drawn = gpu && options.depth ? options.models : undefined;
     const cards = plan.items.filter((item) => isBoardModelObject(item) && scene.opacity(item.id) > 0 && !drawn?.has(item.id)).map((item) => item.id);
     if (cards.length) warnings.push({ kind: "models-flat", ids: cards });
-    if (gpu) for (const miss of boardShaderMisses(scene, plan, owners, exportScene.shaderErrors)) warnings.push({ kind: "shader-hidden", ...miss });
+    for (const miss of boardShaderMisses(scene, plan, owners, exportScene.shaderErrors)) warnings.push({ kind: "shader-hidden", ...miss });
     return { canvas, plan, warnings };
   } finally {
     exportScene.destroy();

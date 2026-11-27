@@ -488,7 +488,7 @@ export async function runBoardExport(
           withImages: options.withImages,
           imageMemory: imageMemoryBytes,
           assetKeys: frameKeys,
-        });
+        }, timeoutMs + 10_000);
         media.push({ at: time ?? 0, media: result.media });
         for (const warning of result.warnings) report(describeFrameWarning(warning, options.withImages));
         await emit({ time, bytes: result.bytes, width: result.width, height: result.height, scale: result.scale, itemCount: result.itemCount, format: options.format });

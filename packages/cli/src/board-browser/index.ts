@@ -46,7 +46,7 @@ export type BoardBrowserPage = {
 export type BoardBrowser = {
   readonly browser: string;
   init(init: BoardBrowserInit): Promise<void>;
-  render(frame: BoardBrowserFrame): Promise<BoardBrowserFrameInfo & { bytes: Uint8Array }>;
+  render(frame: BoardBrowserFrame, timeoutMs?: number): Promise<BoardBrowserFrameInfo & { bytes: Uint8Array }>;
   simulate(input: BoardBrowserSimulation, onFrame: BoardBrowserFrameHandler): Promise<BoardSimulationResult>;
   compile(shaders: BoardBrowserShader[]): Promise<Record<string, string>>;
   profile(input: BoardBrowserProfileInput): Promise<BoardBrowserProfile>;
@@ -65,9 +65,9 @@ export function boardBrowserCalls(page: BoardBrowserPage, receiver: { current: B
   return {
     browser: page.browser,
     init: (init) => page.call("init", init),
-    async render(frame) {
+    async render(frame, timeoutMs) {
       let bytes: Uint8Array | null = null;
-      const info = await receiving(async (_info, received) => { bytes = received; }, () => page.call<BoardBrowserFrameInfo>("render", frame));
+      const info = await receiving(async (_info, received) => { bytes = received; }, () => page.call<BoardBrowserFrameInfo>("render", frame, timeoutMs));
       if (!bytes) throw new Error("The browser drew no frame.");
       return { ...info, bytes };
     },

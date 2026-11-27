@@ -189,7 +189,10 @@ export async function serveBoardBrowser(browser: string): Promise<void> {
       }
       if (!("method" in header) || active() !== caller) return;
       caller.running++;
-      void releasing.then(pageFor)
+      void releasing.then(() => {
+        if (caller.gone) throw new Error("The caller left.");
+        return pageFor();
+      })
         .then((current) => current.call(header.method, header.params, header.timeoutMs))
         .then((result) => caller.send({ id: header.id, result }), async (error: unknown) => {
           const text = error instanceof Error ? error.message : String(error);
@@ -205,6 +208,8 @@ export async function serveBoardBrowser(browser: string): Promise<void> {
     const leave = () => {
       if (caller.gone) return;
       caller.gone = true;
+      // Its unfinished call could hold the browser until its timeout.
+      if (caller.running) releasing = reset().catch(() => {});
       for (const resolve of caller.asks.values()) resolve({ header: { answer: -1, error: "The caller left." }, body: null });
       caller.asks.clear();
       release(caller);
