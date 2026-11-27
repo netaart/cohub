@@ -1,0 +1,26 @@
+name: CohubAcceptance
+options:
+  deploymentTarget:
+    macOS: "14.4"
+targets:
+  CohubAcceptance:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - ../../apple-tests/StoreAcceptanceTests.swift
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: live.cohub.acceptance
+        SWIFT_VERSION: "5.0"
+schemes:
+  Cohub Acceptance:
+    build:
+      targets:
+        CohubAcceptance: [test]
+    test:
+      config: Debug
+      targets:
+        - CohubAcceptance
+      language: en
+      region: US
