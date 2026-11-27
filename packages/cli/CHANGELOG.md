@@ -1,5 +1,24 @@
 # @neta-art/cohub-cli
 
+## 10.39.0
+
+### Minor Changes
+
+- 0524f02: Board script imports take their type from the extension, so `with { type: "json" }` and `with { type: "bytes" }` are optional and bundles whose bundler drops import attributes load as written; a wrong type still fails.
+- 0524f02: Space path arguments are relative to the current directory, like shell paths, when it is inside the Space's workspace (`/workspace` in its sandbox, or a Runtime directory): `boards`, `spaces files`, `apps publish --file/--dir` and `desktop open` resolve `ep2.board` from where you are instead of the Space root. Paths written inside documents, such as a Board's `src`, stay relative to the Space root.
+- d04eef0: Referral rewards now trigger on the invitee's first payment instead of their first conversation. Invitees have 30 days after joining to make it, and every qualifying payment is rewarded: the 5-per-cycle limit is gone.
+  
+  `ReferralDashboard.quota`, `ReferralListItem.inCurrentCycle` and `PublicReferral.rewardAvailable` are removed; read `summary.pending` for invitees still awaiting their first payment and `reward.paymentWindowDays` for the window. `cohub referrals` prints `Awaiting first payment` instead of the cycle line.
+
+### Patch Changes
+
+- 0524f02: `cohub boards export` renders scripted videos about 30% faster: script frames stay in one browser process, and the next frame's scripts run while the current frame uploads.
+- fc9a684: Download sandboxd v2.112.0.
+- Updated dependencies [e9f56b3]
+- Updated dependencies [0524f02]
+- Updated dependencies [d04eef0]
+  - @neta-art/cohub@13.32.0
+
 ## 10.38.0
 
 ### Minor Changes
