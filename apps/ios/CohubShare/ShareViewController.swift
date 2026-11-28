@@ -51,10 +51,11 @@ final class ShareViewController: UIViewController {
 
     private static func copyFile(from provider: NSItemProvider, into draft: SharedInbox.Draft) async {
         guard let type = provider.registeredTypeIdentifiers.compactMap({ UTType($0) }).first(where: { $0.conforms(to: .data) }) else { return }
+        let suggested = provider.suggestedName
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             _ = provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, _ in
                 if let url {
-                    var name = provider.suggestedName ?? url.deletingPathExtension().lastPathComponent
+                    var name = suggested ?? url.deletingPathExtension().lastPathComponent
                     if let ext = type.preferredFilenameExtension, (name as NSString).pathExtension.isEmpty { name += ".\(ext)" }
                     try? draft.add(fileAt: url, name: name, mimeType: type.preferredMIMEType ?? "application/octet-stream")
                 }
