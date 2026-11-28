@@ -2,7 +2,7 @@ import Carbon.HIToolbox
 
 @MainActor
 final class GlobalShortcut {
-    private static let signature: OSType = 0x4348_5542 // 'CHUB'
+    private static let signature: OSType = 0x4348_5542  // 'CHUB'
     private nonisolated(unsafe) static var action: (@MainActor () -> Void)?
 
     private var key: EventHotKeyRef?
@@ -21,10 +21,12 @@ final class GlobalShortcut {
 
     private func register() {
         var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-            MainActor.assumeIsolated { GlobalShortcut.action?() }
-            return OSStatus(noErr)
-        }, 1, &type, nil, &handler)
+        InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, _, _ in
+                MainActor.assumeIsolated { GlobalShortcut.action?() }
+                return OSStatus(noErr)
+            }, 1, &type, nil, &handler)
         let id = EventHotKeyID(signature: Self.signature, id: 1)
         RegisterEventHotKey(UInt32(kVK_Space), UInt32(controlKey | optionKey), id, GetApplicationEventTarget(), 0, &key)
     }

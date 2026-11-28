@@ -1,3 +1,4 @@
+import { syncHostLocale } from "#lib/host-bridge.ts";
 import { setLocale as setParaglideLocale } from "#lib/paraglide/runtime.js";
 import {
 	isLocalePreference,
@@ -33,6 +34,7 @@ let locale = $state<Locale>(initialLocale);
 function applyLocale(nextLocale: Locale) {
 	locale = nextLocale;
 	void setParaglideLocale(nextLocale, { reload: false });
+	syncHostLocale(preference === "system" ? null : preference);
 	if (typeof document !== "undefined") {
 		// Public pages derive lang from the URL (set by SSR); don't let the app
 		// shell preference override it on those pages (hydration consistency).

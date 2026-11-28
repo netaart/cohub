@@ -61,4 +61,10 @@
   <data name="Web {0}" xml:space="preserve"><value>网页版 {0}</value></data>
   <data name="Copied" xml:space="preserve"><value>已复制</value></data>
   <data name="Close" xml:space="preserve"><value>关闭</value></data>
+  <data name="OK" xml:space="preserve"><value>确定</value></data>
+  <data name="Cancel" xml:space="preserve"><value>取消</value></data>
+  <data name="Leave" xml:space="preserve"><value>离开</value></data>
+  <data name="Leave this page?" xml:space="preserve"><value>离开此页面？</value></data>
+  <data name="Changes you made may not be saved." xml:space="preserve"><value>你所做的更改可能不会保存。</value></data>
+  <data name="Embedded page" xml:space="preserve"><value>嵌入的页面</value></data>
 </root>

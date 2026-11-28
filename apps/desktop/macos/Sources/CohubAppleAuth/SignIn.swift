@@ -23,11 +23,12 @@ public final class SignIn: NSObject, ASWebAuthenticationPresentationContextProvi
         self.anchor = anchor
     }
 
-    public func run(_ config: AuthConfig, forceLogin: Bool) async throws -> Grant? {
-        let verifier = Self.random(bytes: 32), state = Self.random(bytes: 16)
+    public func run(_ config: AuthConfig, forceLogin: Bool, provider: String?) async throws -> Grant? {
+        let verifier = Self.random(bytes: 32)
+        let state = Self.random(bytes: 16)
         let challenge = Self.base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
-        guard let url = AuthorizationRequest.url(config: config, challenge: challenge, state: state, forceLogin: forceLogin),
-              let host = config.redirectURI.host()
+        guard let url = AuthorizationRequest.url(config: config, challenge: challenge, state: state, forceLogin: forceLogin, provider: provider),
+            let host = config.redirectURI.host()
         else { throw Failure(reason: "Malformed sign-in configuration") }
 
         let redirect: URL? = try await withCheckedThrowingContinuation { continuation in

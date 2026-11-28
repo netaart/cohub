@@ -49,8 +49,9 @@ public struct SharedInbox: Sendable {
                 let size = (try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                 var stored: String?
                 if size <= HostProtocol.shareFileMaxBytes {
-                    stored = String(files.count)
-                    try FileManager.default.copyItem(at: source, to: directory.appendingPathComponent(stored!))
+                    let file = String(files.count)
+                    try FileManager.default.copyItem(at: source, to: directory.appendingPathComponent(file))
+                    stored = file
                 }
                 files.append(Share.File(name: SharedInbox.fileName(name), mimeType: mimeType, size: size, stored: stored))
             }
@@ -100,8 +101,8 @@ public struct SharedInbox: Sendable {
             pruneDrafts()
         }
         guard let newest = waiting.last,
-              let data = manager.contents(atPath: pending.appendingPathComponent(newest).appendingPathComponent(Self.manifest).path),
-              let share = try? JSONDecoder().decode(Share.self, from: data)
+            let data = manager.contents(atPath: pending.appendingPathComponent(newest).appendingPathComponent(Self.manifest).path),
+            let share = try? JSONDecoder().decode(Share.self, from: data)
         else { return nil }
         try? manager.removeItem(at: taken)
         try? manager.createDirectory(at: taken, withIntermediateDirectories: true)
@@ -110,13 +111,24 @@ public struct SharedInbox: Sendable {
     }
 
     public func read(id: String, index: Int) throws -> Data {
+        try Data(contentsOf: file(id: id, index: index).url)
+    }
+
+    public func file(id: String, index: Int) throws -> (url: URL, file: Share.File) {
         let directory = taken.appendingPathComponent(Self.fileName(id))
         guard let data = FileManager.default.contents(atPath: directory.appendingPathComponent(Self.manifest).path),
-              let share = try? JSONDecoder().decode(Share.self, from: data), share.id == id
+            let share = try? JSONDecoder().decode(Share.self, from: data), share.id == id
         else { throw BridgeFailure.failed("That share is gone") }
         guard share.files.indices.contains(index) else { throw BridgeFailure.failed("No shared file at \(index)") }
         guard let stored = share.files[index].stored else { throw BridgeFailure.failed("This file is too large to share") }
-        return try Data(contentsOf: directory.appendingPathComponent(stored))
+        return (directory.appendingPathComponent(stored), share.files[index])
+    }
+
+    public static func target(of url: URL) -> (id: String, index: Int)? {
+        guard url.scheme?.lowercased() == HostProtocol.shareScheme, let id = url.host?.removingPercentEncoding, !id.isEmpty,
+            url.pathComponents.count == 2, let index = Int(url.pathComponents[1]), index >= 0
+        else { return nil }
+        return (id, index)
     }
 
     private func pruneDrafts() {
@@ -135,9 +147,10 @@ public struct SharedInbox: Sendable {
 
     static func prefix(_ text: String, utf16 limit: Int) -> String {
         var count = 0
-        return String(text.prefix { character in
-            count += character.utf16.count
-            return count <= limit
-        })
+        return String(
+            text.prefix { character in
+                count += character.utf16.count
+                return count <= limit
+            })
     }
 }

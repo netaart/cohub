@@ -36,14 +36,11 @@ public sealed class WebOrigin
         return IsInAppPath(path) ? path : null;
     }
 
-    public Navigation NavigationTo(Uri target)
+    public Navigation NavigationTo(Uri target, bool mainFrame = true)
     {
         if (Contains(target)) return Navigation.Allow;
-        return target.Scheme.ToLowerInvariant() switch
-        {
-            "https" or "http" or "mailto" or "tel" => Navigation.External,
-            _ => Navigation.Deny,
-        };
+        if (!mainFrame) return target.Scheme is "https" or "http" or "about" or "data" or "blob" ? Navigation.Allow : Navigation.Deny;
+        return HostProtocol.ExternalSchemes.Contains(target.Scheme, StringComparer.OrdinalIgnoreCase) ? Navigation.External : Navigation.Deny;
     }
 
     public static string? PathFromDeepLink(string link, string scheme = "cohub")

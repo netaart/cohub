@@ -32,7 +32,7 @@ final class StatusMenu {
         rebuild()
     }
 
-    private func rebuild() {
+    func rebuild() {
         guard let summary = overview.summary else {
             if let item { NSStatusBar.system.removeStatusItem(item) }
             item = nil
@@ -62,9 +62,10 @@ final class StatusMenu {
             submenu.addItem(.disabled(Self.describe(folder.state)))
             submenu.addItem(.separator())
             submenu.addItem(ActionMenuItem(L("Open Space")) { [actions] in actions.openSpace(folder.spaceId) })
-            submenu.addItem(ActionMenuItem(L("Show in Finder")) {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: folder.root)])
-            })
+            submenu.addItem(
+                ActionMenuItem(L("Show in Finder")) {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: folder.root)])
+                })
             submenu.addItem(.separator())
             submenu.addItem(ActionMenuItem(L("Disconnect")) { [actions] in actions.disconnect(folder.spaceId) })
             entry.submenu = submenu
@@ -110,12 +111,13 @@ final class StatusMenu {
 
     private nonisolated static func dot(_ state: RuntimeOverview.State) -> NSImage {
         NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
-            let color: NSColor = switch state {
-            case .ready: .systemGreen
-            case .connecting: .systemYellow
-            case .error: .systemRed
-            case .stopped: .tertiaryLabelColor
-            }
+            let color: NSColor =
+                switch state {
+                case .ready: .systemGreen
+                case .connecting: .systemYellow
+                case .error: .systemRed
+                case .stopped: .tertiaryLabelColor
+                }
             color.setFill()
             NSBezierPath(ovalIn: rect).fill()
             return true

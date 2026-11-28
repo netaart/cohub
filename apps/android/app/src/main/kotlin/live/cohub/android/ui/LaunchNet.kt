@@ -1,5 +1,6 @@
 package live.cohub.android.ui
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Canvas
@@ -10,7 +11,6 @@ import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.AdaptiveIconDrawable
-import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.ShapeDrawable
 import android.graphics.drawable.shapes.OvalShape
@@ -18,6 +18,9 @@ import android.os.Build
 import android.provider.Settings
 import android.view.Choreographer
 import android.view.View
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toDrawable
+import androidx.core.graphics.withTranslation
 import live.cohub.android.R
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -50,11 +53,11 @@ class LaunchNet(context: Context) : View(context) {
 
     private val density = resources.displayMetrics.density
     private val brand = context.getColor(R.color.ic_launcher_background)
-    private val glyph = requireNotNull(context.getDrawable(R.drawable.ic_launcher_foreground)).mutate()
+    private val glyph = requireNotNull(ContextCompat.getDrawable(context, R.drawable.ic_launcher_foreground)).mutate()
 
     // From Android 12 the splash masks its tile like a launcher icon; before, with a circle.
     private val tile: Drawable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        AdaptiveIconDrawable(ColorDrawable(brand), null)
+        AdaptiveIconDrawable(brand.toDrawable(), null)
     } else {
         ShapeDrawable(OvalShape()).apply { paint.color = brand }
     }
@@ -201,7 +204,7 @@ class LaunchNet(context: Context) : View(context) {
             done?.invoke()
             return
         }
-        val settled = (phase == Phase.OFFLINE && offline > 0.999 || phase == Phase.BROKEN && broken > 0.999) &&
+        val settled = ((phase == Phase.OFFLINE && offline > 0.999) || (phase == Phase.BROKEN && broken > 0.999)) &&
             clock > GROW_FROM + GROW && abs(cleared - if (clearingShown) 1.0 else 0.0) < 0.001
         if (settled && !lifting) {
             running = false
@@ -223,13 +226,17 @@ class LaunchNet(context: Context) : View(context) {
 
     private fun opening(grown: Double, e: Double): Pair<Double, Double> {
         val hubWidth = lerp(markWidth.toDouble(), HUB * density, grown) * (1 + 0.6 * outCubic(e))
-        val hole = lerp((markRadius - markWidth / 2).toDouble(), hypot(width.toDouble(), height.toDouble()) / 2 + hubWidth,
-            inOutCubic(clamp((e - 0.12) / 0.88)))
+        val hole = lerp(
+            (markRadius - markWidth / 2).toDouble(),
+            hypot(width.toDouble(), height.toDouble()) / 2 + hubWidth,
+            inOutCubic(clamp((e - 0.12) / 0.88)),
+        )
         return hubWidth to hole
     }
 
     private fun exitProgress(from: Double) = clamp((clock - from) / if (from < BORN) QUICK_EXIT else EXIT)
 
+    @SuppressLint("DrawAllocation", "UseKtx")
     override fun onDraw(canvas: Canvas) {
         val bg = context.getColor(R.color.shell_background)
         val centerX = markX
@@ -301,9 +308,13 @@ class LaunchNet(context: Context) : View(context) {
         val hubGap = GAP_DEGREES * max(1 - close, broken)
         if (tint >= 1) {
             rings += Ring(
-                x = centerX.toDouble(), y = centerY.toDouble(),
+                x = centerX.toDouble(),
+                y = centerY.toDouble(),
                 radius = if (lifting) max(unit, holeRadius + hubWidth / 2) else unit,
-                width = hubWidth, color = blend(bg, brand, 1 - e.pow(3)), hub = true, gap = hubGap,
+                width = hubWidth,
+                color = blend(bg, brand, 1 - e.pow(3)),
+                hub = true,
+                gap = hubGap,
             )
         }
         weave(canvas, bg)
@@ -314,11 +325,10 @@ class LaunchNet(context: Context) : View(context) {
                     .also { clearingShader = bg to it }
             clearingPaint.shader = shader
             clearingPaint.alpha = (cleared * 255).roundToInt()
-            canvas.save()
-            canvas.translate(clearing.centerX(), clearing.centerY())
-            canvas.scale(clearing.width() / 200, clearing.height() / 200)
-            canvas.drawCircle(0f, 0f, 100f, clearingPaint)
-            canvas.restore()
+            canvas.withTranslation(clearing.centerX(), clearing.centerY()) {
+                scale(clearing.width() / 200, clearing.height() / 200)
+                drawCircle(0f, 0f, 100f, clearingPaint)
+            }
         }
 
         if (tint < 1) {
@@ -330,13 +340,12 @@ class LaunchNet(context: Context) : View(context) {
                 canvas.drawCircle(atX, atY, size / 2, fill)
             }
             if (shape < 1) {
-                canvas.save()
-                canvas.translate(atX - originX, atY - originY)
-                canvas.scale(size / tileSize, size / tileSize, originX, originY)
-                tile.setBounds(tileLeft, tileTop, tileRight, tileBottom)
-                tile.alpha = ((1 - shape) * 255).roundToInt()
-                tile.draw(canvas)
-                canvas.restore()
+                canvas.withTranslation(atX - originX, atY - originY) {
+                    scale(size / tileSize, size / tileSize, originX, originY)
+                    tile.setBounds(tileLeft, tileTop, tileRight, tileBottom)
+                    tile.alpha = ((1 - shape) * 255).roundToInt()
+                    tile.draw(this)
+                }
             }
             val inner = (markRadius - markWidth / 2) * tint
             if (inner > 0) {
@@ -352,8 +361,16 @@ class LaunchNet(context: Context) : View(context) {
                 stroke.strokeCap = Paint.Cap.ROUND
                 stroke.strokeWidth = markWidth
                 stroke.color = withAlpha(blend(Color.WHITE, brand, tint), (arc * 255).roundToInt())
-                canvas.drawArc(centerX - markRadius, centerY - markRadius, centerX + markRadius, centerY + markRadius,
-                    hubGap.toFloat(), (360 - 2 * hubGap).toFloat(), false, stroke)
+                canvas.drawArc(
+                    centerX - markRadius,
+                    centerY - markRadius,
+                    centerX + markRadius,
+                    centerY + markRadius,
+                    hubGap.toFloat(),
+                    (360 - 2 * hubGap).toFloat(),
+                    false,
+                    stroke,
+                )
                 stroke.strokeCap = Paint.Cap.BUTT
             }
         }
@@ -374,32 +391,34 @@ class LaunchNet(context: Context) : View(context) {
             }
         }
         val gap = GAP * density
-        for (i in rings.indices) for (j in i + 1 until rings.size) {
-            val a = rings[i]
-            val b = rings[j]
-            val dx = b.x - a.x
-            val dy = b.y - a.y
-            val d = hypot(dx, dy)
-            if (d >= a.radius + b.radius || d <= abs(a.radius - b.radius) || d < 0.001) continue
-            val along = (a.radius * a.radius - b.radius * b.radius + d * d) / (2 * d)
-            val h = sqrt(max(0.0, a.radius * a.radius - along * along))
-            val midX = a.x + dx * along / d
-            val midY = a.y + dy * along / d
-            for (s in SIDES) {
-                val px = midX - s * dy * h / d
-                val py = midY + s * dx * h / d
-                val clockwise = dx * (py - a.y) - dy * (px - a.x) < 0
-                val over = if (a.hub || (!b.hub && clockwise)) a else b
-                val under = if (over === a) b else a
-                val phi = Math.toDegrees(atan2(py - over.y, px - over.x))
-                if (over.gap > 0.001 && abs(phi) < over.gap) continue
-                val half = Math.toDegrees((under.width / 2 + gap + 2 * density) / over.radius * 1.4)
-                stroke.color = bg
-                stroke.strokeWidth = (over.width + 2 * gap).toFloat()
-                arc(canvas, over, phi - half, 2 * half)
-                stroke.color = over.color
-                stroke.strokeWidth = over.width.toFloat()
-                arc(canvas, over, phi - half * 1.05, 2 * half * 1.05)
+        for (i in rings.indices) {
+            for (j in i + 1 until rings.size) {
+                val a = rings[i]
+                val b = rings[j]
+                val dx = b.x - a.x
+                val dy = b.y - a.y
+                val d = hypot(dx, dy)
+                if (d >= a.radius + b.radius || d <= abs(a.radius - b.radius) || d < 0.001) continue
+                val along = (a.radius * a.radius - b.radius * b.radius + d * d) / (2 * d)
+                val h = sqrt(max(0.0, a.radius * a.radius - along * along))
+                val midX = a.x + dx * along / d
+                val midY = a.y + dy * along / d
+                for (s in SIDES) {
+                    val px = midX - s * dy * h / d
+                    val py = midY + s * dx * h / d
+                    val clockwise = dx * (py - a.y) - dy * (px - a.x) < 0
+                    val over = if (a.hub || (!b.hub && clockwise)) a else b
+                    val under = if (over === a) b else a
+                    val phi = Math.toDegrees(atan2(py - over.y, px - over.x))
+                    if (over.gap > 0.001 && abs(phi) < over.gap) continue
+                    val half = Math.toDegrees((under.width / 2 + gap + 2 * density) / over.radius * 1.4)
+                    stroke.color = bg
+                    stroke.strokeWidth = (over.width + 2 * gap).toFloat()
+                    arc(canvas, over, phi - half, 2 * half)
+                    stroke.color = over.color
+                    stroke.strokeWidth = over.width.toFloat()
+                    arc(canvas, over, phi - half * 1.05, 2 * half * 1.05)
+                }
             }
         }
     }
@@ -436,20 +455,26 @@ class LaunchNet(context: Context) : View(context) {
         companion object {
             fun lattice(reach: Double): List<Node> {
                 val nodes = ArrayList<Node>()
-                for (q in -LAYERS..LAYERS) for (r in -LAYERS..LAYERS) {
-                    val n = (abs(q) + abs(r) + abs(q + r)) / 2
-                    val x = SPACING * (q + r / 2.0)
-                    val y = SPACING * sqrt(3.0) / 2 * r
-                    if (n == 0 || n > LAYERS || hypot(x, y) > reach) continue
-                    val back = (n - 1).toDouble() / n
-                    val (pq, pr) = nearest(q * back, r * back)
-                    val around = (atan2(y, x) + Math.PI) / (2 * Math.PI)
-                    nodes += Node(
-                        n, x, y, SPACING * (pq + pr / 2), SPACING * sqrt(3.0) / 2 * pr,
-                        born = BORN + LAYER * (n - 1.0).pow(1.1) + STAGGER * around,
-                        driftX = noise(q, r, 12.9898, 78.233),
-                        driftY = noise(q, r, 39.346, 11.135),
-                    )
+                for (q in -LAYERS..LAYERS) {
+                    for (r in -LAYERS..LAYERS) {
+                        val n = (abs(q) + abs(r) + abs(q + r)) / 2
+                        val x = SPACING * (q + r / 2.0)
+                        val y = SPACING * sqrt(3.0) / 2 * r
+                        if (n == 0 || n > LAYERS || hypot(x, y) > reach) continue
+                        val back = (n - 1).toDouble() / n
+                        val (pq, pr) = nearest(q * back, r * back)
+                        val around = (atan2(y, x) + Math.PI) / (2 * Math.PI)
+                        nodes += Node(
+                            n,
+                            x,
+                            y,
+                            SPACING * (pq + pr / 2),
+                            SPACING * sqrt(3.0) / 2 * pr,
+                            born = BORN + LAYER * (n - 1.0).pow(1.1) + STAGGER * around,
+                            driftX = noise(q, r, 12.9898, 78.233),
+                            driftY = noise(q, r, 39.346, 11.135),
+                        )
+                    }
                 }
                 return nodes.sortedByDescending { it.n }
             }
@@ -462,7 +487,11 @@ class LaunchNet(context: Context) : View(context) {
                 val dx = abs(rx - x)
                 val dy = abs(ry - y)
                 val dz = abs(rz - z)
-                if (dx > dy && dx > dz) rx = -ry - rz else if (dz >= dy) rz = -rx - ry
+                if (dx > dy && dx > dz) {
+                    rx = -ry - rz
+                } else if (dz >= dy) {
+                    rz = -rx - ry
+                }
                 return rx to rz
             }
 

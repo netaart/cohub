@@ -10,6 +10,8 @@ on:
       - 'packages/cli/**'
       - 'scripts/stage-runtime.mjs'
       - 'packages/protocol/src/host-bridge.ts'
+      - 'packages/protocol/src/native-apps.json'
+      - 'packages/protocol/fixtures/host-bridge.json'
       - '.github/workflows/android.yml'
       # Bot PRs (Version Packages, binary pins) change only versions; prepublishOnly verifies pinned binaries.
       - '!packages/cli/package.json'
@@ -26,6 +28,8 @@ on:
       - 'packages/cli/**'
       - 'scripts/stage-runtime.mjs'
       - 'packages/protocol/src/host-bridge.ts'
+      - 'packages/protocol/src/native-apps.json'
+      - 'packages/protocol/fixtures/host-bridge.json'
       - '.github/workflows/android.yml'
   workflow_dispatch:
     inputs:
@@ -144,7 +148,7 @@ jobs:
         run: |
           # AGP 9 only creates unit tests for the tested build type (debug by
           # default), so :app:testReleaseUnitTest no longer exists.
-          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:lintPlayRelease :app:bundlePlayRelease --continue \
+          ./gradlew :app:ktlintCheck :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:lintPlayRelease :app:bundlePlayRelease --continue \
             -PcohubEnv=dev \
             -PcohubVersionCode="$VERSION_CODE" \
             -PcohubVersionSuffix="-dev.${VERSION_CODE}+${SHA}"

@@ -8,11 +8,11 @@ enum LaunchFailure: Equatable {
         guard let error = error as? URLError else { return nil }
         switch error.code {
         case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost,
-             .dnsLookupFailed, .timedOut, .dataNotAllowed, .internationalRoamingOff, .callIsActive:
+            .dnsLookupFailed, .timedOut, .dataNotAllowed, .internationalRoamingOff, .callIsActive:
             self = .offline
         case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate,
-             .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,
-             .clientCertificateRejected, .clientCertificateRequired:
+            .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,
+            .clientCertificateRejected, .clientCertificateRequired:
             self = .broken
         default:
             return nil

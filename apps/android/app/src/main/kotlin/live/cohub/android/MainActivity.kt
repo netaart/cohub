@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.app.AppOpsManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
 import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
@@ -18,11 +19,15 @@ import android.util.Log
 import android.view.HapticFeedbackConstants
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.WindowManager
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient.FileChooserParams
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -41,46 +46,58 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.withStarted
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import live.cohub.android.auth.Account
 import live.cohub.android.auth.AuthSession
 import live.cohub.android.auth.AuthorizationRequest
+import live.cohub.android.auth.GoogleSignIn
+import live.cohub.android.auth.PendingSignIn
 import live.cohub.android.auth.PendingSignIns
 import live.cohub.android.auth.Pkce
 import live.cohub.android.auth.SignInBrowser
+import live.cohub.android.auth.SignInFlow
 import live.cohub.android.files.FileChooser
-import live.cohub.android.media.LocationAccess
-import live.cohub.android.media.MediaCapture
 import live.cohub.android.host.CancellationSignal
 import live.cohub.android.host.HostActions
 import live.cohub.android.host.HostBridge
 import live.cohub.android.host.HostPermissions
 import live.cohub.android.host.HostProtocol
+import live.cohub.android.host.HostValues
 import live.cohub.android.host.IncomingShare
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LaunchFailure
 import live.cohub.android.host.LauncherShortcuts
+import live.cohub.android.host.PageDialog
+import live.cohub.android.host.PageDialogs
 import live.cohub.android.host.ScreenCaptureGrant
 import live.cohub.android.host.SurfaceListener
 import live.cohub.android.host.WebOrigin
 import live.cohub.android.host.WebSurface
 import live.cohub.android.host.WebWarmup
+import live.cohub.android.media.LocationAccess
+import live.cohub.android.media.MediaCapture
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.RuntimeService
 import live.cohub.android.runtime.toJson
+import live.cohub.android.ui.HostLocale
 import live.cohub.android.ui.LaunchCover
 import live.cohub.android.ui.ShellAppearance
 import live.cohub.android.ui.SurfaceContainer
 import kotlin.coroutines.resume
 
 /** The shell: one WebView for product UI, one bridge for native capability. */
-class MainActivity : ComponentActivity(), HostActions {
+class MainActivity :
+    ComponentActivity(),
+    HostActions {
 
     private lateinit var auth: AuthSession
     private val runtime: DeviceRuntime? by lazy {
@@ -101,10 +118,18 @@ class MainActivity : ComponentActivity(), HostActions {
     private var pendingCapture: CompletableDeferred<ScreenCaptureGrant?>? = null
     private lateinit var hostPermissions: HostPermissions
     private var incomingShare: IncomingShare? = null
+
+    @Volatile
     private var takenShare: IncomingShare? = null
     private val app get() = application as CohubApplication
     private val hostPrefs by lazy { getSharedPreferences("cohub-host", MODE_PRIVATE) }
     private val signIns by lazy { PendingSignIns(getSharedPreferences("cohub-sign-in", MODE_PRIVATE)) }
+    private val signIn = SignInFlow { outcome -> bridge.emit(HostProtocol.Events.AUTH_FLOW, buildJsonObject { put("outcome", outcome) }) }
+    private val google by lazy { GoogleSignIn(this, app.http) }
+    private val pageDialogs = PageDialogs(::showPageDialog)
+    private var leftForBrowser = false
+
+    private var tabAttempt = 0
     private var pendingResult: CompletableDeferred<Unit>? = null
     private val preparing = Mutex()
 
@@ -142,6 +167,8 @@ class MainActivity : ComponentActivity(), HostActions {
         override fun onPageStarted() {
             layerBack.isEnabled = false
             app.display?.page?.value = null
+            pageDialogs.dismiss()
+            bridge.onNewDocument()
         }
 
         override fun onPageCommitted() {
@@ -172,6 +199,11 @@ class MainActivity : ComponentActivity(), HostActions {
 
         override fun onDownload(url: String, contentDisposition: String?, mimeType: String?) =
             download(url, contentDisposition, mimeType)
+
+        override fun onPageDialog(dialog: PageDialog) = pageDialogs.request(dialog)
+
+        override fun onSharedFileRequest(request: WebResourceRequest): WebResourceResponse =
+            IncomingShare.respond(takenShare, request, contentResolver)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -200,13 +232,20 @@ class MainActivity : ComponentActivity(), HostActions {
         locationAccess = LocationAccess(this)
 
         // The authorization result returns as a redirect intent, not an activity
-        // result; this launcher only opens the browser.
-        customTabs = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
+        customTabs = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            val attempt = tabAttempt
+            window.decorView.postDelayed({
+                if (signIn.stage == SignInFlow.Stage.BROWSER) signIn.end(HostProtocol.AuthFlowOutcomes.CANCELED, attempt)
+            }, TAB_CLOSED_GRACE_MS)
+        }
         authTab = AuthTabIntent.registerActivityResultLauncher(this) { result ->
             when (result.resultCode) {
-                AuthTabIntent.RESULT_OK -> result.resultUri?.let(::handleSignInRedirect) ?: toast(R.string.sign_in_failed)
-                AuthTabIntent.RESULT_CANCELED -> signIns.clear()
-                else -> toast(R.string.sign_in_failed)
+                AuthTabIntent.RESULT_OK -> result.resultUri?.let(::handleSignInRedirect) ?: signInFailed()
+                AuthTabIntent.RESULT_CANCELED -> {
+                    signIns.clear()
+                    signIn.end(HostProtocol.AuthFlowOutcomes.CANCELED)
+                }
+                else -> signInFailed()
             }
         }
         allFilesAccess = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -253,6 +292,8 @@ class MainActivity : ComponentActivity(), HostActions {
 
     override fun onDestroy() {
         app.display?.page?.value = null
+        pageDialogs.dismiss()
+        bridge.onNewDocument()
         stopWaiting()
         container.removeAllViews()
         surface?.destroy()
@@ -266,7 +307,7 @@ class MainActivity : ComponentActivity(), HostActions {
         // Without the bridge the surface still runs on its browser path; this
         // only explains missing features.
         if (!bridge.attach(next.view, WebOrigin.uri)) {
-            Toast.makeText(this, R.string.bridge_unavailable, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, strings.getString(R.string.bridge_unavailable), Toast.LENGTH_LONG).show()
         }
         container.show(next.view)
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) next.pause()
@@ -329,6 +370,8 @@ class MainActivity : ComponentActivity(), HostActions {
     private fun recoverSurface(crashed: Boolean) {
         val dead = surface ?: return
         surface = null
+        pageDialogs.dismiss()
+        bridge.onNewDocument()
         container.removeView(dead.view)
         dead.destroy()
         historyBack.isEnabled = false
@@ -363,7 +406,19 @@ class MainActivity : ComponentActivity(), HostActions {
         bridge.emit(HostProtocol.Events.APP_FOREGROUND)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (leftForBrowser && signIn.stage == SignInFlow.Stage.BROWSER) signIn.end(HostProtocol.AuthFlowOutcomes.CANCELED)
+        leftForBrowser = false
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        relocalize()
+    }
+
     override fun onStop() {
+        if (signIn.stage == SignInFlow.Stage.BROWSER) leftForBrowser = true
         surface?.pause()
         bridge.emit(HostProtocol.Events.APP_BACKGROUND)
         super.onStop()
@@ -396,7 +451,44 @@ class MainActivity : ComponentActivity(), HostActions {
         return withContext(Dispatchers.IO) { share.readBase64(contentResolver, index) }
     }
 
-    override fun startSignIn(redirectPath: String?) {
+    override fun startSignIn(redirectPath: String?, provider: String?): Boolean {
+        if (provider == HostProtocol.SignInProviders.GOOGLE) {
+            if (!signIn.begin(SignInFlow.Stage.GOOGLE)) return false
+            lifecycleScope.launch {
+                runCatching { signInWithGoogle(redirectPath) }.onFailure {
+                    if (it is CancellationException) throw it
+                    Log.w(TAG, "Google sign-in failed", it)
+                    signInFailed()
+                }
+            }
+            return true
+        }
+        if (!signIn.begin(SignInFlow.Stage.BROWSER)) return false
+        if (!openSignInBrowser(redirectPath, provider)) throw CancellationSignal("No browser available to complete sign-in")
+        return true
+    }
+
+    private suspend fun signInWithGoogle(redirectPath: String?) {
+        val challenge = Pkce.create()
+        val request = signIns.begin(challenge.verifier, BuildConfig.OAUTH_REDIRECT_URI, redirectPath)
+        val result = google.signIn(request.state, request.redirectUri) { credential ->
+            authorization(request, challenge, HostProtocol.SignInProviders.GOOGLE, credential)
+        }
+        when (result) {
+            is GoogleSignIn.Result.Redirected -> handleSignInRedirect(result.uri)
+            GoogleSignIn.Result.Canceled -> {
+                signIns.clear()
+                signIn.end(HostProtocol.AuthFlowOutcomes.CANCELED)
+            }
+            GoogleSignIn.Result.Failed -> signInFailed()
+            GoogleSignIn.Result.Unavailable -> {
+                signIn.advance(SignInFlow.Stage.BROWSER)
+                if (!openSignInBrowser(redirectPath, HostProtocol.SignInProviders.GOOGLE)) signInFailed()
+            }
+        }
+    }
+
+    private fun openSignInBrowser(redirectPath: String?, provider: String?): Boolean {
         val browser = SignInBrowser.pick(this)
         val authTabBrowser = browser?.takeIf { it.authTab }
         val challenge = Pkce.create()
@@ -405,37 +497,49 @@ class MainActivity : ComponentActivity(), HostActions {
             redirectUri = if (authTabBrowser != null) AUTH_TAB_REDIRECT_URI else BuildConfig.OAUTH_REDIRECT_URI,
             redirectPath = redirectPath,
         )
-
-        val url = AuthorizationRequest.build(
-            endpoint = BuildConfig.LOGTO_ENDPOINT,
-            appId = BuildConfig.LOGTO_APP_ID,
-            redirectUri = request.redirectUri,
-            resource = BuildConfig.LOGTO_API_RESOURCE,
-            challenge = challenge,
-            state = request.state,
-            forceLogin = hostPrefs.getBoolean(KEY_FORCE_LOGIN, false),
-        )
+        val url = authorization(request, challenge, provider)
+        leftForBrowser = false
         try {
             if (authTabBrowser != null) {
                 val tab = AuthTabIntent.Builder().build()
                 tab.intent.setPackage(authTabBrowser.packageName)
                 tab.launch(authTab, url, AUTH_TAB_SCHEME)
             } else {
-                customTabs.launch(CustomTabsIntent.Builder().build().intent.apply {
-                    data = url
-                    browser?.let { setPackage(it.packageName) }
-                })
+                tabAttempt = signIn.attempt
+                customTabs.launch(
+                    CustomTabsIntent.Builder().build().intent.apply {
+                        data = url
+                        browser?.let { setPackage(it.packageName) }
+                    },
+                )
             }
         } catch (_: ActivityNotFoundException) {
-            // Falling back to a WebView sign-in would create a session no other
-            // surface can share, so failing loudly is the safer behaviour.
-            throw CancellationSignal("No browser available to complete sign-in")
+            signIns.clear()
+            signIn.end(HostProtocol.AuthFlowOutcomes.FAILED)
+            return false
         }
+        return true
     }
+
+    private fun authorization(request: PendingSignIn, challenge: Pkce.Challenge, provider: String?, googleCredential: String? = null): Uri =
+        AuthorizationRequest.build(
+            BuildConfig.LOGTO_ENDPOINT,
+            AuthorizationRequest.parameters(
+                appId = BuildConfig.LOGTO_APP_ID,
+                redirectUri = request.redirectUri,
+                resource = BuildConfig.LOGTO_API_RESOURCE,
+                challenge = challenge,
+                state = request.state,
+                forceLogin = hostPrefs.getBoolean(KEY_FORCE_LOGIN, false),
+                provider = provider,
+                googleCredential = googleCredential,
+            ),
+        )
 
     override suspend fun signOut() {
         hostPrefs.edit { putBoolean(KEY_FORCE_LOGIN, true) }
         auth.signOut()
+        google.forget()
     }
 
     override fun shareText(text: String, title: String?) {
@@ -452,7 +556,18 @@ class MainActivity : ComponentActivity(), HostActions {
             navigate(path)
             return
         }
-        openExternally(path.toUri())
+        val url = path.toUri()
+        require(url.scheme?.lowercase() in HostProtocol.EXTERNAL_SCHEMES) { "navigation.openPath cannot open ${url.scheme}: links" }
+        openExternally(url)
+    }
+
+    override fun setLocale(locale: String?) {
+        if (HostLocale.set(this, locale)) relocalize()
+    }
+
+    private fun relocalize() {
+        cover.relocalize()
+        if (reportedDrawn && auth.account is Account.SignedIn) LauncherShortcuts.pushNewChat(this)
     }
 
     override suspend fun clearCache(scope: String) {
@@ -477,23 +592,24 @@ class MainActivity : ComponentActivity(), HostActions {
 
     override fun showAbout(web: String?) {
         val version = listOf(BuildConfig.VERSION_NAME, BuildConfig.COMMIT).filter { it.isNotEmpty() }.joinToString(" · ")
-        val cli = if (runtime?.cli?.bundled == true) BuildConfig.CLI_VERSION else getString(R.string.about_cli_unavailable)
+        val strings = strings
+        val cli = if (runtime?.cli?.bundled == true) BuildConfig.CLI_VERSION else strings.getString(R.string.about_cli_unavailable)
         AlertDialog.Builder(this)
-            .setTitle(R.string.about_title)
-            .setMessage(getString(R.string.about_message, version, web.orEmpty(), cli))
-            .setPositiveButton(android.R.string.ok, null)
-            .setNeutralButton(R.string.about_source) { _, _ -> openExternally(Uri.parse(REPOSITORY)) }
+            .setTitle(strings.getString(R.string.about_title))
+            .setMessage(strings.getString(R.string.about_message, version, web.orEmpty(), cli))
+            .setPositiveButton(strings.getString(R.string.dialog_ok), null)
+            .setNeutralButton(strings.getString(R.string.about_source)) { _, _ -> openExternally(REPOSITORY.toUri()) }
             .show()
     }
 
-    override fun performHaptic(kind: HostProtocol.Haptic): Boolean {
+    override fun performHaptic(kind: HostValues.Haptic): Boolean {
         val view = surface?.view ?: return false
         val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
         val feedback = when (kind) {
-            HostProtocol.Haptic.TICK -> HapticFeedbackConstants.CLOCK_TICK
-            HostProtocol.Haptic.CONFIRM -> if (modern) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
-            HostProtocol.Haptic.REJECT -> if (modern) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
-            HostProtocol.Haptic.LONG_PRESS -> HapticFeedbackConstants.LONG_PRESS
+            HostValues.Haptic.TICK -> HapticFeedbackConstants.CLOCK_TICK
+            HostValues.Haptic.CONFIRM -> if (modern) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
+            HostValues.Haptic.REJECT -> if (modern) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
+            HostValues.Haptic.LONG_PRESS -> HapticFeedbackConstants.LONG_PRESS
         }
         return view.performHapticFeedback(feedback)
     }
@@ -545,11 +661,12 @@ class MainActivity : ComponentActivity(), HostActions {
     private suspend fun confirmRuntimeConsent(runtime: DeviceRuntime): Boolean {
         if (hostPrefs.getBoolean(KEY_RUNTIME_CONSENT, false)) return true
         val allowed = runtime.instances.value.isNotEmpty() || suspendCancellableCoroutine { result ->
+            val strings = strings
             val dialog = AlertDialog.Builder(this)
-                .setTitle(R.string.runtime_consent_title)
-                .setMessage(R.string.runtime_consent_message)
-                .setPositiveButton(R.string.runtime_consent_allow) { _, _ -> result.resume(true) }
-                .setNegativeButton(android.R.string.cancel) { _, _ -> result.resume(false) }
+                .setTitle(strings.getString(R.string.runtime_consent_title))
+                .setMessage(strings.getString(R.string.runtime_consent_message))
+                .setPositiveButton(strings.getString(R.string.runtime_consent_allow)) { _, _ -> result.resume(true) }
+                .setNegativeButton(strings.getString(R.string.dialog_cancel)) { _, _ -> result.resume(false) }
                 .setOnCancelListener { result.resume(false) }
                 .show()
             result.invokeOnCancellation { dialog.dismiss() }
@@ -588,7 +705,7 @@ class MainActivity : ComponentActivity(), HostActions {
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri())
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-            Toast.makeText(this, R.string.display_control_restricted, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, strings.getString(R.string.display_control_restricted), Toast.LENGTH_LONG).show()
         } else {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
@@ -598,6 +715,7 @@ class MainActivity : ComponentActivity(), HostActions {
     private fun isControlRestrictionAcknowledged(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
         return runCatching {
+            @Suppress("DEPRECATION") // The restricted-settings op has no other public read.
             getSystemService(AppOpsManager::class.java)
                 .unsafeCheckOpNoThrow(OP_ACCESS_RESTRICTED_SETTINGS, applicationInfo.uid, packageName) ==
                 AppOpsManager.MODE_IGNORED
@@ -621,25 +739,71 @@ class MainActivity : ComponentActivity(), HostActions {
         val code = data.getQueryParameter("code")
         if (pending == null || code == null) {
             if (auth.account !is Account.SignedIn) toast(R.string.sign_in_failed)
+            signIn.end(HostProtocol.AuthFlowOutcomes.FAILED)
             return
         }
 
+        signIn.advance(SignInFlow.Stage.EXCHANGE)
         val destination = pending.redirectPath ?: "/"
         if (surface != null) WebWarmup.prefetch(destination)
         lifecycleScope.launch {
             runCatching { auth.completeSignIn(code, pending.verifier, pending.redirectUri) }
-                .onSuccess { hostPrefs.edit { remove(KEY_FORCE_LOGIN) } }
+                .onSuccess {
+                    hostPrefs.edit { remove(KEY_FORCE_LOGIN) }
+                    signIn.end(HostProtocol.AuthFlowOutcomes.SIGNED_IN)
+                }
                 .onFailure {
                     Log.w(TAG, "Sign-in failed", it)
-                    toast(R.string.sign_in_failed)
+                    signInFailed()
                 }
             navigate(destination)
         }
     }
 
-    private fun toast(messageRes: Int) {
-        Toast.makeText(this, messageRes, Toast.LENGTH_SHORT).show()
+    private fun signInFailed() {
+        toast(R.string.sign_in_failed)
+        signIn.end(HostProtocol.AuthFlowOutcomes.FAILED)
     }
+
+    private fun showPageDialog(dialog: PageDialog): () -> Unit {
+        if (isFinishing || isDestroyed) {
+            dialog.settle(false)
+            return {}
+        }
+        val strings = strings
+        val leaving = dialog.kind == PageDialog.Kind.BEFORE_UNLOAD
+        val input = if (dialog.kind != PageDialog.Kind.PROMPT) {
+            null
+        } else {
+            EditText(this).apply {
+                setText(dialog.defaultText)
+                setSingleLine()
+                selectAll()
+            }
+        }
+        val builder = AlertDialog.Builder(this)
+            .setTitle(dialog.title)
+            .setMessage(if (leaving) strings.getString(R.string.dialog_leave_message) else dialog.message)
+            .setPositiveButton(strings.getString(if (leaving) R.string.dialog_leave else R.string.dialog_ok)) { _, _ ->
+                dialog.settle(true, input?.text?.toString())
+            }
+            .setOnDismissListener { dialog.settle(false) }
+        if (dialog.kind != PageDialog.Kind.ALERT) builder.setNegativeButton(strings.getString(R.string.dialog_cancel), null)
+        val shown = builder.create()
+        if (input != null) {
+            val margin = (DIALOG_INPUT_MARGIN_DP * resources.displayMetrics.density).toInt()
+            shown.setView(input, margin, 0, margin, 0)
+            shown.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        }
+        shown.show()
+        return shown::dismiss
+    }
+
+    private fun toast(messageRes: Int) {
+        Toast.makeText(this, strings.getString(messageRes), Toast.LENGTH_SHORT).show()
+    }
+
+    private val strings get() = HostLocale.strings(this)
 
     private fun openExternally(uri: Uri) {
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
@@ -654,6 +818,7 @@ class MainActivity : ComponentActivity(), HostActions {
 
     private companion object {
         const val TAG = "CohubShell"
+        const val TAB_CLOSED_GRACE_MS = 1_000L
         const val KEY_INSTALL_ID = "install_id"
         const val KEY_FORCE_LOGIN = "force_login"
         const val KEY_RUNTIME_CONSENT = "runtime_consent"
@@ -664,6 +829,8 @@ class MainActivity : ComponentActivity(), HostActions {
         const val REPOSITORY = "https://github.com/netaart/cohub"
 
         const val OP_ACCESS_RESTRICTED_SETTINGS = "android:access_restricted_settings"
+
+        const val DIALOG_INPUT_MARGIN_DP = 20
 
         const val LAUNCH_TIMEOUT_MS = 2_500L
         const val SLOW_TIMEOUT_MS = 8_000L

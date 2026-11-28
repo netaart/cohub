@@ -10,7 +10,6 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -21,12 +20,14 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import live.cohub.android.auth.AuthSession
 import live.cohub.android.display.CohubPage
 import live.cohub.android.display.DeviceDisplay
 import live.cohub.android.display.DisplayRef
 import live.cohub.android.files.FileSaver
+import live.cohub.android.files.FileStreams
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.FolderUnavailable
 import live.cohub.android.runtime.LocalWorkspaces
@@ -55,11 +56,19 @@ class HostBridge(
     private val display: DeviceDisplay? = null,
     private val workspaces: LocalWorkspaces? = null,
 ) {
-    private val supportedMethods = BASE_METHODS +
-        (if (runtime != null) RUNTIME_METHODS else emptySet()) +
-        (if (runtime != null && workspaces != null) setOf(HostProtocol.Methods.WORKSPACE_CALL) else emptySet()) +
-        (if (runtime != null && display != null) DISPLAY_METHODS else emptySet()) +
-        (if (files != null) setOf(HostProtocol.Methods.FILES_SAVE, HostProtocol.Methods.FILES_REVEAL) else emptySet())
+    private val streaming = lazy {
+        if (files != null && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER)) FileStreams(files) else null
+    }
+    private val streams: FileStreams? by streaming
+
+    private val supportedMethods by lazy {
+        BASE_METHODS +
+            (if (runtime != null) RUNTIME_METHODS else emptySet()) +
+            (if (runtime != null && workspaces != null) setOf(HostProtocol.Methods.WORKSPACE_CALL) else emptySet()) +
+            (if (runtime != null && display != null) DISPLAY_METHODS else emptySet()) +
+            (if (files != null) setOf(HostProtocol.Methods.FILES_SAVE, HostProtocol.Methods.FILES_REVEAL) else emptySet()) +
+            (if (streams != null) STREAM_METHODS else emptySet())
+    }
 
     @Volatile
     private var replyProxy: JavaScriptReplyProxy? = null
@@ -87,18 +96,25 @@ class HostBridge(
                     // Only the top-level Cohub surface may drive native behaviour.
                     if (!isMainFrame) return
                     replyProxy = proxy
-                    message.data?.let { handle(it, proxy) }
+                    if (message.type == WebMessageCompat.TYPE_ARRAY_BUFFER) {
+                        streams?.receive(message.arrayBuffer)
+                    } else {
+                        message.data?.let { handle(it, proxy) }
+                    }
                 }
             },
         )
     }
 
+    fun onNewDocument() {
+        if (streaming.isInitialized()) streams?.cancelAll()
+    }
+
     private fun handle(data: String, proxy: JavaScriptReplyProxy) {
-        val message = runCatching { Json.parseToJsonElement(data) as? JsonObject }.getOrNull() ?: return
-        if (message["type"]?.jsonPrimitive?.contentOrNull != "request") return
-        val id = message["id"]?.jsonPrimitive?.contentOrNull ?: return
-        val method = message["method"]?.jsonPrimitive?.contentOrNull ?: return
-        val params = message["params"] as? JsonObject ?: JsonObject(emptyMap())
+        val request = BridgeRequest.parse(data) ?: return
+        val id = request.id
+        val method = request.method
+        val params = request.fields
 
         // Unknown methods answer `unsupported` rather than staying silent, so the
         // web side falls back to its browser path instead of waiting.
@@ -127,12 +143,12 @@ class HostBridge(
     private suspend fun dispatch(method: String, id: String, params: JsonObject): JsonElement = when (method) {
         HostProtocol.Methods.HOST_DESCRIBE -> buildJsonObject {
             put("version", HostProtocol.VERSION)
-            put("platform", HostProtocol.PLATFORM)
+            put("platform", HostValues.PLATFORM)
             put("hostId", actions.hostId())
             put(
                 "capabilities",
                 buildJsonArray {
-                    HostCapabilities.advertised(runtime = runtime != null, files = files != null, display = display != null)
+                    HostCapabilities.advertised(runtime = runtime != null, files = files != null, display = display != null, fileStream = streams != null)
                         .forEach { add(JsonPrimitive(it)) }
                 },
             )
@@ -158,7 +174,11 @@ class HostBridge(
         }
 
         HostProtocol.Methods.AUTH_SIGN_IN -> {
-            actions.startSignIn(params["redirectPath"]?.jsonPrimitive?.contentOrNull)
+            JsonPrimitive(actions.startSignIn(params.string("redirectPath"), params.string("provider")?.takeIf { it in SIGN_IN_PROVIDERS }))
+        }
+
+        HostProtocol.Methods.APP_SET_LOCALE -> {
+            actions.setLocale(params.string("locale"))
             JsonPrimitive(true)
         }
 
@@ -188,7 +208,7 @@ class HostBridge(
         }
 
         HostProtocol.Methods.APPEARANCE_SET -> {
-            val color = params["backgroundColor"]?.jsonPrimitive?.contentOrNull?.let(HostProtocol::parseColor)
+            val color = params["backgroundColor"]?.jsonPrimitive?.contentOrNull?.let(HostValues::parseColor)
                 ?: throw IllegalArgumentException("appearance.set requires a #rrggbb backgroundColor")
             actions.setAppearance(color)
             JsonPrimitive(true)
@@ -205,7 +225,7 @@ class HostBridge(
         }
 
         HostProtocol.Methods.HAPTICS_PERFORM -> {
-            val kind = HostProtocol.Haptic.of(params.string("kind"))
+            val kind = HostValues.Haptic.of(params.string("kind"))
                 ?: throw IllegalArgumentException("haptics.perform requires a known kind")
             JsonPrimitive(actions.performHaptic(kind))
         }
@@ -218,18 +238,36 @@ class HostBridge(
             val url = params.string("url")
             require(url == null || url.startsWith("https://")) { "files.save only downloads https URLs" }
             val saved = saver.save(fileId, name, params.string("mimeType"), url, params.string("data")) { received, total ->
-                val payload = buildJsonObject {
-                    put("id", fileId)
-                    put("received", received)
-                    put("total", total)
-                }
                 // Progress arrives on the IO thread; the reply proxy is main-thread only.
-                scope.launch { emit(HostProtocol.Events.FILES_PROGRESS, payload) }
+                scope.launch { emit(HostProtocol.Events.FILES_PROGRESS, progress(fileId, received, total)) }
+            }
+            saved(saved)
+        }
+
+        HostProtocol.Methods.FILES_WRITE_BEGIN -> {
+            val streams = streams ?: throw IllegalStateException("This device cannot stream files")
+            val fileId = params.string("id") ?: throw IllegalArgumentException("files.write.begin requires an id")
+            val name = params.string("name") ?: throw IllegalArgumentException("files.write.begin requires a name")
+            val size = params["size"]?.jsonPrimitive?.longOrNull ?: throw IllegalArgumentException("files.write.begin requires a size")
+            val started = streams.begin(fileId, name, params.string("mimeType"), size) { received ->
+                scope.launch { emit(HostProtocol.Events.FILES_PROGRESS, progress(fileId, received, size)) }
             }
             buildJsonObject {
-                put("location", saved.location)
-                put("revealable", true)
+                put("channel", started.channel)
+                put("chunkBytes", started.chunkBytes)
+                put("windowBytes", started.windowBytes)
             }
+        }
+
+        HostProtocol.Methods.FILES_WRITE_COMMIT -> {
+            val streams = streams ?: throw IllegalStateException("This device cannot stream files")
+            val saved = streams.commit(params.string("id") ?: throw IllegalArgumentException("files.write.commit requires an id"))
+            saved(saved)
+        }
+
+        HostProtocol.Methods.FILES_WRITE_CANCEL -> {
+            streams?.cancel(params.string("id") ?: throw IllegalArgumentException("files.write.cancel requires an id"))
+            JsonPrimitive(true)
         }
 
         HostProtocol.Methods.FILES_REVEAL -> {
@@ -347,6 +385,17 @@ class HostBridge(
         else -> throw IllegalArgumentException("Unhandled method: $method")
     }
 
+    private fun progress(id: String, received: Long, total: Long?) = buildJsonObject {
+        put("id", id)
+        put("received", received)
+        put("total", total?.takeIf { it > 0 })
+    }
+
+    private fun saved(saved: FileSaver.Saved) = buildJsonObject {
+        put("location", saved.location)
+        put("revealable", true)
+    }
+
     private fun requireKind(params: JsonObject): String = params.string("kind") ?: throw IllegalArgumentException("A permission kind is required")
 
     private fun requireDisplayRef(params: JsonObject) =
@@ -369,43 +418,24 @@ class HostBridge(
 
     /** Push a host event; dropped when no page is attached. */
     fun emit(name: String, payload: JsonElement? = null) {
-        val proxy = replyProxy ?: return
-        proxy.postMessage(
-            buildJsonObject {
-                put("type", "event")
-                put("name", name)
-                if (payload != null) put("payload", payload)
-            }.toString(),
-        )
+        replyProxy?.postMessage(BridgeMessages.event(name, payload))
     }
 
     private fun reply(proxy: JavaScriptReplyProxy, id: String, result: JsonElement) {
-        proxy.postMessage(
-            buildJsonObject {
-                put("type", "response")
-                put("id", id)
-                put("result", result)
-            }.toString(),
-        )
+        proxy.postMessage(BridgeMessages.result(id, result))
     }
 
     private fun replyError(proxy: JavaScriptReplyProxy, id: String, code: String, message: String) {
-        proxy.postMessage(
-            buildJsonObject {
-                put("type", "response")
-                put("id", id)
-                put(
-                    "error",
-                    buildJsonObject {
-                        put("code", code)
-                        put("message", message)
-                    },
-                )
-            }.toString(),
-        )
+        proxy.postMessage(BridgeMessages.error(id, code, message))
     }
 
     private companion object {
+        val SIGN_IN_PROVIDERS = setOf(HostProtocol.SignInProviders.GOOGLE, HostProtocol.SignInProviders.APPLE, HostProtocol.SignInProviders.FACEBOOK)
+        val STREAM_METHODS = setOf(
+            HostProtocol.Methods.FILES_WRITE_BEGIN,
+            HostProtocol.Methods.FILES_WRITE_COMMIT,
+            HostProtocol.Methods.FILES_WRITE_CANCEL,
+        )
         val DISPLAY_METHODS = setOf(
             HostProtocol.Methods.DISPLAY_STATUS,
             HostProtocol.Methods.DISPLAY_SHARE,
@@ -445,6 +475,7 @@ class HostBridge(
             HostProtocol.Methods.PERMISSIONS_OPEN_SETTINGS,
             HostProtocol.Methods.SHARE_TAKE,
             HostProtocol.Methods.SHARE_READ_FILE,
+            HostProtocol.Methods.APP_SET_LOCALE,
         )
     }
 }
@@ -459,10 +490,12 @@ class ScreenCaptureGrant(val resultCode: Int, val data: Intent)
 /** Native effects the bridge may request; an interface keeps it testable. */
 interface HostActions {
     fun hostId(): String
-    fun startSignIn(redirectPath: String?)
+
+    fun startSignIn(redirectPath: String?, provider: String?): Boolean
     suspend fun signOut()
     fun shareText(text: String, title: String?)
     fun openPath(path: String)
+    fun setLocale(locale: String?)
     suspend fun clearCache(scope: String)
     fun setAppearance(backgroundColor: Int)
 
@@ -470,7 +503,7 @@ interface HostActions {
 
     fun showAbout(web: String?)
 
-    fun performHaptic(kind: HostProtocol.Haptic): Boolean
+    fun performHaptic(kind: HostValues.Haptic): Boolean
 
     fun interceptBack(enabled: Boolean)
 

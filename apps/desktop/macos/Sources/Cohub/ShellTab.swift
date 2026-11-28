@@ -19,6 +19,7 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
     private(set) var capturesKeys = false
     private(set) var attention = false
     private var stale = false
+    private let dialogs = PageDialogs()
 
     static let revealTimeout: Duration = .milliseconds(2_500)
 
@@ -37,6 +38,7 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func load(_ path: String) {
         guard let url = shell.config.origin.url(for: path) else { return }
+        dialogs.cancel()
         self.path = path
         loadStarted = .now
         makeWebView().load(URLRequest(url: url))
@@ -44,7 +46,12 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func refresh() {
         guard let webView else { return }
-        if isShown { webView.reload() } else { stale = true }
+        if isShown {
+            dialogs.cancel()
+            webView.reload()
+        } else {
+            stale = true
+        }
     }
 
     func show() {
@@ -63,6 +70,7 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func close() {
+        dialogs.cancel()
         observations = []
         router = nil
         webView?.stopLoading()
@@ -160,8 +168,8 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
         // Only the top-level Cohub page may drive native behaviour.
         let origin = message.frameInfo.securityOrigin
         guard message.frameInfo.isMainFrame,
-              shell.config.origin.isOrigin(scheme: origin.protocol, host: origin.host, port: origin.port),
-              let text = message.body as? String
+            shell.config.origin.isOrigin(scheme: origin.protocol, host: origin.host, port: origin.port),
+            let text = message.body as? String
         else { return }
         router?.receive(text)
     }
@@ -201,7 +209,9 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard let sheet = window?.window else { return false }
         let alert = NSAlert()
         alert.messageText = L("Connect “\(URL(fileURLWithPath: root).lastPathComponent)” to a Space?")
-        alert.informativeText = L("People and agents in the Space can change files in this folder and run commands as you on this Mac. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space.")
+        alert.informativeText = L(
+            "People and agents in the Space can change files in this folder and run commands as you on this Mac. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space."
+        )
         alert.icon = NSWorkspace.shared.icon(forFile: root)
         alert.addButton(withTitle: L("Connect"))
         alert.addButton(withTitle: L("Cancel"))
@@ -225,13 +235,14 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-        guard navigationAction.targetFrame?.isMainFrame != false, let url = navigationAction.request.url else { return .allow }
-        if navigationAction.shouldPerformDownload { return .download }
-        if navigationAction.navigationType == .linkActivated, let background = Self.inBackground(navigationAction), let path = shell.config.origin.path(of: url) {
+        guard let url = navigationAction.request.url else { return .allow }
+        let mainFrame = navigationAction.targetFrame?.isMainFrame != false
+        if mainFrame, navigationAction.shouldPerformDownload { return .download }
+        if mainFrame, navigationAction.navigationType == .linkActivated, let background = Self.inBackground(navigationAction), let path = shell.config.origin.path(of: url) {
             window?.open(.init(path: path), beside: self, background: background)
             return .cancel
         }
-        switch shell.config.origin.navigation(to: url) {
+        switch shell.config.origin.navigation(to: url, mainFrame: mainFrame) {
         case .allow: return .allow
         case .external(let url):
             NSWorkspace.shared.open(url)
@@ -249,6 +260,7 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     private func resetPageState() {
+        dialogs.cancel()
         dirty = false
         capturesKeys = false
     }
@@ -277,17 +289,17 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo) async {
-        _ = await panel(message, buttons: [L("OK")])
+        _ = await dialog(message, from: frame, cancels: false)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo) async -> Bool {
-        await panel(message, buttons: [L("OK"), L("Cancel")]) == .alertFirstButtonReturn
+        await dialog(message, from: frame) != nil
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo) async -> String? {
         let field = NSTextField(string: defaultText ?? "")
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
-        return await panel(prompt, buttons: [L("OK"), L("Cancel")], accessory: field) == .alertFirstButtonReturn ? field.stringValue : nil
+        return await dialog(prompt, from: frame, field: field)
     }
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
@@ -303,13 +315,27 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
         frame.isMainFrame && shell.config.origin.isOrigin(scheme: origin.protocol, host: origin.host, port: origin.port) ? .grant : .prompt
     }
 
-    private func panel(_ message: String, buttons: [String], accessory: NSView? = nil) async -> NSApplication.ModalResponse {
+    private func dialog(_ message: String, from frame: WKFrameInfo, cancels: Bool = true, field: NSTextField? = nil) async -> String? {
         let alert = NSAlert()
-        alert.messageText = message
-        alert.accessoryView = accessory
-        for button in buttons { alert.addButton(withTitle: button) }
-        guard isShown, let sheet = window?.window else { return alert.runModal() }
-        return await alert.beginSheetModal(for: sheet)
+        let origin = frame.securityOrigin
+        if let title = shell.config.origin.dialogTitle(scheme: origin.protocol, host: origin.host, port: origin.port) {
+            alert.messageText = title.isEmpty ? L("An embedded page") : title
+            alert.informativeText = message
+        } else {
+            alert.messageText = message
+        }
+        alert.accessoryView = field
+        alert.addButton(withTitle: L("OK"))
+        if cancels { alert.addButton(withTitle: L("Cancel")) }
+        return await dialogs.show { answer in
+            guard isShown, let sheet = window?.window else { return answer(nil) }
+            alert.beginSheetModal(for: sheet) { response in
+                MainActor.assumeIsolated { answer(response == .alertFirstButtonReturn ? field?.stringValue ?? "" : nil) }
+            }
+        } dismiss: { [weak alert] in
+            guard let panel = alert?.window else { return }
+            panel.sheetParent?.endSheet(panel, returnCode: .cancel)
+        }
     }
 }
 

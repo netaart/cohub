@@ -56,7 +56,7 @@ internal sealed class TrayIcon : IDisposable
         Rebuild();
     }
 
-    private void Rebuild()
+    public void Rebuild()
     {
         var menu = new ContextMenuStrip();
         var connected = overview.Connected;

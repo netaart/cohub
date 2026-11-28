@@ -72,7 +72,12 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
 
     override fun mirror(displayId: Int, width: Int, height: Int, surface: Surface): IBinder? = attempt("mirror") {
         val create = DisplayManager::class.java.getMethod(
-            "createVirtualDisplay", String::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Surface::class.java,
+            "createVirtualDisplay",
+            String::class.java,
+            Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            Surface::class.java,
         )
         val owner = if (java.lang.reflect.Modifier.isStatic(create.modifiers)) null else displayManager
         val mirror = create.invoke(owner, "cohub-mirror", width, height, displayId, surface) as VirtualDisplay
@@ -84,8 +89,20 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
     }
 
     override fun touch(displayId: Int, action: Int, x: Float, y: Float, downTime: Long): Boolean = attempt("touch") {
-        val properties = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
-        val coords = arrayOf(MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 1f })
+        val properties = arrayOf(
+            MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            },
+        )
+        val coords = arrayOf(
+            MotionEvent.PointerCoords().apply {
+                this.x = x
+                this.y = y
+                pressure = 1f
+                size = 1f
+            },
+        )
         val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, 1, properties, coords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
         try {
             send(event, displayId)

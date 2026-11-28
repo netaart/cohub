@@ -86,8 +86,15 @@ internal class AdbKey private constructor(private val keyPair: KeyPair) {
             val size = content.size
             when {
                 size < 0x80 -> out.write(size)
-                size < 0x100 -> { out.write(0x81); out.write(size) }
-                else -> { out.write(0x82); out.write(size ushr 8); out.write(size and 0xff) }
+                size < 0x100 -> {
+                    out.write(0x81)
+                    out.write(size)
+                }
+                else -> {
+                    out.write(0x82)
+                    out.write(size ushr 8)
+                    out.write(size and 0xff)
+                }
             }
             out.write(content)
             return out.toByteArray()

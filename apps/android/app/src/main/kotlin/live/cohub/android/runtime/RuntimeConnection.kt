@@ -1,15 +1,18 @@
 package live.cohub.android.runtime
 
 import kotlinx.coroutines.CancellationException
-import live.cohub.android.BuildConfig
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -18,10 +21,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeoutOrNull
+import live.cohub.android.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -125,24 +125,27 @@ class RuntimeConnection(
         val current = AtomicReference(token(forceRefresh))
         val events = Channel<Event>(Channel.UNLIMITED)
         val request = Request.Builder().url("$url?runtimeId=$runtimeId").build()
-        val socket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                events.trySend(Event.Open)
-            }
+        val socket = client.newWebSocket(
+            request,
+            object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    events.trySend(Event.Open)
+                }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                events.trySend(Event.Message(text))
-            }
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    events.trySend(Event.Message(text))
+                }
 
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                webSocket.close(1000, null)
-                events.trySend(Event.Closed(code))
-            }
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    webSocket.close(1000, null)
+                    events.trySend(Event.Closed(code))
+                }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                events.trySend(Event.Closed(response?.code ?: 0))
-            }
-        })
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    events.trySend(Event.Closed(response?.code ?: 0))
+                }
+            },
+        )
         val lastHeartbeat = AtomicLong(clock())
         val heartbeat = launch {
             while (isActive) {

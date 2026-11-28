@@ -64,7 +64,9 @@ final class LaunchNet: UIView {
             logo.layer.removeAnimation(forKey: Self.breatheKey)
             liftToken &+= 1
             let token = liftToken
-            UIView.animate(withDuration: 0.18, animations: { self.alpha = 0 }) { _ in
+            UIView.animate(withDuration: 0.18) {
+                self.alpha = 0
+            } completion: { _ in
                 if self.lifting, self.liftToken == token { done() }
             }
             return
@@ -133,7 +135,8 @@ final class LaunchNet: UIView {
             return
         }
         let grown = clock > Spec.growFrom + Spec.grow
-        let settled = (phase == .offline && offline > 0.999 || phase == .broken && broken > 0.999) && grown
+        let settled =
+            (phase == .offline && offline > 0.999 || phase == .broken && broken > 0.999) && grown
             && abs(cleared - (clearingShown ? 1 : 0)) < 0.001
         if settled && !lifting { link.isPaused = true }
         let idling = grown && !lifting
@@ -153,8 +156,9 @@ final class LaunchNet: UIView {
 
     private func opening(grown: Double, e: Double) -> (hubWidth: CGFloat, hole: CGFloat) {
         let hubWidth = lerp(mark.width, Spec.hub, grown) * (1 + 0.6 * outCubic(e))
-        let hole = lerp(mark.radius - mark.width / 2, hypot(bounds.width, bounds.height) / 2 + hubWidth,
-                        inOutCubic(clamp((e - 0.12) / 0.88)))
+        let hole = lerp(
+            mark.radius - mark.width / 2, hypot(bounds.width, bounds.height) / 2 + hubWidth,
+            inOutCubic(clamp((e - 0.12) / 0.88)))
         return (hubWidth, hole)
     }
 
@@ -212,16 +216,19 @@ final class LaunchNet: UIView {
             let y = lerp(node.parent.y, node.at.y, p) * spread + node.drift.y * 0.5 * offline
             var alpha = Spec.falloff[min(node.n, Spec.falloff.count - 1)] * p * fade
             if slow > 0 { alpha = clamp(alpha + 0.45 * slow * pow(max(0, cos(Double(node.n) * 0.9 - wave * 3.2)), 8) * p * fade) }
-            rings.append(Ring(
-                center: CGPoint(x: center.x + (x * cosr - y * sinr) * unit, y: center.y + (x * sinr + y * cosr) * unit),
-                radius: unit * lerp(0.6, 1, p) * (1 - 0.15 * offline),
-                width: Spec.line,
-                tone: bg.mix(ink, alpha * (1 - 0.35 * offline))))
+            rings.append(
+                Ring(
+                    center: CGPoint(x: center.x + (x * cosr - y * sinr) * unit, y: center.y + (x * sinr + y * cosr) * unit),
+                    radius: unit * lerp(0.6, 1, p) * (1 - 0.15 * offline),
+                    width: Spec.line,
+                    tone: bg.mix(ink, alpha * (1 - 0.35 * offline))))
         }
         let hubGap = mark.gap * max(1 - close, broken)
         if tint >= 1 {
-            rings.append(Ring(center: center, radius: lifting ? max(unit, hole + hubWidth / 2) : unit, width: hubWidth,
-                              tone: bg.mix(.brand, 1 - pow(e, 3)), hub: true, gap: hubGap))
+            rings.append(
+                Ring(
+                    center: center, radius: lifting ? max(unit, hole + hubWidth / 2) : unit, width: hubWidth,
+                    tone: bg.mix(.brand, 1 - pow(e, 3)), hub: true, gap: hubGap))
         }
         weave(rings, bg: bg, in: ctx)
 
@@ -279,8 +286,11 @@ final class LaunchNet: UIView {
         ctx.setLineCap(.butt)
         for i in rings.indices {
             for j in rings.indices where j > i {
-                let a = rings[i], b = rings[j]
-                let dx = b.center.x - a.center.x, dy = b.center.y - a.center.y, d = hypot(dx, dy)
+                let a = rings[i]
+                let b = rings[j]
+                let dx = b.center.x - a.center.x
+                let dy = b.center.y - a.center.y
+                let d = hypot(dx, dy)
                 guard d < a.radius + b.radius, d > abs(a.radius - b.radius), d > 0.001 else { continue }
                 let along = (a.radius * a.radius - b.radius * b.radius + d * d) / (2 * d)
                 let h = sqrt(max(0, a.radius * a.radius - along * along))
@@ -307,8 +317,9 @@ final class LaunchNet: UIView {
 
     private func clearingGradient(_ bg: Tone) -> CGGradient? {
         if let cached = gradientCache, cached.0 == bg { return cached.1 }
-        let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
-                                  colors: [bg.cg, bg.cg, bg.cg(0)] as CFArray, locations: [0, 0.55, 1])
+        let gradient = CGGradient(
+            colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+            colors: [bg.cg, bg.cg, bg.cg(0)] as CFArray, locations: [0, 0.55, 1])
         gradientCache = gradient.map { (bg, $0) }
         return gradient
     }
@@ -385,10 +396,11 @@ private struct Node {
                 let back = Double(n - 1) / Double(n)
                 let (pq, pr) = nearest(Double(q) * back, Double(r) * back)
                 let around = (atan2(at.y, at.x) + .pi) / (2 * .pi)
-                nodes.append(Node(
-                    n: n, at: at, parent: point(pq, pr),
-                    born: Spec.born + Spec.layer * pow(Double(n - 1), 1.1) + Spec.stagger * around,
-                    drift: CGPoint(x: noise(q, r, 12.9898, 78.233), y: noise(q, r, 39.346, 11.135))))
+                nodes.append(
+                    Node(
+                        n: n, at: at, parent: point(pq, pr),
+                        born: Spec.born + Spec.layer * pow(Double(n - 1), 1.1) + Spec.stagger * around,
+                        drift: CGPoint(x: noise(q, r, 12.9898, 78.233), y: noise(q, r, 39.346, 11.135))))
             }
         }
         return nodes.sorted { $0.n > $1.n }
@@ -400,9 +412,12 @@ private struct Node {
 
     private static func nearest(_ x: Double, _ z: Double) -> (Double, Double) {
         let y = -x - z
-        var rx = (x + 0.5).rounded(.down), rz = (z + 0.5).rounded(.down)
+        var rx = (x + 0.5).rounded(.down)
+        var rz = (z + 0.5).rounded(.down)
         let ry = (y + 0.5).rounded(.down)
-        let dx = abs(rx - x), dy = abs(ry - y), dz = abs(rz - z)
+        let dx = abs(rx - x)
+        let dy = abs(ry - y)
+        let dz = abs(rz - z)
         if dx > dy, dx > dz { rx = -ry - rz } else if dz >= dy { rz = -rx - ry }
         return (rx, rz)
     }

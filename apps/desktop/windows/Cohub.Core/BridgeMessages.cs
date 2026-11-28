@@ -62,3 +62,12 @@ public static class BridgeEvent
         return message.ToJsonString();
     }
 }
+
+public sealed class BridgeException(string code, string message) : Exception(message)
+{
+    public string Code { get; } = code;
+
+    public static BridgeException Canceled(string message = "Canceled") => new(HostProtocol.ErrorCodes.Canceled, message);
+    public static BridgeException Failed(string message) => new(HostProtocol.ErrorCodes.Failed, message);
+    public static BridgeException Unsupported(string method) => new(HostProtocol.ErrorCodes.Unsupported, $"Unsupported method: {method}");
+}

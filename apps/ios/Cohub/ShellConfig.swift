@@ -2,8 +2,7 @@ import CohubCore
 import Foundation
 
 struct ShellConfig: Sendable {
-    static let redirectPath = "/mobile/auth/callback"
-    static let repository = URL(string: "https://github.com/netaart/cohub")!
+    static let repository = URL(string: "https://github.com/netaart/cohub")
 
     let environment: String
     let origin: WebOrigin
@@ -26,7 +25,7 @@ struct ShellConfig: Sendable {
             return url
         }
         guard let origin = WebOrigin(value("CohubWebOrigin")), let api = WebOrigin(value("CohubApiOrigin")),
-              let redirect = URL(string: origin.origin + redirectPath)
+            let redirect = URL(string: origin.origin + HostProtocol.authCallbackPath)
         else { preconditionFailure("Info.plist has a malformed origin") }
         return ShellConfig(
             environment: value("CohubEnvironment"),

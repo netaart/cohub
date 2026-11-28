@@ -19,6 +19,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.RequiresApi
+import androidx.core.view.isVisible
 import live.cohub.android.R
 
 internal class Look(val color: Int, val pulse: Boolean, val title: String)
@@ -69,7 +70,11 @@ private class Dot(context: Context) : View(context) {
         shape.setColor(color)
         if (pulsing == this.pulsing) return
         this.pulsing = pulsing
-        if (pulsing && isAttachedToWindow) pulse.start() else if (!pulsing) rest()
+        if (pulsing && isAttachedToWindow) {
+            pulse.start()
+        } else if (!pulsing) {
+            rest()
+        }
     }
 
     private fun rest() {
@@ -153,7 +158,9 @@ internal class Pill(context: Context) : LinearLayout(context) {
 }
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-internal class Panel(context: Context) : LinearLayout(context), SurfaceHolder.Callback {
+internal class Panel(context: Context) :
+    LinearLayout(context),
+    SurfaceHolder.Callback {
     private val dot = Dot(context)
     private val title = text(context, 13f).apply { maxLines = 3 }
     private val steps = text(context, 12f).apply { setLineSpacing(dp(2).toFloat(), 1f) }
@@ -195,7 +202,7 @@ internal class Panel(context: Context) : LinearLayout(context), SurfaceHolder.Ca
     }
 
     private fun arrange() {
-        val shown = listOf(secondary, primary).filter { it.visibility == VISIBLE }
+        val shown = listOf(secondary, primary).filter { it.isVisible }
         val natural = shown.sumOf { it.paint.measureText(it.text.toString()).toDouble() + it.paddingLeft + it.paddingRight + dp(GAP) }
         val stack = natural > dp(PREVIEW_WIDTH)
         row.orientation = if (stack) VERTICAL else HORIZONTAL

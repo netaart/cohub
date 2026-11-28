@@ -211,11 +211,13 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         val last = prefs.getInt(PORT, 0)
         val launched = System.currentTimeMillis()
         val ran = (last > 0 && exec(key, last, command)) || connectPort(last)?.let { exec(key, it, command) } == true
-        if (!ran) return when {
-            !paired -> "unpaired"
-            !localNetwork -> LOCAL_NETWORK_OFF
-            !onWifi() -> WIFI_OFF
-            else -> "wireless_debugging_unreachable"
+        if (!ran) {
+            return when {
+                !paired -> "unpaired"
+                !localNetwork -> LOCAL_NETWORK_OFF
+                !onWifi() -> WIFI_OFF
+                else -> "wireless_debugging_unreachable"
+            }
         }
         if (withTimeoutOrNull(ATTACH_MS) { _helper.first { it != null } } != null) return null
         note("the helper did not attach within ${ATTACH_MS / 1000} s: ${helperFailure(key, launched)}")
@@ -309,7 +311,16 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         var shown: Int? = null
         while (_state.value.searching) {
             val stage = if (developerOptions) Stage.PAIRING else Stage.DEVELOPER
-            enter(stage, if (!localNetwork) LOCAL_NETWORK_OFF else if (stage == Stage.PAIRING && !onWifi()) WIFI_OFF else error)
+            enter(
+                stage,
+                if (!localNetwork) {
+                    LOCAL_NETWORK_OFF
+                } else if (stage == Stage.PAIRING && !onWifi()) {
+                    WIFI_OFF
+                } else {
+                    error
+                },
+            )
             val text = when {
                 error != null -> R.string.phone_control_pairing_closed
                 stage == Stage.DEVELOPER -> R.string.phone_control_guide_developer
@@ -401,9 +412,12 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         if (watchingWifi) return
         watchingWifi = true
         val request = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
-        context.getSystemService(ConnectivityManager::class.java).registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) = start()
-        })
+        context.getSystemService(ConnectivityManager::class.java).registerNetworkCallback(
+            request,
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) = start()
+            },
+        )
     }
 
     // Without the permission Android 17 answers every discovery with a device picker.
@@ -438,13 +452,16 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
     @Suppress("DEPRECATION")
     private suspend fun resolve(nsd: NsdManager, service: NsdServiceInfo): Int? = withTimeoutOrNull(RESOLVE_MS) {
         suspendCancellableCoroutine { continuation ->
-            nsd.resolveService(service, object : NsdManager.ResolveListener {
-                override fun onServiceResolved(info: NsdServiceInfo) {
-                    val own = info.host?.let { it.isLoopbackAddress || NetworkInterface.getByInetAddress(it) != null } == true
-                    continuation.resume(if (own) info.port else null)
-                }
-                override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) = continuation.resume(null)
-            })
+            nsd.resolveService(
+                service,
+                object : NsdManager.ResolveListener {
+                    override fun onServiceResolved(info: NsdServiceInfo) {
+                        val own = info.host?.let { it.isLoopbackAddress || NetworkInterface.getByInetAddress(it) != null } == true
+                        continuation.resume(if (own) info.port else null)
+                    }
+                    override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) = continuation.resume(null)
+                },
+            )
         }
     }
 
@@ -454,10 +471,13 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
     }
 
     private fun settingsPendingIntent() = PendingIntent.getActivity(
-        context, 0, settingsIntent(),
+        context,
+        0,
+        settingsIntent(),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
+    @SuppressLint("LaunchActivityFromNotification") // Tapping hands control over where it is; nothing opens.
     fun notifyHandover(reason: String) {
         val take = PendingIntent.getBroadcast(context, 0, Intent(context, HandoverReceiver::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val text = context.getString(R.string.overlay_activity, reason)
@@ -479,7 +499,9 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
     private fun notifyPairing(text: String, alert: Boolean = false) {
         val manager = notifications()
         val reply = PendingIntent.getBroadcast(
-            context, 0, Intent(context, PairingReceiver::class.java),
+            context,
+            0,
+            Intent(context, PairingReceiver::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
         )
         val input = RemoteInput.Builder(KEY_CODE).setLabel(context.getString(R.string.phone_control_pairing_code)).build()

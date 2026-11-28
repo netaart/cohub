@@ -13,7 +13,9 @@ struct ShellConfig {
         let info = { (key: String) in bundle.object(forInfoDictionaryKey: key) as? String }
         let environment = env["COHUB_DESKTOP_ENV"] ?? info("CohubEnvironment") ?? "prod"
         let fallbackOrigin = environment == "dev" ? "https://dev.cohub.live" : "https://cohub.live"
-        let origin = WebOrigin(env["COHUB_DESKTOP_WEB_ORIGIN"] ?? info("CohubWebOrigin") ?? fallbackOrigin) ?? WebOrigin(fallbackOrigin)!
+        guard let origin = WebOrigin(env["COHUB_DESKTOP_WEB_ORIGIN"] ?? info("CohubWebOrigin") ?? fallbackOrigin) ?? WebOrigin(fallbackOrigin) else {
+            preconditionFailure("No web origin")
+        }
         let childEnv = childEnvironment(env, environment: environment)
         let serve: @Sendable (URL, URL, URL?) -> HostService.Launch = { node, cli, sandboxd in
             var environment = childEnv
@@ -27,8 +29,9 @@ struct ShellConfig {
         if let node = env["COHUB_DESKTOP_NODE"].map(URL.init(fileURLWithPath:)), let cli = env["COHUB_DESKTOP_CLI"].map(URL.init(fileURLWithPath:)) {
             service = { serve(node, cli, env["COHUB_SANDBOXD_BIN"].map(URL.init(fileURLWithPath:))) }
         } else if let bundled = bundle.resourceURL?.appendingPathComponent("runtime"), let id = bundle.bundleIdentifier,
-                  FileManager.default.fileExists(atPath: bundled.appendingPathComponent(RuntimeInstall.cliEntry).path),
-                  let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            FileManager.default.fileExists(atPath: bundled.appendingPathComponent(RuntimeInstall.cliEntry).path),
+            let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        {
             let data = support.appendingPathComponent(id, isDirectory: true)
             let root = data.appendingPathComponent("runtime", isDirectory: true)
             let shim = data.appendingPathComponent("bin/cohub")
@@ -148,5 +151,5 @@ extension RGB {
 }
 
 func L(_ key: String.LocalizationValue) -> String {
-    String(localized: key)
+    String(localized: key, bundle: HostLocale.shared.bundle)
 }

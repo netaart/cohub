@@ -4,6 +4,8 @@ import AppKit
 enum MainMenu {
     static func build(updater: NSMenuItem?, commandLineTool: Bool) -> NSMenu {
         let bar = NSMenu()
+        ShellKeys.tabs.removeAllItems()
+        ShellKeys.always.removeAllItems()
 
         let app = submenu(bar, "Cohub")
         app.addItem(withTitle: L("About Cohub"), action: #selector(Shell.showAbout(_:)), keyEquivalent: "")
@@ -96,7 +98,9 @@ enum MainMenu {
     }
 
     private static func copy(_ item: NSMenuItem) -> NSMenuItem {
-        item.copy() as! NSMenuItem
+        let copy = NSMenuItem(title: item.title, action: item.action, keyEquivalent: item.keyEquivalent)
+        copy.keyEquivalentModifierMask = item.keyEquivalentModifierMask
+        return copy
     }
 
     private static func submenu(_ bar: NSMenu, _ title: String) -> NSMenu {

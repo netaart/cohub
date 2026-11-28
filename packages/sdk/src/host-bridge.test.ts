@@ -5,6 +5,7 @@ import {
   createHostBridge,
   HostBridgeErrorClass,
   type HostBridgeChannel,
+  writeHostFile,
 } from "./host-bridge.js";
 
 type Request = { type: string; method?: string; id?: string; params?: unknown };
@@ -22,6 +23,7 @@ function createFakeHost(options: { autoDescribe?: boolean } = {}) {
   const deliver = (data: unknown) => listener?.({ data });
   const channel: HostBridgeChannel = {
     postMessage(message) {
+      if (typeof message !== "string") return;
       const parsed = JSON.parse(message) as Request;
       sent.push(parsed);
       if (options.autoDescribe !== false && parsed.method === "host.describe" && parsed.id) {
@@ -191,9 +193,53 @@ test("malformed host messages are ignored", async () => {
   const bridge = createHostBridge({ channel: host.channel });
 
   host.deliver("not json");
-  host.deliver({ type: "hello", version: 1, platform: "harmony", hostId: "x", capabilities: [] });
+  host.deliver({ type: "hello", version: 1, platform: "android", capabilities: [] });
   assert.equal(bridge.connected, false);
 
   host.hello();
   assert.equal(bridge.connected, true);
+});
+
+test("writeHostFile streams frames within the host's window, then commits", async () => {
+  const frames: { channel: number; offset: number; size: number }[] = [];
+  let listener: ((event: { data: unknown }) => void) | null = null;
+  let acked = 0;
+  let inFlightPeak = 0;
+  const deliver = (data: unknown) => queueMicrotask(() => listener?.({ data }));
+  const channel: HostBridgeChannel = {
+    postMessage(message) {
+      if (typeof message !== "string") {
+        const view = new DataView(message);
+        assert.equal(new TextDecoder().decode(message.slice(0, 4)), "CHF1");
+        const frame = { channel: view.getUint32(4), offset: Number(view.getBigUint64(8)), size: message.byteLength - 16 };
+        frames.push(frame);
+        inFlightPeak = Math.max(inFlightPeak, frame.offset + frame.size - acked);
+        setTimeout(() => {
+          acked = frame.offset + frame.size;
+          deliver({ type: "event", name: "files.progress", payload: { id: "f1", received: acked, total: 10 } });
+        }, 1);
+        return;
+      }
+      const request = JSON.parse(message) as Request;
+      const result = {
+        "host.describe": { version: 1, platform: "android", hostId: "h", capabilities: ["files.stream"] },
+        "files.write.begin": { channel: 7, chunkBytes: 3, windowBytes: 6 },
+        "files.write.commit": { location: "downloads", revealable: true },
+      }[request.method as string];
+      deliver({ type: "response", id: request.id, result });
+    },
+    addEventListener(_type, next) {
+      listener = next;
+    },
+    removeEventListener() {
+      listener = null;
+    },
+  };
+  const bridge = createHostBridge({ channel });
+  await bridge.ready();
+
+  const saved = await writeHostFile(bridge, { id: "f1", name: "a.bin" }, new Blob([new Uint8Array(10)]));
+  assert.deepEqual(saved, { location: "downloads", revealable: true });
+  assert.deepEqual(frames.map((frame) => [frame.channel, frame.offset, frame.size]), [[7, 0, 3], [7, 3, 3], [7, 6, 3], [7, 9, 1]]);
+  assert.ok(inFlightPeak <= 6);
 });

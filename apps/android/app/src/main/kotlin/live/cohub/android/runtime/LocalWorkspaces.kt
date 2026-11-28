@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import live.cohub.android.host.HostProtocol
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -94,18 +95,32 @@ class LocalWorkspaces(private val http: OkHttpClient, private val ready: (String
         code,
         reason,
         mapOf("Cache-Control" to "no-store"),
-        ByteArrayInputStream(buildJsonObject { putJsonObject("error") { put("code", rpcCode); put("message", reason) } }.toString().toByteArray()),
+        ByteArrayInputStream(
+            buildJsonObject {
+                putJsonObject("error") {
+                    put("code", rpcCode)
+                    put("message", reason)
+                }
+            }.toString().toByteArray(),
+        ),
     )
 
     companion object {
-        const val PATH_PREFIX = "/__cohub/workspace/"
+        const val PATH_PREFIX = HostProtocol.WORKSPACE_PATH
         private val METHOD = Regex("^fs\\.[a-z]+$")
         private val JSON = "application/json".toMediaType()
+
         // Conditional requests stay out: WebResourceResponse cannot carry a 304.
         private val FORWARDED = listOf("Range", "If-Range")
         private val PASSED = listOf(
-            "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control",
-            "Content-Security-Policy", "X-Content-Type-Options",
+            "Content-Length",
+            "Content-Range",
+            "Accept-Ranges",
+            "ETag",
+            "Last-Modified",
+            "Cache-Control",
+            "Content-Security-Policy",
+            "X-Content-Type-Options",
         )
     }
 }

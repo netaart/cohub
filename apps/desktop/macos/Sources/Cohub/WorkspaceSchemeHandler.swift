@@ -89,7 +89,8 @@ final class WorkspaceSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         var fields = response.allHeaderFields.reduce(into: [String: String]()) { fields, header in
             guard let name = header.key as? String, let value = header.value as? String,
-                  WorkspaceFiles.passedHeaders.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { return }
+                WorkspaceFiles.passedHeaders.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame })
+            else { return }
             fields[name] = value
         }
         fields["Access-Control-Allow-Origin"] = origin

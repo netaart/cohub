@@ -135,12 +135,13 @@ public actor AuthSession {
                 "resource": config.apiResource,
             ])
             guard generation == started else { return nil }
-            change(to: Credentials(
-                refreshToken: token.refreshToken ?? stored.refreshToken,
-                subject: token.subject ?? stored.subject,
-                accessToken: token.accessToken,
-                accessTokenExpiresAt: expiry(token)
-            ), newSession: false)
+            change(
+                to: Credentials(
+                    refreshToken: token.refreshToken ?? stored.refreshToken,
+                    subject: token.subject ?? stored.subject,
+                    accessToken: token.accessToken,
+                    accessTokenExpiresAt: expiry(token)
+                ), newSession: false)
             return token.accessToken
         } catch let failure as OAuthFailure where failure.status == 400 || failure.status == 401 {
             log("Refresh rejected (\(failure.status)); signing out")

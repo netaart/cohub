@@ -69,10 +69,13 @@ internal sealed class ShellTab : IDisposable
         core.Settings.AreDevToolsEnabled = app.Config.IsDevelopment;
         core.Settings.IsStatusBarEnabled = false;
         core.Settings.IsPasswordAutosaveEnabled = false;
+        core.Settings.AreDefaultScriptDialogsEnabled = false;
         await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeScript);
         core.WebMessageReceived += OnWebMessage;
         core.NavigationStarting += OnNavigationStarting;
         core.NewWindowRequested += OnNewWindowRequested;
+        core.LaunchingExternalUriScheme += (_, e) => e.Cancel = true;
+        core.ScriptDialogOpening += OnScriptDialogOpening;
         core.ContentLoading += (_, _) => ResetPage();
         core.PermissionRequested += OnPermissionRequested;
         if (app.WorkspaceFiles is { } files)
@@ -82,6 +85,7 @@ internal sealed class ShellTab : IDisposable
         }
         core.ProcessFailed += (_, e) =>
         {
+            app.Dialogs.Dismiss(this);
             if (e.ProcessFailedKind is not (CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)) return;
             ResetPage();
             Refresh();
@@ -209,6 +213,7 @@ internal sealed class ShellTab : IDisposable
 
     private void ResetPage()
     {
+        app.Dialogs.Dismiss(this);
         Dirty = false;
         CapturesKeys = false;
         usedMedia = false;
@@ -243,6 +248,35 @@ internal sealed class ShellTab : IDisposable
         if (app.Config.Origin.PathOf(url) is { } path)
             Window.OpenBeside(new SessionTab(path), this, background: modifiers.HasFlag(ModifierKeys.Control) && !modifiers.HasFlag(ModifierKeys.Shift));
         else if (app.Config.Origin.NavigationTo(url) == WebOrigin.Navigation.External) ShellWindow.OpenExternally(url);
+    }
+
+    private async void OnScriptDialogOpening(object? sender, CoreWebView2ScriptDialogOpeningEventArgs e)
+    {
+        var deferral = e.GetDeferral();
+        var kind = e.Kind switch
+        {
+            CoreWebView2ScriptDialogKind.Confirm => PageDialogKind.Confirm,
+            CoreWebView2ScriptDialogKind.Prompt => PageDialogKind.Prompt,
+            CoreWebView2ScriptDialogKind.Beforeunload => PageDialogKind.BeforeUnload,
+            _ => PageDialogKind.Alert,
+        };
+        var dialog = app.Dialogs.Open(this, hiddenSince is null && Window.IsVisible, (accepted, text) =>
+        {
+            try
+            {
+                if (accepted)
+                {
+                    if (kind == PageDialogKind.Prompt) e.ResultText = text ?? "";
+                    e.Accept();
+                }
+                deferral.Complete();
+            }
+            catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException) { }
+        });
+        if (dialog is null) return;
+        var (title, message, defaultText) = (PageDialogs.Title(app.Config.Origin, e.Uri, Strings.L("Embedded page")), e.Message, e.DefaultText);
+        await Task.Yield();
+        Window.ShowPageDialog(dialog, kind, title, message, defaultText);
     }
 
     private void OnPermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs e)
@@ -292,6 +326,7 @@ internal sealed class ShellTab : IDisposable
     {
         if (disposed) return;
         disposed = true;
+        app.Dialogs.Dismiss(this);
         view?.Dispose();
     }
 

@@ -55,8 +55,14 @@ internal class ProjectionSource(private val projection: MediaProjection, size: S
     init {
         projection.registerCallback(callback, FrameChanges.handler)
         display = projection.createVirtualDisplay(
-            "cohub-screen", size.width, size.height, densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, null, null, FrameChanges.handler,
+            "cohub-screen",
+            size.width,
+            size.height,
+            densityDpi,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            null,
+            null,
+            FrameChanges.handler,
         ) ?: throw DisplayError(DisplayError.FAILED, "the phone could not record the screen")
     }
 

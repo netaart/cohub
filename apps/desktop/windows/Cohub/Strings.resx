@@ -61,4 +61,10 @@
   <data name="Web {0}" xml:space="preserve"><value>Web {0}</value></data>
   <data name="Copied" xml:space="preserve"><value>Copied</value></data>
   <data name="Close" xml:space="preserve"><value>Close</value></data>
+  <data name="OK" xml:space="preserve"><value>OK</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Leave" xml:space="preserve"><value>Leave</value></data>
+  <data name="Leave this page?" xml:space="preserve"><value>Leave this page?</value></data>
+  <data name="Changes you made may not be saved." xml:space="preserve"><value>Changes you made may not be saved.</value></data>
+  <data name="Embedded page" xml:space="preserve"><value>Embedded page</value></data>
 </root>

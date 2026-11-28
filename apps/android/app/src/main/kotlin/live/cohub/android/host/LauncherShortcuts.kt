@@ -8,6 +8,7 @@ import androidx.core.graphics.drawable.IconCompat
 import androidx.core.net.toUri
 import live.cohub.android.MainActivity
 import live.cohub.android.R
+import live.cohub.android.ui.HostLocale
 
 object LauncherShortcuts {
 
@@ -25,7 +26,7 @@ object LauncherShortcuts {
 
     fun pushNewChat(context: Context) {
         val intent = Intent(Intent.ACTION_VIEW, WebOrigin.urlOf(NEW_CHAT_PATH).toUri(), context, MainActivity::class.java)
-        val label = context.getString(R.string.shortcut_new_chat)
+        val label = HostLocale.strings(context).getString(R.string.shortcut_new_chat)
         val shortcut = ShortcutInfoCompat.Builder(context, "new-chat")
             .setShortLabel(label)
             .setIcon(IconCompat.createWithResource(context, R.drawable.ic_shortcut_space))

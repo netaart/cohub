@@ -1,11 +1,15 @@
 package live.cohub.android.files
 
+import android.annotation.SuppressLint
+import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
+import android.os.StatFs
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.provider.MediaStore.MediaColumns
@@ -20,11 +24,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import live.cohub.android.BuildConfig
 import live.cohub.android.R
+import live.cohub.android.ui.HostLocale
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 
@@ -46,7 +52,7 @@ class FileSaver(
                 else -> throw IllegalArgumentException("files.save requires exactly one of url or data")
             }
         }
-        saved[id] = result.uri
+        remember(id, result)
         return result
     }
 
@@ -65,10 +71,11 @@ class FileSaver(
                 .onFailure { Log.w(TAG, "Could not save $name", it) }
                 .getOrNull()
             withContext(Dispatchers.Main) {
+                val strings = HostLocale.strings(context)
                 val message = if (saved != null) {
-                    context.getString(R.string.file_saved, saved.path)
+                    strings.getString(R.string.file_saved, saved.path)
                 } else {
-                    context.getString(R.string.file_save_failed)
+                    strings.getString(R.string.file_save_failed)
                 }
                 Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             }
@@ -89,40 +96,84 @@ class FileSaver(
     }
 
     private fun write(name: String, mimeType: String?, source: InputStream): Saved {
+        val pending = create(name, mimeType)
+        try {
+            pending.output().use { source.copyTo(it) }
+        } catch (error: Exception) {
+            pending.discard()
+            throw error
+        }
+        return pending.publish()
+    }
+
+    fun create(name: String, mimeType: String?): Pending {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) throw UnsupportedOperationException("Needs Android 10")
         val fileName = safeFileName(name)
         val type = mimeType?.lowercase()?.substringBefore(';')?.trim()?.takeIf { it.contains('/') }
             ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(fileName.substringAfterLast('.', "").lowercase())
             ?: GENERIC_TYPE
         val folder = SavedFolder.of(type)
-        val target = try {
-            folder to insert(folder, fileName, type, source)
+        return try {
+            Pending(folder, insert(folder, fileName, type))
         } catch (error: IllegalArgumentException) {
             if (folder == SavedFolder.DOWNLOADS) throw error
-            SavedFolder.DOWNLOADS to insert(SavedFolder.DOWNLOADS, fileName, type, source)
+            Pending(SavedFolder.DOWNLOADS, insert(SavedFolder.DOWNLOADS, fileName, type))
         }
-        return Saved(target.first.location, target.first.path, target.second)
+    }
+
+    inner class Pending internal constructor(private val folder: SavedFolder, val uri: Uri) {
+        fun output(): OutputStream = context.contentResolver.openOutputStream(uri) ?: throw IOException("Cannot open $uri")
+
+        @SuppressLint("InlinedApi") // Only create makes one, on Android 10+.
+        fun publish(): Saved {
+            context.contentResolver.update(uri, ContentValues().apply { put(MediaColumns.IS_PENDING, 0) }, null, null)
+            return Saved(folder.location, folder.path, uri)
+        }
+
+        fun discard() {
+            runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+    }
+
+    fun remember(id: String, saved: Saved) {
+        this.saved[id] = saved.uri
+    }
+
+    fun hasRoom(bytes: Long): Boolean = (context.getExternalFilesDir(null)?.let { StatFs(it.path).availableBytes } ?: 0) >= bytes
+
+    fun sweepPending(startedAt: Long) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val resolver = context.contentResolver
+        for (folder in SavedFolder.entries) {
+            val selection = "${MediaColumns.IS_PENDING} = 1 AND ${MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaColumns.DATE_ADDED} < ?"
+            val args = arrayOf("${folder.path}/%", (startedAt / 1_000).toString())
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    resolver.delete(
+                        folder.collection(),
+                        Bundle().apply {
+                            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args)
+                            putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_ONLY)
+                        },
+                    )
+                } else {
+                    @Suppress("DEPRECATION") // Android 10's only way to reach pending items.
+                    resolver.delete(MediaStore.setIncludePending(folder.collection()), selection, args)
+                }
+            }.onFailure { Log.w(TAG, "Could not sweep ${folder.path}", it) }
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun insert(folder: SavedFolder, name: String, mimeType: String, source: InputStream): Uri {
-        val resolver = context.contentResolver
+    private fun insert(folder: SavedFolder, name: String, mimeType: String): Uri {
         val values = ContentValues().apply {
             put(MediaColumns.DISPLAY_NAME, name)
             put(MediaColumns.MIME_TYPE, mimeType)
             put(MediaColumns.RELATIVE_PATH, folder.path)
             put(MediaColumns.IS_PENDING, 1)
         }
-        val uri = resolver.insert(folder.collection(), values) ?: throw IOException("MediaStore refused $name")
-        try {
-            val output = resolver.openOutputStream(uri) ?: throw IOException("Cannot open $uri")
-            output.use { source.copyTo(it) }
-            resolver.update(uri, ContentValues().apply { put(MediaColumns.IS_PENDING, 0) }, null, null)
-        } catch (error: Exception) {
-            resolver.delete(uri, null, null)
-            throw error
-        }
-        return uri
+        return context.contentResolver.insert(folder.collection(), values) ?: throw IOException("MediaStore refused $name")
     }
 
     private companion object {
@@ -137,7 +188,7 @@ class FileSaver(
     }
 }
 
-private enum class SavedFolder(directory: String, val location: String) {
+internal enum class SavedFolder(directory: String, val location: String) {
     PICTURES(Environment.DIRECTORY_PICTURES, "pictures"),
     MOVIES(Environment.DIRECTORY_MOVIES, "movies"),
     MUSIC(Environment.DIRECTORY_MUSIC, "music"),

@@ -9,6 +9,7 @@ on:
       - 'scripts/stage-runtime.mjs'
       - 'packages/protocol/src/host-bridge.ts'
       - 'packages/protocol/host-bridge.json'
+      - 'apps/.swift-format'
       - '.github/workflows/desktop.yml'
       # Bot PRs (Version Packages, binary pins) change only versions; prepublishOnly verifies pinned binaries.
       - '!packages/cli/package.json'
@@ -26,6 +27,7 @@ on:
       - 'scripts/stage-runtime.mjs'
       - 'packages/protocol/src/host-bridge.ts'
       - 'packages/protocol/host-bridge.json'
+      - 'apps/.swift-format'
       - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
@@ -51,8 +53,10 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: apps/desktop/windows/global.json
+      - name: Swift style
+        run: swift format lint --strict --recursive --parallel apps/desktop/macos
       - name: macOS core
-        run: swift test --package-path apps/desktop/macos
+        run: swift test --package-path apps/desktop/macos -Xswiftc -warnings-as-errors
       - name: Windows core
         working-directory: apps/desktop/windows
         run: dotnet test --project Cohub.Core.Tests

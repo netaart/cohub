@@ -68,7 +68,14 @@ class SandboxBridge(
         val localToken = newLocalToken()
         val tmp = File(home, "tmp").apply { mkdirs() }
         val process = ProcessBuilder(
-            binary.path, "--local", "--space", spaceId, "--root", root.path, "--relay", relayUrl,
+            binary.path,
+            "--local",
+            "--space",
+            spaceId,
+            "--root",
+            root.path,
+            "--relay",
+            relayUrl,
         ).directory(root).apply {
             environment().putAll(
                 mapOf(

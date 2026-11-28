@@ -15,3 +15,6 @@
 
 # The phone helper starts by name through app_process, outside the app.
 -keep class live.cohub.android.helper.HelperMain { public static void main(java.lang.String[]); }
+
+-if class androidx.credentials.CredentialManager
+-keep class androidx.credentials.playservices.** { *; }

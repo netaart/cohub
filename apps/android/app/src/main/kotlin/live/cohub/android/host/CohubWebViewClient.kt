@@ -12,8 +12,9 @@ import android.webkit.WebViewClient
 import live.cohub.android.runtime.LocalWorkspaces
 
 /**
- * Only the Cohub origin loads in-shell; anything else goes to the system
- * browser, so the bridge injection surface never sees third-party pages.
+ * Only the Cohub origin loads as the top document; a link elsewhere opens
+ * outside when its scheme may, so the bridge injection surface never sees
+ * third-party pages. Frames (Apps) navigate where they like, never outside.
  *
  * Lint only recognises the `onRenderProcessGone` override on anonymous
  * `WebViewClient` objects, hence the suppression.
@@ -26,14 +27,19 @@ class CohubWebViewClient(
 
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         val url = request.url
-        if (workspaces == null || !WebOrigin.contains(url) || url.path?.startsWith(LocalWorkspaces.PATH_PREFIX) != true) return null
-        return workspaces.intercept(request)
+        if (!WebOrigin.contains(url)) return null
+        val path = url.path ?: return null
+        return when {
+            path.startsWith(HostProtocol.SHARE_PATH) -> listener.onSharedFileRequest(request)
+            workspaces != null && path.startsWith(LocalWorkspaces.PATH_PREFIX) -> workspaces.intercept(request)
+            else -> null
+        }
     }
 
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url
-        if (WebOrigin.contains(url)) return false
-        listener.onExternalLink(url)
+        if (WebOrigin.contains(url) || !request.isForMainFrame) return false
+        if (url.scheme?.lowercase() in HostProtocol.EXTERNAL_SCHEMES) listener.onExternalLink(url)
         return true
     }
 

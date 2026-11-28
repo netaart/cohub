@@ -20,12 +20,13 @@ internal sealed class ShellApp : IDisposable
     private RuntimeOverview overview = RuntimeOverview.Empty;
     private EdgePalette? appliedPalette;
     private bool saveQueued;
+    private bool updateReady;
     private Gtk.AboutDialog? about;
 
-    public ShellApp(ShellConfig config)
+    public ShellApp(ShellConfig config, ShellState state)
     {
         Config = config;
-        State = ShellState.Load(config.DataDirectory);
+        State = state;
         // A second launch hands its URI to this instance over D-Bus and exits.
         Application = Adw.Application.New(config.AppId, Gio.ApplicationFlags.HandlesOpen);
         Application.OnStartup += (_, _) => Startup();
@@ -39,6 +40,7 @@ internal sealed class ShellApp : IDisposable
 
     public ShellConfig Config { get; }
     public ShellState State { get; }
+    public PageDialogs Dialogs { get; } = new();
     public Adw.Application Application { get; }
     public Gio.Menu Menu { get; } = Gio.Menu.New();
     public WebKit.NetworkSession Session { get; private set; } = null!;
@@ -69,7 +71,7 @@ internal sealed class ShellApp : IDisposable
         try { DesktopEntry.Write(Config, State.Shortcuts); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { Log($"Could not write the desktop entry: {error.Message}"); }
         StartService();
-        updates = new Updates(Config.FeedUrl, () => Post(() => { updateSection.RemoveAll(); updateSection.Append(Strings.L("Restart to Update"), "app.restart-to-update"); }), Log,
+        updates = new Updates(Config.FeedUrl, () => Post(ShowUpdateReady), Log,
             new Updates.Gate(Path.Combine(Config.DataDirectory, "update.lock"), AppImage.Superseded, () => AppImage.Relaunch([])));
         _ = updates.RunAsync(stopping.Token);
     }
@@ -263,9 +265,26 @@ internal sealed class ShellApp : IDisposable
         Menu.AppendSection(null, quitSection);
     }
 
-    private void UpdateFolders(RuntimeOverview next)
+    private void ShowUpdateReady()
     {
-        if (next.Equals(overview)) return;
+        updateReady = true;
+        updateSection.RemoveAll();
+        updateSection.Append(Strings.L("Restart to Update"), "app.restart-to-update");
+    }
+
+    private void ApplyLocale()
+    {
+        Strings.Use(State.Locale);
+        Menu.RemoveAll();
+        BuildMenu();
+        UpdateFolders(overview, relabel: true);
+        if (updateReady) ShowUpdateReady();
+        foreach (var window in windows) window.Relabel();
+    }
+
+    private void UpdateFolders(RuntimeOverview next, bool relabel = false)
+    {
+        if (next.Equals(overview) && !relabel) return;
         overview = next;
         folders.RemoveAll();
         foreach (var folder in next.Connected)
@@ -337,15 +356,18 @@ internal sealed class ShellApp : IDisposable
         List<string> capabilities = [
             HostProtocol.Capabilities.Launch, HostProtocol.Capabilities.Appearance, HostProtocol.Capabilities.Navigation,
             HostProtocol.Capabilities.Notifications, HostProtocol.Capabilities.Shortcuts, HostProtocol.Capabilities.MediaCapture,
-            HostProtocol.Capabilities.Tabs,
-            HostProtocol.Capabilities.About,
-            HostProtocol.Capabilities.Files,
+            HostProtocol.Capabilities.Tabs, HostProtocol.Capabilities.AppAbout, HostProtocol.Capabilities.AppLocale, HostProtocol.Capabilities.Files,
         ];
         var handlers = new Dictionary<string, BridgeRouter.Handler>
         {
             [HostProtocol.Methods.AppReady] = _ =>
             {
                 tab.ReportReady();
+                return Ok();
+            },
+            [HostProtocol.Methods.AppSetLocale] = parameters =>
+            {
+                if (State.SetLocale(JsonFields.Text(parameters, "locale"))) ApplyLocale();
                 return Ok();
             },
             [HostProtocol.Methods.FilesSave] = async parameters => await downloads.SaveAsync(parameters, payload => tab.Emit(HostProtocol.Events.FilesProgress, payload)),

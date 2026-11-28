@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -15,6 +16,7 @@ public sealed class ShellState
     public ServiceHello? ServiceHello { get; set; }
     public List<Shortcut> Shortcuts { get; set; } = [];
     public bool GlobalShortcut { get; set; }
+    public string? Locale { get; set; }
 
     [JsonInclude] internal string? LastPath { get; set; }
     [JsonInclude] internal Placement? Window { get; set; }
@@ -50,6 +52,22 @@ public sealed class ShellState
         Shortcuts = [shortcut, .. Shortcuts.Where(item => item.Id != shortcut.Id).Take(4)];
         Save();
     }
+
+    public bool SetLocale(string? locale)
+    {
+        locale = locale is HostProtocol.Locales.En or HostProtocol.Locales.ZhCn ? locale : null;
+        if (locale == Locale) return false;
+        Locale = locale;
+        Save();
+        return true;
+    }
+
+    public static CultureInfo? CultureOf(string? locale) => locale switch
+    {
+        HostProtocol.Locales.ZhCn => CultureInfo.GetCultureInfo("zh-Hans"),
+        HostProtocol.Locales.En => CultureInfo.GetCultureInfo("en"),
+        _ => null,
+    };
 
     /// The CLI child sees the user's environment minus Cohub settings, so a terminal's overrides never leak into the app.
     public static Dictionary<string, string> ChildEnvironment(IReadOnlyDictionary<string, string> env, string environment, StringComparer comparer)

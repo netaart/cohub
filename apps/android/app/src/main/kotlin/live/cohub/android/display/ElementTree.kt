@@ -192,6 +192,7 @@ internal class ElementTree {
         val states = buildList {
             if (isFocused) add("focused")
             if (isSelected) add("selected")
+            @Suppress("DEPRECATION") // Android 16's tri-state replacement adds nothing for a checked flag.
             if (isChecked) add("checked")
             if (!isEnabled) add("disabled")
             if (isEditable) add("editable")

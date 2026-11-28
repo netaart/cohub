@@ -12,7 +12,8 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     private let cover = LaunchCover()
     private var webView: WKWebView!
     private var router: BridgeRouter!
-    private(set) lazy var files = FileSaver(host: self, api: shell.config.api, auth: shell.auth)
+    private(set) lazy var files = FileSaver(host: self, webView: webView, origin: shell.config.origin, api: shell.config.api, auth: shell.auth)
+    private let dialogs = PageDialogs()
     private var edge: RGB
     private var observation: NSKeyValueObservation?
     private var loadStarted: ContinuousClock.Instant? = .now
@@ -75,6 +76,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         let messages = ScriptMessageProxy()
         messages.target = self
         configuration.userContentController.add(messages, contentWorld: .page, name: HostProtocol.global)
+        configuration.setURLSchemeHandler(ShareSchemeHandler(inbox: shell.inbox, origin: shell.config.origin.origin), forURLScheme: HostProtocol.shareScheme)
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.isOpaque = false
@@ -96,6 +98,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
 
     func load(_ path: String) {
         guard let url = shell.config.origin.url(for: path) else { return }
+        dialogs.cancel()
         needsReload = false
         if cover.failure != nil { holdCover() }
         retryPath = path
@@ -226,6 +229,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     }
 
     private func recover() {
+        dialogs.cancel()
         needsReload = false
         retryPath = ShellState.lastPage ?? startPath
         holdCover()
@@ -235,8 +239,8 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     fileprivate func receive(_ message: WKScriptMessage) {
         let origin = message.frameInfo.securityOrigin
         guard message.frameInfo.isMainFrame,
-              shell.config.origin.isOrigin(scheme: origin.protocol, host: origin.host, port: origin.port),
-              let text = message.body as? String
+            shell.config.origin.isOrigin(scheme: origin.protocol, host: origin.host, port: origin.port),
+            let text = message.body as? String
         else { return }
         router.receive(text)
     }
@@ -258,12 +262,12 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
-        guard action.targetFrame?.isMainFrame != false else { return .allow }
-        if action.shouldPerformDownload {
+        let mainFrame = action.targetFrame?.isMainFrame != false
+        if mainFrame, action.shouldPerformDownload {
             if url.scheme == "https" { files.save(url: url, name: url.lastPathComponent, mimeType: nil) }
             return .cancel
         }
-        return route(url) ? .allow : .cancel
+        return route(url, mainFrame: mainFrame) ? .allow : .cancel
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
@@ -272,8 +276,8 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         return .cancel
     }
 
-    private func route(_ url: URL) -> Bool {
-        switch shell.config.origin.navigation(to: url) {
+    private func route(_ url: URL, mainFrame: Bool = true) -> Bool {
+        switch shell.config.origin.navigation(to: url, mainFrame: mainFrame) {
         case .allow: return true
         case .external(let url): UIApplication.shared.open(url)
         case .deny: break
@@ -282,6 +286,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        dialogs.cancel()
         committed = true
         if revealDue, cover.failure == nil { lift() }
     }
@@ -296,6 +301,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         logger.warning("Web content process terminated")
+        dialogs.cancel()
         guard foreground else {
             needsReload = true
             return
@@ -321,26 +327,32 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
     }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo) async {
-        _ = await dialog(message, confirm: L("OK"), cancel: nil)
+        _ = await dialog(message, from: frame, cancels: false)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo) async -> Bool {
-        await dialog(message, confirm: L("OK"), cancel: L("Cancel")) != nil
+        await dialog(message, from: frame) != nil
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo) async -> String? {
-        await dialog(prompt, confirm: L("OK"), cancel: L("Cancel"), field: defaultText ?? "")
+        await dialog(prompt, from: frame, field: defaultText ?? "")
     }
 
-    private func dialog(_ message: String, confirm: String, cancel: String?, field: String? = nil) async -> String? {
-        await withCheckedContinuation { continuation in
-            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-            if let field { alert.addTextField { $0.text = field } }
-            alert.addAction(UIAlertAction(title: confirm, style: .default) { [weak alert] _ in
-                continuation.resume(returning: alert?.textFields?.first?.text ?? "")
-            })
-            if let cancel { alert.addAction(UIAlertAction(title: cancel, style: .cancel) { _ in continuation.resume(returning: nil) }) }
+    func cancelDialog() {
+        dialogs.cancel()
+    }
+
+    private func dialog(_ message: String, from frame: WKFrameInfo, cancels: Bool = true, field: String? = nil) async -> String? {
+        let origin = frame.securityOrigin
+        let title = shell.config.origin.dialogTitle(scheme: origin.protocol, host: origin.host, port: origin.port)
+        let alert = UIAlertController(title: title.map { $0.isEmpty ? L("An embedded page") : $0 }, message: message, preferredStyle: .alert)
+        if let field { alert.addTextField { $0.text = field } }
+        return await dialogs.show { answer in
+            alert.addAction(UIAlertAction(title: L("OK"), style: .default) { [weak alert] _ in answer(alert?.textFields?.first?.text ?? "") })
+            if cancels { alert.addAction(UIAlertAction(title: L("Cancel"), style: .cancel) { _ in answer(nil) }) }
             topmost.present(alert, animated: true)
+        } dismiss: { [weak alert] in
+            alert?.dismiss(animated: true)
         }
     }
 }

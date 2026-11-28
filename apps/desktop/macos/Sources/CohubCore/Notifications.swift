@@ -26,7 +26,7 @@ public final class Notifications: NSObject, UNUserNotificationCenterDelegate {
 
     public nonisolated func show(_ params: JSON) async throws -> Bool {
         guard let id = params["id"]?.string, let title = params["title"]?.string,
-              let path = params["path"]?.string, WebOrigin.isInAppPath(path)
+            let path = params["path"]?.string, WebOrigin.isInAppPath(path)
         else { throw BridgeFailure.failed("notifications.show requires an id, a title and an in-app path") }
         guard await state() == "granted" else { return false }
         let content = UNMutableNotificationContent()

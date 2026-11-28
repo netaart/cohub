@@ -49,15 +49,13 @@ public final class BridgeRouter {
     }
 
     private func reply(to request: BridgeRequest) async -> BridgeReply {
-        if request.method == HostProtocol.Method.describe { return .result(await describe()) }
+        if request.method == HostProtocol.Method.hostDescribe { return .result(await describe()) }
         if let handler = handlers[request.method] {
             do {
                 let result = try await handler(request.params)
                 if request.method == HostProtocol.Method.runtimePickFolder { try await confirmFolder(result) }
                 return .result(result)
-            }
-            catch let failure as BridgeFailure { return .failure(failure) }
-            catch { return .failure(.failed(String(describing: error))) }
+            } catch let failure as BridgeFailure { return .failure(failure) } catch { return .failure(.failed(String(describing: error))) }
         }
         guard let service, await serviceHello()?.methods.contains(request.method) == true else { return .failure(.unsupported(request.method)) }
         if request.method == HostProtocol.Method.runtimeStart, !(await consented(to: request, service: service)) {
@@ -99,7 +97,8 @@ public final class BridgeRouter {
         pendingConsent = nil
         if let spent, spent.root == root, .now < spent.until { return true }
         if case .result(let runtime) = await service.call(BridgeRequest(id: "list", method: HostProtocol.Method.runtimeList)),
-           runtime["instances"]?.array?.contains(where: { $0["spaceId"]?.string == spaceId && $0["root"]?.string == root }) == true {
+            runtime["instances"]?.array?.contains(where: { $0["spaceId"]?.string == spaceId && $0["root"]?.string == root }) == true
+        {
             return true
         }
         return await consent(.folder(root: root))

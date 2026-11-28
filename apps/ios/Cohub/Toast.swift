@@ -33,6 +33,10 @@ enum Toast {
         ])
         UIAccessibility.post(notification: .announcement, argument: text)
         UIView.animate(withDuration: 0.2) { pill.alpha = 1 }
-        UIView.animate(withDuration: 0.3, delay: 2.2, options: []) { pill.alpha = 0 } completion: { _ in pill.removeFromSuperview() }
+        UIView.animate(withDuration: 0.3, delay: 2.2, options: []) {
+            pill.alpha = 0
+        } completion: { _ in
+            pill.removeFromSuperview()
+        }
     }
 }

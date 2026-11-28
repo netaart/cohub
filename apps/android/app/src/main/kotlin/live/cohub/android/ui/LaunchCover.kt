@@ -1,5 +1,6 @@
 package live.cohub.android.ui
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -27,6 +28,7 @@ import live.cohub.android.R
 import live.cohub.android.host.LaunchFailure
 import kotlin.math.min
 
+@SuppressLint("ViewConstructor") // Built in code only, around the surface it covers.
 class LaunchCover(context: Context, private val behind: View, private val onAction: () -> Unit) : FrameLayout(context) {
 
     sealed interface State {
@@ -36,11 +38,12 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
     }
 
     private var state: State = State.Loading
+    private val statusBounds = RectF()
 
     val failure: LaunchFailure? get() = (state as? State.Failed)?.failure
 
     private val brand = context.getColor(R.color.ic_launcher_background)
-    private val net = LaunchNet(context).apply { contentDescription = context.getString(R.string.launch_loading) }
+    private val net = LaunchNet(context)
     private val title = TextView(context).apply {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
         setTypeface(typeface, Typeface.BOLD)
@@ -76,10 +79,13 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
     init {
         isClickable = true
         addView(net, LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        addView(status, LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER_HORIZONTAL).apply {
-            leftMargin = 24.dp
-            rightMargin = 24.dp
-        })
+        addView(
+            status,
+            LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER_HORIZONTAL).apply {
+                leftMargin = 24.dp
+                rightMargin = 24.dp
+            },
+        )
         render()
     }
 
@@ -109,6 +115,8 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
         render()
     }
 
+    fun relocalize() = render()
+
     fun dismiss() {
         if (!isVisible || net.lifting) return
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
@@ -132,10 +140,11 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
         val inset = ViewCompat.getRootWindowInsets(this)?.getInsets(WindowInsetsCompat.Type.systemBars())?.bottom ?: 0
         val below = (net.originY + net.clearance).toInt() + 32.dp
         status.offsetTopAndBottom(min(below, height - inset - 16.dp - status.height) - status.top)
-        net.clear(if (status.isVisible) RectF(status.left.toFloat(), status.top.toFloat(), status.right.toFloat(), status.bottom.toFloat()) else null)
+        net.clear(if (status.isVisible) statusBounds.apply { set(status.left.toFloat(), status.top.toFloat(), status.right.toFloat(), status.bottom.toFloat()) } else null)
     }
 
     private fun render() {
+        net.contentDescription = HostLocale.strings(context).getString(R.string.launch_loading)
         when (val current = state) {
             State.Loading -> explain(null)
             State.Slow -> explain(R.string.launch_slow, action = R.string.launch_reload)
@@ -163,10 +172,11 @@ class LaunchCover(context: Context, private val behind: View, private val onActi
         prominent: Boolean = false,
     ) {
         val appearing = !status.isVisible && heading != null
-        title.text = heading?.let(context::getString)
-        detail.text = note?.let(context::getString)
+        val strings = HostLocale.strings(context)
+        title.text = heading?.let(strings::getString)
+        detail.text = note?.let(strings::getString)
         detail.isVisible = note != null
-        button.text = action?.let(context::getString)
+        button.text = action?.let(strings::getString)
         button.setTextColor(if (prominent) Color.WHITE else brand)
         val pill = GradientDrawable().apply {
             cornerRadius = 24.dp.toFloat()

@@ -113,6 +113,26 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
   (Linux) to it, or puts its directory on the user PATH (Windows), so the terminal's `cohub`
   updates with the app.
 
+### macOS
+
+- **Page dialogs.** `alert`, `confirm` and `prompt` are sheets on the tab's window. As on Windows, one shows
+  at a time, a frame on another origin is named by its host, a tab out of sight gets its answer as cancelled
+  at once, and a new document, a crashed page or a closed tab cancels the open one (`PageDialogs`).
+- **Language.** `app.setLocale` picks the shell's own copy (`HostLocale`, `zh-CN` reads `zh-Hans.lproj`, none
+  follows the system), kept for the next start: the menus and tray menu switch at once.
+- **Links.** Only the main frame opens links outside, for the schemes in `HostProtocol.externalSchemes`.
+
+### Windows
+
+- **Page dialogs.** `alert`, `confirm`, `prompt` and `beforeunload` are task dialogs (`prompt` a small window
+  over the tab's edge color). A frame on another origin, such as an App, is named by its host, so it cannot
+  pass for Cohub. One shows at a time, a tab out of sight gets its answer as cancelled at once, and a new
+  document, a crashed page or a closed tab cancels the open one.
+- **Language.** `app.setLocale` picks the shell's own copy (`zh-CN` draws `zh-Hans`, none follows the system)
+  and is kept in `shell.json`: the tray menu and Jump List switch at once, other open UI on the next start.
+- **Links.** Only the main frame opens links outside, for the schemes in `HostProtocol.ExternalSchemes`;
+  WebView2 never launches an app for a frame.
+
 ### Linux
 
 - **Toolkit.** GTK 4.10+, libadwaita 1.2+ and WebKitGTK 6.0 come from the distribution (Ubuntu 24.04, Debian 13,
@@ -129,6 +149,11 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
   pointing at the AppImage, registers it for the URL scheme and lists recent Spaces as actions.
 - **Bridge.** The page's `cohubHost` relays to an isolated script world, the only one that can
   reach the native message handler, so frames and page scripts never touch it directly.
+- **Page dialogs and language.** As on Windows, with libadwaita message dialogs; the header and tab menus
+  switch language at once. WebKitGTK does not say which frame asks for a dialog, so each frame reports its
+  origin from an isolated world just before; one no frame reported is titled "Embedded page", never as Cohub's.
+- **Links.** WebKitGTK does not say which frame navigates either, so `mailto:`, `tel:` and `sms:` open
+  outside only when clicked, never from a script.
 - **Tabs.** Tabs drag between windows and out into new ones.
 - **Edge color.** The header bar takes the front tab's edge color, and the strip's shade while the tab bar shows; its menu lists connected folders,
   and its icon turns green, yellow or red with them, like the tray icon elsewhere.
@@ -143,6 +168,7 @@ The cores build and test anywhere their toolchains run:
 
 ```bash
 swift test --package-path apps/desktop/macos           # Swift 6.0+
+swift format lint --strict --recursive apps/desktop/macos   # style: apps/.swift-format
 cd apps/desktop/windows && dotnet test --project Cohub.Core.Tests
 dotnet build apps/desktop/windows/Cohub/Cohub.csproj   # compiles on macOS and Linux too
 dotnet build apps/desktop/linux/Cohub/Cohub.csproj     # compiles anywhere; runs on Linux
@@ -194,8 +220,9 @@ publishes a self-contained build and packs it with `vpk` into an AppImage that u
 
 The store build is a sandboxed cloud client (`live.cohub.ios`, macOS 14.4+),
 connecting to Spaces on the cloud and other computers. It signs in through the system
-browser and keeps credentials in Keychain. It contains no local Runtime, CLI installer
-or Sparkle updater; the website DMG retains those features and its existing pipeline.
+browser, straight to a social provider when the page names one (`auth.provider`), and keeps
+credentials in Keychain. It contains no local Runtime, CLI installer or Sparkle updater; the
+website DMG retains those features and its existing pipeline.
 
 ```bash
 bash apps/desktop/macos/scripts/bundle-app-store.sh 1.2.3 1

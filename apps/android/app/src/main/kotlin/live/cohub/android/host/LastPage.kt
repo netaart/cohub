@@ -11,20 +11,22 @@ class LastPage(context: Context) {
 
     fun remember(url: String) {
         val path = WebOrigin.pathOf(url.toUri()) ?: return
-        val route = path.substringBefore('?').substringBefore('#')
-        if (route in HOMES || ONE_SHOT.any { route == it || route.startsWith("$it/") }) return
-        if (path != read()) prefs.edit { putString(KEY, path) }
+        if (isResumable(path) && path != read()) prefs.edit { putString(KEY, path) }
     }
 
     fun clear() {
         prefs.edit { remove(KEY) }
     }
 
-    private companion object {
-        const val PREFS = "cohub-host"
-        const val KEY = "last_page"
+    companion object {
+        private const val PREFS = "cohub-host"
+        private const val KEY = "last_page"
 
-        val HOMES = setOf("/", "/zh")
-        val ONE_SHOT = listOf("/callback", "/app-auth", "/mobile")
+        fun isResumable(path: String): Boolean {
+            if (!path.startsWith("/") || path.startsWith("//")) return false
+            val route = path.substringBefore('?').substringBefore('#')
+            return route !in HostProtocol.LANDING_PATHS &&
+                HostProtocol.ONE_SHOT_PATHS.none { route == it || route.startsWith("$it/") }
+        }
     }
 }

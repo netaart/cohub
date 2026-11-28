@@ -162,14 +162,20 @@ internal class GestureInjector(private val service: () -> AccessibilityService?,
         val start = node.textSelectionStart.takeIf { it in 0..current.length } ?: current.length
         val end = node.textSelectionEnd.takeIf { it in start..current.length } ?: start
         val (next, cursor) = change(current, start, end)
-        val set = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, next)
-        })
+        val set = node.performAction(
+            AccessibilityNodeInfo.ACTION_SET_TEXT,
+            Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, next)
+            },
+        )
         if (!set) throw DisplayError(DisplayError.FAILED, "the focused field refused text")
-        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
-            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
-            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
-        })
+        node.performAction(
+            AccessibilityNodeInfo.ACTION_SET_SELECTION,
+            Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
+            },
+        )
     }
 
     private fun characters(text: String) = BreakIterator.getCharacterInstance().apply { setText(text) }

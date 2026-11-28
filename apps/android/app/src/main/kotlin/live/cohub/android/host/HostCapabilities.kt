@@ -1,56 +1,36 @@
 package live.cohub.android.host
 
+import live.cohub.android.host.HostProtocol.Capabilities as C
+
 /**
  * Capabilities this build honours. The web side gates every optional call on
  * these, so a capability is a promise — advertise one only when the feature is
  * reachable. FCM is deliberately absent: the server has no delivery channel yet.
  */
 object HostCapabilities {
-    const val AUTH_TOKEN = "auth.token"
-    const val AUTH_SIGN_IN = "auth.signIn"
-    const val AUTH_SESSION = "auth.session"
-    const val NOTIFICATIONS = "notifications"
-    const val SHARE = "share"
-    const val FILE_PICKER = "filePicker"
-    const val NAVIGATION = "navigation"
-    const val CACHE = "cache"
-    const val RUNTIME = "runtime"
-    const val APPEARANCE = "appearance"
-    const val LAUNCH = "launch"
-    const val HAPTICS = "haptics"
-    const val FILES = "files"
-    const val NAVIGATION_BACK = "navigation.back"
-    const val SHORTCUTS = "shortcuts"
-    const val DISPLAY = "display"
-    const val DISPLAY_PRESENTING = "display.presenting"
-    const val DISPLAY_FLOAT = "display.float"
-    const val MEDIA_CAPTURE = "media.capture"
-    const val PERMISSIONS = "permissions"
-    const val SHARE_INCOMING = "share.incoming"
-    const val WORKSPACE = "workspace"
-    const val WORKSPACE_FILES = "workspace.files"
-    const val ABOUT = "app.about"
-
     private val always: List<String> = listOf(
-        AUTH_TOKEN,
-        AUTH_SIGN_IN,
-        AUTH_SESSION,
-        SHARE,
-        NAVIGATION,
-        CACHE,
-        APPEARANCE,
-        LAUNCH,
-        HAPTICS,
-        NAVIGATION_BACK,
-        SHORTCUTS,
-        MEDIA_CAPTURE,
-        PERMISSIONS,
-        SHARE_INCOMING,
-        ABOUT,
+        C.AUTH_TOKEN,
+        C.AUTH_SIGN_IN,
+        C.AUTH_SESSION,
+        C.AUTH_PROVIDER,
+        C.SHARE,
+        C.NAVIGATION,
+        C.CACHE,
+        C.APPEARANCE,
+        C.LAUNCH,
+        C.HAPTICS,
+        C.NAVIGATION_BACK,
+        C.SHORTCUTS,
+        C.MEDIA_CAPTURE,
+        C.PERMISSIONS,
+        C.SHARE_INCOMING,
+        C.SHARE_FILE_URL,
+        C.APP_ABOUT,
+        C.APP_LOCALE,
     )
 
-    fun advertised(runtime: Boolean, files: Boolean, display: Boolean = runtime): List<String> =
-        always + listOfNotNull(FILES.takeIf { files }) +
-            (if (runtime) listOf(RUNTIME, WORKSPACE, WORKSPACE_FILES) else emptyList()) +
-            (if (runtime && display) listOf(DISPLAY, DISPLAY_PRESENTING, DISPLAY_FLOAT) else emptyList())
+    fun advertised(runtime: Boolean, files: Boolean, display: Boolean = runtime, fileStream: Boolean = false): List<String> =
+        always + listOfNotNull(C.FILES.takeIf { files }, C.FILES_STREAM.takeIf { files && fileStream }) +
+            (if (runtime) listOf(C.RUNTIME, C.WORKSPACE, C.WORKSPACE_FILES) else emptyList()) +
+            (if (runtime && display) listOf(C.DISPLAY, C.DISPLAY_PRESENTING, C.DISPLAY_FLOAT) else emptyList())
 }

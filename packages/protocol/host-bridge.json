@@ -31,7 +31,12 @@
     "display.presenting",
     "display.float",
     "tabs",
-    "app.about"
+    "app.about",
+    "app.locale",
+    "auth.provider",
+    "files.blobUrl",
+    "files.stream",
+    "share.fileUrl"
   ],
   "methods": [
     "host.describe",
@@ -65,6 +70,10 @@
     "haptics.perform",
     "files.save",
     "files.reveal",
+    "files.write.begin",
+    "files.write.commit",
+    "files.write.cancel",
+    "app.setLocale",
     "navigation.interceptBack",
     "shortcuts.push",
     "tabs.update",
@@ -81,6 +90,7 @@
   "events": [
     "auth.changed",
     "auth.signedOut",
+    "auth.flow",
     "navigation.back",
     "app.foreground",
     "app.background",
@@ -110,6 +120,8 @@
     "path": "/__cohub/workspace/"
   },
   "share": {
-    "fileMaxBytes": 12582912
+    "fileMaxBytes": 12582912,
+    "scheme": "cohub-share",
+    "path": "/__cohub/share/"
   }
 }

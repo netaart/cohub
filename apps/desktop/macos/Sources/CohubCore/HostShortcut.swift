@@ -11,8 +11,8 @@ public struct HostShortcut: Codable, Equatable, Sendable {
 
     public init?(_ params: JSON) {
         guard let id = params["id"]?.string, (1...128).contains(id.count),
-              let label = params["label"]?.string, (1...64).contains(label.count),
-              let path = params["path"]?.string, WebOrigin.isInAppPath(path)
+            let label = params["label"]?.string, (1...64).contains(label.count),
+            let path = params["path"]?.string, WebOrigin.isInAppPath(path)
         else { return nil }
         self.init(id: id, label: label, path: path)
     }

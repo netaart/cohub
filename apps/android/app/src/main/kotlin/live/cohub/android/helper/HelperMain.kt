@@ -46,7 +46,11 @@ object HelperMain {
         val authority = "$appPackage${HelperHandoff.AUTHORITY_SUFFIX}"
         val manager = Class.forName("android.app.ActivityManager").getMethod("getService").invoke(null)!!
         val holder = manager.javaClass.getMethod(
-            "getContentProviderExternal", String::class.java, Int::class.javaPrimitiveType, IBinder::class.java, String::class.java,
+            "getContentProviderExternal",
+            String::class.java,
+            Int::class.javaPrimitiveType,
+            IBinder::class.java,
+            String::class.java,
         ).invoke(manager, authority, appUid / PER_USER, Binder(), Helper.TAG) ?: return null
         val info = holder.javaClass.getField("info").get(holder) as ProviderInfo
         if (info.packageName != appPackage || info.applicationInfo.uid != appUid) return null

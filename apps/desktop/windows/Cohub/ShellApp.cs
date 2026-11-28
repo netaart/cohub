@@ -35,6 +35,7 @@ internal sealed class ShellApp : Application, IDisposable
     {
         Config = config;
         State = ShellState.Load(config.DataDirectory);
+        Strings.Use(State.Locale);
         this.instance = instance;
         this.startArgument = startArgument;
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -45,6 +46,7 @@ internal sealed class ShellApp : Application, IDisposable
 
     public ShellConfig Config { get; }
     public ShellState State { get; }
+    public PageDialogs Dialogs { get; } = new();
     public WorkspaceFiles? WorkspaceFiles { get; private set; }
     public ImageSource? WindowIcon { get; }
     public bool Quitting { get; private set; }
@@ -247,8 +249,8 @@ internal sealed class ShellApp : Application, IDisposable
             HostProtocol.Capabilities.Appearance, HostProtocol.Capabilities.Navigation, HostProtocol.Capabilities.Share,
             HostProtocol.Capabilities.Cache, HostProtocol.Capabilities.Notifications, HostProtocol.Capabilities.Shortcuts,
             HostProtocol.Capabilities.MediaCapture, HostProtocol.Capabilities.Permissions, HostProtocol.Capabilities.Badge,
-            HostProtocol.Capabilities.LaunchAtLogin, HostProtocol.Capabilities.GlobalShortcut, HostProtocol.Capabilities.Launch,
-            HostProtocol.Capabilities.Tabs, HostProtocol.Capabilities.About, HostProtocol.Capabilities.Files,
+            HostProtocol.Capabilities.AppLaunchAtLogin, HostProtocol.Capabilities.AppGlobalShortcut, HostProtocol.Capabilities.Launch,
+            HostProtocol.Capabilities.Tabs, HostProtocol.Capabilities.AppAbout, HostProtocol.Capabilities.AppLocale, HostProtocol.Capabilities.Files,
         ];
         var handlers = new Dictionary<string, BridgeRouter.Handler>
         {
@@ -260,6 +262,11 @@ internal sealed class ShellApp : Application, IDisposable
             [HostProtocol.Methods.AppReady] = _ =>
             {
                 tab.ReportReady();
+                return Ok();
+            },
+            [HostProtocol.Methods.AppSetLocale] = parameters =>
+            {
+                if (State.SetLocale(JsonFields.Text(parameters, "locale"))) ApplyLocale();
                 return Ok();
             },
             [HostProtocol.Methods.AppearanceSet] = parameters =>
@@ -327,12 +334,12 @@ internal sealed class ShellApp : Application, IDisposable
                 foreach (var open in windows) open.ShowBadge(badge);
                 return Ok();
             },
-            [HostProtocol.Methods.LaunchAtLogin] = parameters =>
+            [HostProtocol.Methods.AppLaunchAtLogin] = parameters =>
             {
                 if (JsonFields.Bool(parameters, "enabled") is { } enabled) Registration.SetLaunchAtLogin(Config, enabled);
                 return Task.FromResult<JsonNode?>(Registration.LaunchesAtLogin(Config));
             },
-            [HostProtocol.Methods.GlobalShortcut] = parameters =>
+            [HostProtocol.Methods.AppGlobalShortcut] = parameters =>
             {
                 if (JsonFields.Bool(parameters, "enabled") is { } enabled)
                 {
@@ -448,21 +455,21 @@ internal sealed class ShellApp : Application, IDisposable
             return;
         }
         if (JsonFields.Text(reply.Result, "refused") is null) return;
-        var disconnect = new System.Windows.Forms.TaskDialogButton(Strings.L("Disconnect"));
-        var answer = System.Windows.Forms.TaskDialog.ShowDialog(Primary?.Handle ?? IntPtr.Zero, new System.Windows.Forms.TaskDialogPage
-        {
-            Caption = "Cohub",
-            Heading = Strings.L("A task’s result hasn’t been confirmed yet"),
-            Text = Strings.L("Disconnecting stops the Runtime. Results and files are kept."),
-            Icon = System.Windows.Forms.TaskDialogIcon.Warning,
-            Buttons = { disconnect, System.Windows.Forms.TaskDialogButton.Cancel },
-        });
-        if (answer == disconnect) Disconnect(spaceId, force: true);
+        if (ShellWindow.Confirm(Primary?.Handle ?? IntPtr.Zero, Strings.L("A task’s result hasn’t been confirmed yet"), Strings.L("Disconnecting stops the Runtime. Results and files are kept."),
+                Strings.L("Disconnect"), System.Windows.Forms.TaskDialogIcon.Warning))
+            Disconnect(spaceId, force: true);
     }
 
     private async void StopSharing()
     {
         if (service is not null) await service.CallAsync(new BridgeRequest("stop", HostProtocol.Methods.DisplayStop));
+    }
+
+    private void ApplyLocale()
+    {
+        Strings.Use(State.Locale);
+        tray?.Rebuild();
+        UpdateJumpList();
     }
 
     private void UpdateJumpList()
@@ -529,7 +536,15 @@ internal sealed class ShellApp : Application, IDisposable
 
     private void Inform(string heading, string text) => System.Windows.Forms.TaskDialog.ShowDialog(
         Primary?.Handle ?? IntPtr.Zero,
-        new System.Windows.Forms.TaskDialogPage { Caption = "Cohub", Heading = heading, Text = text, Icon = System.Windows.Forms.TaskDialogIcon.Information });
+        new System.Windows.Forms.TaskDialogPage
+        {
+            Caption = "Cohub",
+            Heading = heading,
+            Text = text,
+            Icon = System.Windows.Forms.TaskDialogIcon.Information,
+            AllowCancel = true,
+            Buttons = { new System.Windows.Forms.TaskDialogButton(Strings.L("OK")) },
+        });
 
     private static System.Drawing.Icon TrayIconImage()
     {

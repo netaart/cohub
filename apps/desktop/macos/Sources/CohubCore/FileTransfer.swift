@@ -1,4 +1,5 @@
 import Foundation
+
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -6,7 +7,7 @@ import FoundationNetworking
 public enum FileTransfer {
     public typealias Progress = @Sendable (_ received: Int64, _ total: Int64?) -> Void
 
-    static let progressInterval: TimeInterval = 0.25
+    public static let progressInterval: TimeInterval = 0.25
 
     public static func download(_ request: URLRequest, to destination: URL, progress: @escaping Progress) async throws {
         let delegate = Delegate(destination: destination, progress: progress)

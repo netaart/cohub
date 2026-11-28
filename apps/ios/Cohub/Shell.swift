@@ -1,11 +1,11 @@
 import CohubCore
-import os
 import UIKit
+import os
 
 let logger = Logger(subsystem: "live.cohub.ios", category: "Shell")
 
 func L(_ key: String.LocalizationValue) -> String {
-    String(localized: key)
+    String(localized: key, bundle: HostLocale.shared.bundle)
 }
 
 @MainActor
@@ -50,22 +50,40 @@ final class Shell {
         return pendingPath ?? ShellState.lastPage ?? "/"
     }
 
-    func signIn(redirectPath: String?) {
-        guard !signingIn, let window = surface?.view.window else { return }
+    @discardableResult
+    func signIn(redirectPath: String?, provider: String?) -> Bool {
+        guard !signingIn else { return false }
+        guard let window = surface?.view.window else {
+            signInEnded(HostProtocol.AuthFlowOutcome.failed)
+            return true
+        }
         signingIn = true
         let destination = redirectPath.flatMap { WebOrigin.isInAppPath($0) ? $0 : nil } ?? "/"
         Task {
             defer { signingIn = false }
             do {
-                guard let grant = try await SignIn(anchor: window).run(config.auth, forceLogin: ShellState.forceLogin) else { return }
+                guard let grant = try await SignIn(anchor: window).run(config.auth, forceLogin: ShellState.forceLogin, provider: provider) else {
+                    return signInEnded(HostProtocol.AuthFlowOutcome.canceled)
+                }
                 try await auth.completeSignIn(code: grant.code, verifier: grant.verifier)
                 ShellState.forceLogin = false
+                signInEnded(HostProtocol.AuthFlowOutcome.signedIn)
                 open(destination)
             } catch {
                 logger.error("Sign-in failed: \(error.localizedDescription, privacy: .public)")
+                signInEnded(HostProtocol.AuthFlowOutcome.failed)
                 Toast.show(L("Couldn't complete sign-in. Please try again."), in: surface?.view)
             }
         }
+        return true
+    }
+
+    private func signInEnded(_ outcome: String) {
+        surface?.emit(HostProtocol.Event.authFlow, ["outcome": .string(outcome)])
+    }
+
+    func localeChanged() {
+        Task { [auth] in QuickActions.refresh(signedIn: await auth.signedIn) }
     }
 
     func signOut() async {

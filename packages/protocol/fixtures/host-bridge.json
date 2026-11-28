@@ -1,0 +1,173 @@
+{
+ "$comment": "Bridge envelope cases every host and the protocol must agree on. Hosts parse `requests` (`request: null` means the text is dropped unanswered) and serialise `replies` and `events`; the protocol test checks the same cases against its schemas. JSON is compared by value, not by text.",
+ "requests": [
+  {
+   "name": "a request with params",
+   "text": "{\"type\":\"request\",\"id\":\"h1-a\",\"method\":\"auth.signIn\",\"params\":{\"redirectPath\":\"/spaces\"}}",
+   "request": {
+    "id": "h1-a",
+    "method": "auth.signIn",
+    "params": {
+     "redirectPath": "/spaces"
+    }
+   }
+  },
+  {
+   "name": "a request without params",
+   "text": "{\"type\":\"request\",\"id\":\"h2\",\"method\":\"host.describe\"}",
+   "request": {
+    "id": "h2",
+    "method": "host.describe",
+    "params": null
+   }
+  },
+  {
+   "name": "unknown envelope fields are ignored",
+   "text": "{\"type\":\"request\",\"id\":\"h3\",\"method\":\"app.ready\",\"trace\":\"abc\"}",
+   "request": {
+    "id": "h3",
+    "method": "app.ready",
+    "params": null
+   }
+  },
+  {
+   "name": "unknown params reach the handler, which ignores them",
+   "text": "{\"type\":\"request\",\"id\":\"h4\",\"method\":\"auth.signIn\",\"params\":{\"redirectPath\":\"/\",\"future\":1}}",
+   "request": {
+    "id": "h4",
+    "method": "auth.signIn",
+    "params": {
+     "redirectPath": "/",
+     "future": 1
+    }
+   }
+  },
+  {
+   "name": "an id at the 128-character limit",
+   "text": "{\"type\":\"request\",\"id\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\",\"method\":\"app.ready\"}",
+   "request": {
+    "id": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+    "method": "app.ready",
+    "params": null
+   }
+  },
+  {
+   "name": "an id over the limit",
+   "text": "{\"type\":\"request\",\"id\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\",\"method\":\"app.ready\"}",
+   "request": null
+  },
+  {
+   "name": "an empty id",
+   "text": "{\"type\":\"request\",\"id\":\"\",\"method\":\"app.ready\"}",
+   "request": null
+  },
+  {
+   "name": "a numeric id",
+   "text": "{\"type\": \"request\", \"id\": 7, \"method\": \"app.ready\"}",
+   "request": null
+  },
+  {
+   "name": "a method over 64 characters",
+   "text": "{\"type\":\"request\",\"id\":\"h5\",\"method\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\"}",
+   "request": null
+  },
+  {
+   "name": "a missing method",
+   "text": "{\"type\":\"request\",\"id\":\"h6\"}",
+   "request": null
+  },
+  {
+   "name": "a response is not a request",
+   "text": "{\"type\": \"response\", \"id\": \"h7\", \"result\": true}",
+   "request": null
+  },
+  {
+   "name": "not JSON",
+   "text": "{type: request",
+   "request": null
+  },
+  {
+   "name": "an array",
+   "text": "[]",
+   "request": null
+  }
+ ],
+ "replies": [
+  {
+   "name": "a result",
+   "id": "h1",
+   "result": true,
+   "json": {
+    "type": "response",
+    "id": "h1",
+    "result": true
+   }
+  },
+  {
+   "name": "a null result",
+   "id": "h1",
+   "result": null,
+   "json": {
+    "type": "response",
+    "id": "h1",
+    "result": null
+   }
+  },
+  {
+   "name": "a failure",
+   "id": "h1",
+   "error": {
+    "code": "unsupported",
+    "message": "Unsupported method: teleport"
+   },
+   "json": {
+    "type": "response",
+    "id": "h1",
+    "error": {
+     "code": "unsupported",
+     "message": "Unsupported method: teleport"
+    }
+   }
+  },
+  {
+   "name": "a failure without a message",
+   "id": "h1",
+   "error": {
+    "code": "failed",
+    "message": ""
+   },
+   "json": {
+    "type": "response",
+    "id": "h1",
+    "error": {
+     "code": "failed",
+     "message": "Host call failed"
+    }
+   }
+  }
+ ],
+ "events": [
+  {
+   "name": "an event with a payload",
+   "event": "auth.flow",
+   "payload": {
+    "outcome": "canceled"
+   },
+   "json": {
+    "type": "event",
+    "name": "auth.flow",
+    "payload": {
+     "outcome": "canceled"
+    }
+   }
+  },
+  {
+   "name": "an event without a payload",
+   "event": "app.foreground",
+   "json": {
+    "type": "event",
+    "name": "app.foreground"
+   }
+  }
+ ]
+}

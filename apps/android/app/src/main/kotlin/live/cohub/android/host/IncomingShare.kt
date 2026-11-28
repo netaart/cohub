@@ -5,11 +5,14 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import androidx.core.content.IntentCompat
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.UUID
 
@@ -56,8 +59,32 @@ class IncomingShare private constructor(
         return Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP)
     }
 
+    private fun serve(resolver: ContentResolver, index: Int): WebResourceResponse? {
+        val file = files.getOrNull(index) ?: return null
+        val source = runCatching { resolver.openAssetFileDescriptor(file.uri, "r") }.getOrNull() ?: return null
+        val length = source.length.takeIf { it >= 0 } ?: file.size.takeIf { it > 0 }
+        val headers = STREAM_HEADERS + listOfNotNull(length?.let { "Content-Length" to it.toString() })
+        return WebResourceResponse(file.mimeType, null, 200, "OK", headers, source.createInputStream())
+    }
+
     companion object {
         const val MAX_FILE_BYTES = 12 * 1024 * 1024
+
+        private val STREAM_HEADERS = mapOf(
+            "Cache-Control" to "no-store",
+            "X-Content-Type-Options" to "nosniff",
+            "Content-Security-Policy" to "sandbox",
+        )
+
+        fun respond(share: IncomingShare?, request: WebResourceRequest, resolver: ContentResolver): WebResourceResponse {
+            val parts = request.url.pathSegments.drop(SHARE_PATH_SEGMENTS)
+            val index = parts.getOrNull(1)?.toIntOrNull()
+            val readable = share != null && index != null && parts.size == 2 && parts[0] == share.id && !request.isForMainFrame && request.method == "GET"
+            val file = if (readable) share.serve(resolver, index) else null
+            return file ?: WebResourceResponse("text/plain", "utf-8", 404, "Not Found", STREAM_HEADERS, ByteArrayInputStream(ByteArray(0)))
+        }
+
+        private val SHARE_PATH_SEGMENTS = HostProtocol.SHARE_PATH.trim('/').split('/').size
         private const val MAX_FILES = 16
 
         fun isShare(intent: Intent?): Boolean = intent?.action == Intent.ACTION_SEND || intent?.action == Intent.ACTION_SEND_MULTIPLE

@@ -15,7 +15,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
         let shell = Shell.shared
-        let link = options.userActivities.compactMap { self.path(ofActivity: $0) }.first
+        let link =
+            options.userActivities.compactMap { self.path(ofActivity: $0) }.first
             ?? options.urlContexts.compactMap { self.path(ofLink: $0.url) }.first
             ?? options.shortcutItem.flatMap(QuickActions.path(of:))
         if let link { shell.open(link) }
@@ -52,6 +53,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         Shell.shared.surface?.enteredBackground()
+    }
+
+    func sceneDidDisconnect(_ scene: UIScene) {
+        Shell.shared.surface?.cancelDialog()
     }
 
     private func path(ofActivity activity: NSUserActivity) -> String? {

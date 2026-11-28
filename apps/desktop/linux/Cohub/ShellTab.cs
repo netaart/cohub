@@ -7,6 +7,7 @@ namespace Cohub;
 internal sealed class ShellTab
 {
     private const string MessageHandler = HostProtocol.Global;
+    private const string DialogHandler = "cohubHostDialog";
     private const string BridgeWorld = "cohub-host";
     private static readonly TimeSpan RevealTimeout = TimeSpan.FromMilliseconds(2_500);
 
@@ -16,6 +17,7 @@ internal sealed class ShellTab
     private bool shown;
     private bool stale;
     private long? loadStarted;
+    private string? dialogReport;
 
     public ShellTab(ShellApp app, ShellWindow window, SessionTab tab)
     {
@@ -48,8 +50,12 @@ internal sealed class ShellTab
         var origin = JsonSerializer.Serialize(config.Origin.Origin);
         contents.AddScript(WebKit.UserScript.New(PageScript.Replace("ORIGIN", origin, StringComparison.Ordinal), WebKit.UserContentInjectedFrames.TopFrame, WebKit.UserScriptInjectionTime.Start, null, null));
         contents.AddScript(WebKit.UserScript.NewForWorld(RelayScript.Replace("ORIGIN", origin, StringComparison.Ordinal), WebKit.UserContentInjectedFrames.TopFrame, WebKit.UserScriptInjectionTime.Start, BridgeWorld, null, null));
+        contents.AddScript(WebKit.UserScript.New(DialogScript, WebKit.UserContentInjectedFrames.AllFrames, WebKit.UserScriptInjectionTime.Start, null, null));
+        contents.AddScript(WebKit.UserScript.NewForWorld(DialogReportScript, WebKit.UserContentInjectedFrames.AllFrames, WebKit.UserScriptInjectionTime.Start, BridgeWorld, null, null));
         WebKit.UserContentManager.ScriptMessageReceivedSignal.Connect(contents, (_, args) => Receive(args.Value), false, MessageHandler);
+        WebKit.UserContentManager.ScriptMessageReceivedSignal.Connect(contents, (_, args) => dialogReport = args.Value.IsString() ? args.Value.ToString() : null, false, DialogHandler);
         contents.RegisterScriptMessageHandler(MessageHandler, BridgeWorld);
+        contents.RegisterScriptMessageHandler(DialogHandler, BridgeWorld);
 
         var view = WebKit.WebView.NewWithProperties([
             new GObject.ConstructArgument("network-session", new GObject.Value(app.Session)),
@@ -67,6 +73,7 @@ internal sealed class ShellTab
         ApplyEdge(Edge ?? app.EdgeColor, notify: false);
         view.OnDecidePolicy += (_, args) => DecidePolicy(args.Decision, args.DecisionType);
         view.OnPermissionRequest += (_, args) => DecidePermission(args.Request);
+        view.OnScriptDialog += (_, args) => OpenDialog(args.Dialog);
         view.OnWebProcessTerminated += (_, _) =>
         {
             ResetPage();
@@ -173,6 +180,7 @@ internal sealed class ShellTab
     public void Close()
     {
         Closed = true;
+        app.Dialogs.Dismiss(this);
         webView?.TryClose();
     }
 
@@ -184,6 +192,8 @@ internal sealed class ShellTab
 
     private void ResetPage()
     {
+        app.Dialogs.Dismiss(this);
+        dialogReport = null;
         Dirty = false;
         CapturesKeys = false;
         Window.TabChanged(this);
@@ -219,18 +229,10 @@ internal sealed class ShellTab
                     Window.OpenBeside(new SessionTab(path), this, background);
                     return true;
                 }
-                switch (url.Scheme)
-                {
-                    case "https" or "http" or "about" or "data" or "blob":
-                        return false;
-                    case "mailto" or "tel":
-                        decision.Ignore();
-                        ShellWindow.OpenExternally(url.AbsoluteUri);
-                        return true;
-                    default:
-                        decision.Ignore();
-                        return true;
-                }
+                if (app.Config.Origin.NavigationTo(url, mainFrame: false) == WebOrigin.Navigation.Allow) return false;
+                decision.Ignore();
+                if (action.IsUserGesture() && app.Config.Origin.NavigationTo(url) == WebOrigin.Navigation.External) ShellWindow.OpenExternally(url.AbsoluteUri);
+                return true;
             }
             case WebKit.ResponsePolicyDecision response:
             {
@@ -254,6 +256,36 @@ internal sealed class ShellTab
             default:
                 return false;
         }
+    }
+
+    private bool OpenDialog(WebKit.ScriptDialog request)
+    {
+        var kind = request.GetDialogType() switch
+        {
+            WebKit.ScriptDialogType.Confirm => PageDialogKind.Confirm,
+            WebKit.ScriptDialogType.Prompt => PageDialogKind.Prompt,
+            WebKit.ScriptDialogType.BeforeUnloadConfirm => PageDialogKind.BeforeUnload,
+            _ => PageDialogKind.Alert,
+        };
+        var message = request.GetMessage();
+        var frame = PageDialogs.ReportedFrame(dialogReport, message);
+        dialogReport = null;
+        void Answer(bool accepted, string? text) => GLib.Functions.IdleAdd(0, () =>
+        {
+            if (kind is PageDialogKind.Confirm or PageDialogKind.BeforeUnload) request.ConfirmSetConfirmed(accepted);
+            else if (kind == PageDialogKind.Prompt && accepted) request.PromptSetText(text ?? "");
+            request.Close();
+            request.Dispose();
+            return false;
+        });
+        if (Closed)
+        {
+            Answer(kind == PageDialogKind.BeforeUnload, null);
+            return true;
+        }
+        if (app.Dialogs.Open(this, shown && Window.Window.GetVisible(), Answer) is { } dialog)
+            Window.ShowPageDialog(dialog, kind, PageDialogs.Title(app.Config.Origin, frame, Strings.L("Embedded page")), message, kind == PageDialogKind.Prompt ? request.PromptGetDefaultText() : null);
+        return true;
     }
 
     private static bool? InBackground(WebKit.NavigationAction action)
@@ -311,6 +343,29 @@ internal sealed class ShellTab
               addEventListener: (type, listener) => { if (type === "message") listeners.add(listener); },
               removeEventListener: (type, listener) => { if (type === "message") listeners.delete(listener); },
             }),
+          });
+        })();
+        """;
+
+    private const string DialogScript = """
+        (() => {
+          for (const name of ["alert", "confirm", "prompt"]) {
+            const original = window[name];
+            if (typeof original !== "function") continue;
+            window[name] = function (message) {
+              document.dispatchEvent(new CustomEvent("cohubhost:dialog", { detail: message === undefined ? "" : String(message) }));
+              return original.apply(window, arguments);
+            };
+          }
+        })();
+        """;
+
+    private const string DialogReportScript = """
+        (() => {
+          const handler = window.webkit?.messageHandlers?.cohubHostDialog;
+          if (!handler) return;
+          document.addEventListener("cohubhost:dialog", (event) => {
+            if (typeof event.detail === "string") handler.postMessage(`${origin}\n${event.detail}`);
           });
         })();
         """;

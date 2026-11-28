@@ -13,8 +13,8 @@ final class ShareViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .clear
         guard let group = Bundle.main.object(forInfoDictionaryKey: "CohubAppGroup") as? String,
-              let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group),
-              let draft = try? SharedInbox(root: container.appendingPathComponent("Inbox", isDirectory: true)).draft()
+            let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group),
+            let draft = try? SharedInbox(root: container.appendingPathComponent("Inbox", isDirectory: true)).draft()
         else { return finish(nil) }
         let items = extensionContext?.inputItems as? [NSExtensionItem] ?? []
         Task {
@@ -71,8 +71,8 @@ final class ShareViewController: UIViewController {
             return
         }
         guard let scheme = Bundle.main.object(forInfoDictionaryKey: "CohubURLScheme") as? String,
-              let url = URL(string: "\(scheme)://open\(WebOrigin.newChatPath)"),
-              openHostApp(url)
+            let url = URL(string: "\(scheme)://open\(WebOrigin.newChatPath)"),
+            openHostApp(url)
         else { return complete() }
         Task { [weak self] in
             try? await Task.sleep(for: Self.openGrace)

@@ -3,7 +3,7 @@ import CohubCore
 
 @MainActor
 enum AboutPanel {
-    static let repository = URL(string: "https://github.com/netaart/cohub")!
+    static let repository = URL(string: "https://github.com/netaart/cohub")
 
     static func show(service: HostService?, web: String? = nil) async {
         let about = await CliAbout.fetch(from: service)

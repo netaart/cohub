@@ -29,7 +29,7 @@ app="$dist/$name.app"
 contents="$app/Contents"
 
 echo "==> Building $name $version ($arch)"
-swift build --package-path "$here" -c release --arch "$arch" --product Cohub
+swift build --package-path "$here" -c release --arch "$arch" --product Cohub -Xswiftc -warnings-as-errors
 binaries="$(swift build --package-path "$here" -c release --arch "$arch" --show-bin-path)"
 
 rm -rf "$app"

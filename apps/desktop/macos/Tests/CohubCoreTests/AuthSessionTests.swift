@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import CohubCore
 
 private final class MemoryStore: CredentialStore, @unchecked Sendable {
@@ -35,6 +36,7 @@ private actor FakeEndpoint: TokenEndpoint {
     func revoke(_ fields: [String: String]) async throws {}
 }
 
+// swift-format-ignore: NeverForceUnwrap
 private let config = AuthConfig(
     endpoint: URL(string: "https://auth.example")!,
     appId: "app",

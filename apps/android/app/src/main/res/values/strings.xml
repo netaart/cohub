@@ -55,4 +55,8 @@
     <string name="launch_offline_detail">Cohub will try again when you\'re back online.</string>
     <string name="launch_failed">Couldn\'t load Cohub</string>
     <string name="launch_retry">Try again</string>
+    <string name="dialog_ok">OK</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="dialog_leave">Leave</string>
+    <string name="dialog_leave_message">Leave this page? Changes you made may not be saved.</string>
 </resources>

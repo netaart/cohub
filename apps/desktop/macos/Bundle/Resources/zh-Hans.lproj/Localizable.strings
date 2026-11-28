@@ -88,3 +88,4 @@
 "%@: %@" = "%1$@：%2$@";
 "Open source under Apache-2.0" = "基于 Apache-2.0 开源";
 "Couldn't complete sign-in. Please try again." = "未能完成登录，请重试。";
+"An embedded page" = "嵌入的网页";

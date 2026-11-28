@@ -135,7 +135,9 @@ public final class HostService: BridgeService, @unchecked Sendable {
         process.executableURL = launch.executable
         process.arguments = launch.arguments
         process.environment = launch.environment
-        let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = stderr
@@ -147,7 +149,10 @@ public final class HostService: BridgeService, @unchecked Sendable {
         let log = self.log
         stderr.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
-            if chunk.isEmpty { handle.readabilityHandler = nil; return }
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil
+                return
+            }
             if let text = String(data: chunk, encoding: .utf8) { log(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
         }
         process.terminationHandler = { [weak self] process in
@@ -215,7 +220,7 @@ public final class HostService: BridgeService, @unchecked Sendable {
         switch message["type"]?.string {
         case "hello":
             guard let methods = message["methods"]?.array?.compactMap(\.string),
-                  let capabilities = message["capabilities"]?.array?.compactMap(\.string)
+                let capabilities = message["capabilities"]?.array?.compactMap(\.string)
             else { return }
             let hello = ServiceHello(capabilities: capabilities, methods: methods)
             let resumed: [CheckedContinuation<ServiceHello?, Never>] = lock.withLock {

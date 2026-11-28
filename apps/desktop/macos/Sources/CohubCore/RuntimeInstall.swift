@@ -12,7 +12,7 @@ public enum RuntimeInstall {
         try finish(staging)
         do {
             try manager.moveItem(at: staging, to: target)
-        } catch where manager.fileExists(atPath: target.path) {
+        } catch  where manager.fileExists(atPath: target.path) {
             try? manager.removeItem(at: staging)
         }
         return target
@@ -32,11 +32,11 @@ public enum RuntimeInstall {
         let quote = { (path: String) in "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'" }
         let cli = runtime.appendingPathComponent(cliEntry).path
         let script = """
-        #!/bin/sh
-        # Written by Cohub on launch: the CLI it ships, updated with the app.
-        COHUB_CLI_AUTO_UPDATE=0 COHUB_SANDBOXD_BIN=${COHUB_SANDBOXD_BIN:-\(quote(runtime.appendingPathComponent(sandboxdEntry).path))} exec \(quote(runtime.appendingPathComponent("node").path)) \(quote(cli)) "$@"
+            #!/bin/sh
+            # Written by Cohub on launch: the CLI it ships, updated with the app.
+            COHUB_CLI_AUTO_UPDATE=0 COHUB_SANDBOXD_BIN=${COHUB_SANDBOXD_BIN:-\(quote(runtime.appendingPathComponent(sandboxdEntry).path))} exec \(quote(runtime.appendingPathComponent("node").path)) \(quote(cli)) "$@"
 
-        """
+            """
         try FileManager.default.createDirectory(at: shim.deletingLastPathComponent(), withIntermediateDirectories: true)
         let temporary = shim.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString)")
         try Data(script.utf8).write(to: temporary)

@@ -35,12 +35,13 @@ public struct TabSession: Codable, Equatable, Sendable {
     }
 
     public func sanitized() -> TabSession {
-        TabSession(windows: windows.suffix(Self.maxWindows).compactMap { window in
-            let kept = window.tabs.enumerated().filter { WebOrigin.isInAppPath($0.element.path) }.suffix(Self.maxTabs)
-            guard !kept.isEmpty else { return nil }
-            let selected = kept.lastIndex { $0.offset <= window.selected } ?? kept.startIndex
-            return Window(tabs: kept.map(\.element), selected: selected - kept.startIndex, frame: window.frame)
-        })
+        TabSession(
+            windows: windows.suffix(Self.maxWindows).compactMap { window in
+                let kept = window.tabs.enumerated().filter { WebOrigin.isInAppPath($0.element.path) }.suffix(Self.maxTabs)
+                guard !kept.isEmpty else { return nil }
+                let selected = kept.lastIndex { $0.offset <= window.selected } ?? kept.startIndex
+                return Window(tabs: kept.map(\.element), selected: selected - kept.startIndex, frame: window.frame)
+            })
     }
 
     public static func decode(_ data: Data?) -> TabSession? {

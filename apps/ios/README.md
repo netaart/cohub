@@ -22,6 +22,7 @@ Cohub/
   SignIn.swift             ASWebAuthenticationSession + PKCE, HTTPS callback
   KeychainStore.swift      the session's only copy, this device only
   FileSaver.swift          files.save and downloads → Photos or Files
+  ShareSchemeHandler.swift cohub-share:// streams shared files to the page
   QuickActions.swift       Home Screen quick actions: New chat and recent Spaces
   ShellConfig.swift        environment from Info.plist; ShellState.swift, what persists
 CohubShare/                share extension: hands shared items to the app
@@ -31,12 +32,16 @@ Configs/                   prod and dev environments (xcconfig)
 Platform-neutral logic is `CohubCore`, the package the macOS shell builds
 (`apps/desktop/macos/Sources/CohubCore`): bridge routing and messages, the web origin
 policy, `AuthSession` (single-flight refresh, every token rotation persisted before
-use), the authorization request, notifications, permissions and the share inbox. It is
+use), the authorization request, notifications, permissions, the share inbox, page dialogs
+(`PageDialogs`) and the host's language (`HostLocale`). It is
 compiled into this project as a static framework and tested with SwiftPM, on Linux in CI:
 
 ```bash
 swift test --package-path apps/desktop/macos
+swift format --in-place --recursive apps/ios apps/desktop/macos   # style: apps/.swift-format
 ```
+
+CI lints that style strictly and builds every target with warnings as errors.
 
 ## Build
 
@@ -81,12 +86,19 @@ Android uses).
 - **Gestures.** The page owns insets and gestures: no automatic insets, document bounce,
   link previews or back swipe.
 - **Sign-in.** The system browser session with PKCE (`prompt=consent`, and `login consent`
-  after a sign-out), returning on the HTTPS callback. Tokens live only in the Keychain
+  after a sign-out), returning on the HTTPS callback; a `provider` opens that social sign-in
+  directly. Each sign-in ends with one `auth.flow`. Tokens live only in the Keychain
   (`AfterFirstUnlockThisDeviceOnly`); the page asks per request.
+- **Language.** Copy the shell draws itself (launch cover, toasts, dialogs, About, quick actions)
+  follows `app.setLocale`, kept for the next cold start, else the system.
+- **Dialogs.** `alert`, `confirm` and `prompt` show one at a time and are cancelled when the page
+  navigates or its process ends; one from an App's frame is titled with that frame's host.
 - **Sharing in.** The share extension copies text, links and up to 16 files (each up to
   12 MiB is kept) into the App Group, commits them with one rename, and opens
-  `cohub://open/sessions/new`; the new chat takes the newest share once.
+  `cohub://open/sessions/new`; the new chat takes the newest share once, reading its files
+  from `cohub-share://<id>/<index>`.
 - **Downloads.** `files.save` and downloads the page cannot show: images and videos go to
-  Photos, anything else to Files.
+  Photos, anything else to Files. The page's `blob:` URLs download through WebKit into a
+  temporary file, so their bytes never cross the bridge.
 - **Quick actions.** New chat, then the three Spaces opened last; cleared on sign-out with
   the last page.

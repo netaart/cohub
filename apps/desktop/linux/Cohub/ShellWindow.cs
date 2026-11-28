@@ -299,6 +299,27 @@ internal sealed class ShellWindow
         catch (GLib.GException) { return false; }
     }
 
+    public void ShowPageDialog(PageDialogs.Dialog dialog, PageDialogKind kind, string? title, string message, string? text)
+    {
+        var leaving = kind == PageDialogKind.BeforeUnload;
+        var alert = Adw.MessageDialog.New(Window, leaving ? Strings.L("Leave this page?") : title, leaving ? Strings.L("Changes you made may not be saved.") : message);
+        if (kind != PageDialogKind.Alert) alert.AddResponse("cancel", Strings.L("Cancel"));
+        alert.AddResponse("accept", Strings.L(leaving ? "Leave" : "OK"));
+        alert.DefaultResponse = "accept";
+        alert.CloseResponse = "cancel";
+        var entry = kind == PageDialogKind.Prompt ? Gtk.Entry.New() : null;
+        if (entry is not null)
+        {
+            entry.SetText(text ?? "");
+            entry.ActivatesDefault = true;
+            alert.SetExtraChild(entry);
+        }
+        alert.OnResponse += (_, args) => dialog.Settle(args.Response == "accept", entry?.GetText());
+        if (dialog.Showing(alert.Close)) alert.Present();
+    }
+
+    public void Relabel() => TabView.MenuModel = TabMenu();
+
     public void Inform(string message, string detail)
     {
         Present();

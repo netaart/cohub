@@ -18,9 +18,10 @@ public struct CliAbout: Equatable, Sendable {
         self.node = node
         path = json["path"]?["path"]?.string
         pathVersion = json["path"]?["version"]?.string
-        runtimes = json["runtimes"]?.array?.compactMap { item in
-            item["root"]?.string.map { Runtime(root: $0, version: item["version"]?.string) }
-        } ?? []
+        runtimes =
+            json["runtimes"]?.array?.compactMap { item in
+                item["root"]?.string.map { Runtime(root: $0, version: item["version"]?.string) }
+            } ?? []
     }
 
     public static func fetch(from service: (any BridgeService)?) async -> CliAbout? {

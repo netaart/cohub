@@ -1,3 +1,9 @@
+import {
+	HOST_AUTH_FLOW_EVENT,
+	type HostAuthFlow,
+	type HostSignInProvider,
+	hostAuthFlowSchema,
+} from "@cohub/protocol/host-bridge";
 import LogtoClient, { type IdTokenClaims } from "@logto/browser";
 import { sanitizeRedirectPath } from "#lib/auth-redirect-path.ts";
 import {
@@ -6,7 +12,14 @@ import {
 	type ClearBrokenSessionOptions,
 	createAuthRefreshCoordinator,
 } from "#lib/auth-refresh-coordinator.ts";
-import { callHost, hostOwnsCredentials, readyHost } from "#lib/host-bridge.ts";
+import {
+	callHost,
+	hostOwnsCredentials,
+	onHostEvent,
+	readyHost,
+	supportsHostCapability,
+} from "#lib/host-bridge.ts";
+import { chooseSignIn } from "#lib/sign-in-chooser.svelte.ts";
 import {
 	PUBLIC_LOGTO_API_RESOURCE,
 	PUBLIC_LOGTO_APP_ID,
@@ -580,12 +593,13 @@ export const signInWithRedirectPath = async (redirectPath?: string) => {
 
 	// The host owns the credential and the sign-in round trip (system browser +
 	// PKCE), so the web side only asks for it. Logto's browser client would keep
-	// a second session the host could not see.
 	if ((await readyHost()) && hostOwnsCredentials()) {
-		await callHost(
-			"auth.signIn",
-			safePath === undefined ? {} : { redirectPath: safePath },
-		);
+		if (supportsHostCapability("auth.provider")) chooseSignIn(safePath);
+		else
+			await callHost(
+				"auth.signIn",
+				safePath === undefined ? {} : { redirectPath: safePath },
+			);
 		return;
 	}
 
@@ -601,6 +615,31 @@ export const signInWithRedirectPath = async (redirectPath?: string) => {
 		client.adapter.generateState = originalGenerateState;
 	}
 };
+
+export const startHostSignIn = (
+	redirectPath: string | undefined,
+	provider: HostSignInProvider | undefined,
+): Promise<HostAuthFlow["outcome"]> =>
+	new Promise((resolve) => {
+		const stop = onHostEvent((event) => {
+			if (event.name !== HOST_AUTH_FLOW_EVENT) return;
+			const flow = hostAuthFlowSchema.safeParse(event.payload);
+			if (!flow.success) return;
+			stop();
+			resolve(flow.data.outcome);
+		});
+		const end = (outcome: HostAuthFlow["outcome"]) => {
+			stop();
+			resolve(outcome);
+		};
+		callHost("auth.signIn", {
+			...(redirectPath === undefined ? {} : { redirectPath }),
+			...(provider ? { provider } : {}),
+		}).then(
+			(started) => started || end("canceled"),
+			() => end("failed"),
+		);
+	});
 
 let hostSignIn: Promise<void> | null = null;
 

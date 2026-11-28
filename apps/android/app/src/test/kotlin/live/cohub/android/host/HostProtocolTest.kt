@@ -1,92 +1,34 @@
 package live.cohub.android.host
 
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import live.cohub.android.host.HostProtocol.Capabilities as C
 
-/**
- * These constants must match `packages/protocol/src/host-bridge.ts`. Drift fails
- * silently at runtime (every call degrades to the browser path), so it is
- * pinned here where a mismatch is cheap to catch.
- */
 class HostProtocolTest {
-
-    @Test
-    fun `constants match the protocol package`() {
-        assertEquals(1, HostProtocol.VERSION)
-        assertEquals("cohubHost", HostProtocol.GLOBAL)
-    }
-
-    @Test
-    fun `method and event names match the protocol tables`() {
-        assertEquals(
-            setOf(
-                "host.describe", "auth.getAccessToken", "auth.getSessionVersion",
-                "auth.getSession", "auth.signIn", "auth.signOut",
-                "notifications.register", "share.text", "navigation.openPath", "cache.clear",
-            ),
-            setOf(
-                HostProtocol.Methods.HOST_DESCRIBE,
-                HostProtocol.Methods.AUTH_GET_ACCESS_TOKEN,
-                HostProtocol.Methods.AUTH_GET_SESSION_VERSION,
-                HostProtocol.Methods.AUTH_GET_SESSION,
-                HostProtocol.Methods.AUTH_SIGN_IN,
-                HostProtocol.Methods.AUTH_SIGN_OUT,
-                HostProtocol.Methods.NOTIFICATIONS_REGISTER,
-                HostProtocol.Methods.SHARE_TEXT,
-                HostProtocol.Methods.NAVIGATION_OPEN_PATH,
-                HostProtocol.Methods.CACHE_CLEAR,
-            ),
-        )
-        assertEquals(
-            listOf("auth.changed", "auth.signedOut", "navigation.back", "app.foreground", "app.background"),
-            listOf(
-                HostProtocol.Events.AUTH_CHANGED,
-                HostProtocol.Events.AUTH_SIGNED_OUT,
-                HostProtocol.Events.NAVIGATION_BACK,
-                HostProtocol.Events.APP_FOREGROUND,
-                HostProtocol.Events.APP_BACKGROUND,
-            ),
-        )
-    }
-
-    @Test
-    fun `every advertised capability is known to the web side`() {
-        val known = setOf(
-            "auth.token", "auth.signIn", "auth.session", "notifications",
-            "share", "filePicker", "navigation", "cache", "runtime", "appearance",
-            "launch", "haptics", "files", "navigation.back", "shortcuts", "display", "display.presenting", "display.float", "media.capture",
-            "permissions", "share.incoming", "workspace", "workspace.files", "app.about",
-        )
-        HostCapabilities.advertised(runtime = true, files = true).forEach { capability ->
-            assertTrue("Unknown capability advertised: $capability", capability in known)
-        }
-    }
 
     @Test
     fun `runtime remains available without display control`() {
         val capabilities = HostCapabilities.advertised(runtime = true, files = true, display = false)
-        assertTrue(HostCapabilities.RUNTIME in capabilities)
-        assertTrue(HostCapabilities.WORKSPACE in capabilities)
-        assertTrue(HostCapabilities.WORKSPACE_FILES in capabilities)
-        assertFalse(HostCapabilities.DISPLAY in capabilities)
-        assertFalse(HostCapabilities.DISPLAY_PRESENTING in capabilities)
-        assertFalse(HostCapabilities.DISPLAY_FLOAT in capabilities)
-    }
-
-    @Test
-    fun `workspace names match the protocol tables`() {
-        assertEquals("workspace.call", HostProtocol.Methods.WORKSPACE_CALL)
-        assertEquals("app.about", HostProtocol.Methods.APP_ABOUT)
-        assertEquals("unavailable", HostProtocol.Errors.UNAVAILABLE)
-        assertEquals("/__cohub/workspace/", live.cohub.android.runtime.LocalWorkspaces.PATH_PREFIX)
+        assertTrue(C.RUNTIME in capabilities)
+        assertTrue(C.WORKSPACE in capabilities)
+        assertTrue(C.WORKSPACE_FILES in capabilities)
+        assertFalse(C.DISPLAY in capabilities)
+        assertFalse(C.DISPLAY_PRESENTING in capabilities)
+        assertFalse(C.DISPLAY_FLOAT in capabilities)
     }
 
     @Test
     fun `notifications is not advertised until delivery exists`() {
         // The server has no FCM channel; claiming it would make the web side
         // wait for notifications that never arrive.
-        assertFalse(HostCapabilities.NOTIFICATIONS in HostCapabilities.advertised(runtime = true, files = true))
+        assertFalse(C.NOTIFICATIONS in HostCapabilities.advertised(runtime = true, files = true))
+    }
+
+    @Test
+    fun `files stream only where files are saved and frames can cross`() {
+        assertTrue(C.FILES_STREAM in HostCapabilities.advertised(runtime = false, files = true, fileStream = true))
+        assertFalse(C.FILES_STREAM in HostCapabilities.advertised(runtime = false, files = true))
+        assertFalse(C.FILES_STREAM in HostCapabilities.advertised(runtime = false, files = false, fileStream = true))
     }
 }

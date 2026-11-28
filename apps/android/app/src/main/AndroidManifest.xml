@@ -48,6 +48,7 @@
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="${appName}"
+        android:localeConfig="@xml/locales_config"
         android:supportsRtl="true"
         android:theme="@style/Theme.Cohub"
         android:usesCleartextTraffic="false"
@@ -55,7 +56,7 @@
 
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|locale|layoutDirection"
             android:exported="true"
             android:launchMode="singleTask"
             android:theme="@style/Theme.Cohub.Starting"
@@ -101,6 +102,16 @@
                 <data
                     android:host="${oauthHost}"
                     android:scheme="https" />
+                <!-- native-apps.json `paths.browserOnly`; a protocol test keeps them in step. -->
+                <uri-relative-filter-group android:allow="false">
+                    <data android:pathPrefix="/callback" />
+                </uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false">
+                    <data android:pathPrefix="/app-auth" />
+                </uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false">
+                    <data android:pathPrefix="/mobile/" />
+                </uri-relative-filter-group>
                 <uri-relative-filter-group android:allow="false">
                     <data android:pathPattern="/.*/.*/w/.*" />
                 </uri-relative-filter-group>

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
+using Cohub.Core;
 using Velopack;
 
 [assembly: SupportedOSPlatform("linux")]
@@ -25,6 +26,8 @@ internal static class Program
             return 0;
         }
         VelopackApp.Build().Run();
+        var state = ShellState.Load(config.DataDirectory);
+        Strings.Use(state.Locale);
         if (!HasToolkit(out var problem))
         {
             var message = Strings.L("Cohub needs GTK 4.10, libadwaita 1.2 and WebKitGTK 6.0.");
@@ -34,7 +37,7 @@ internal static class Program
             catch (System.ComponentModel.Win32Exception) { }
             return 1;
         }
-        return new ShellApp(config).Run(args);
+        return new ShellApp(config, state).Run(args);
     }
 
     private static bool HasToolkit(out string problem)

@@ -2,6 +2,7 @@
 import "../../app.css";
 import { onMount } from "svelte";
 import DownloadToasts from "#lib/components/DownloadToasts.svelte";
+import SignInChooser from "#lib/components/SignInChooser.svelte";
 import { markHostReady } from "#lib/host-bridge.ts";
 import { browser } from "$app/env";
 import { page } from "$app/state";
@@ -57,3 +58,4 @@ const isPublicAppPath = $derived.by(() => {
 {/if}
 
 <DownloadToasts />
+<SignInChooser />

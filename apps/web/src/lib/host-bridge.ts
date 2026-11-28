@@ -3,6 +3,7 @@ import {
 	type HostBridgeCapability,
 	type HostBridgeEvent,
 	type HostBridgeMethod,
+	type HostLocale,
 	type HostPlatform,
 	type HostShortcut,
 } from "@cohub/protocol/host-bridge";
@@ -112,6 +113,27 @@ export function syncHostAppearance(backgroundColor: string) {
 		appliedAppearance = backgroundColor;
 		callHost("appearance.set", { backgroundColor }).catch(() => {
 			if (appliedAppearance === backgroundColor) appliedAppearance = null;
+		});
+	});
+}
+
+let requestedLocale: HostLocale | null | undefined;
+let appliedLocale: HostLocale | null | undefined;
+
+export function syncHostLocale(locale: HostLocale | null) {
+	requestedLocale = locale;
+	if (!isHosted()) return;
+	void readyHost().then(() => {
+		if (
+			requestedLocale !== locale ||
+			appliedLocale === locale ||
+			!supportsHostCapability("app.locale")
+		) {
+			return;
+		}
+		appliedLocale = locale;
+		callHost("app.setLocale", { locale }).catch(() => {
+			if (appliedLocale === locale) appliedLocale = undefined;
 		});
 	});
 }

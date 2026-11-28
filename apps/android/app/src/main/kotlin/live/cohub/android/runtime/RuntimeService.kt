@@ -1,5 +1,6 @@
 package live.cohub.android.runtime
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -40,6 +41,7 @@ import live.cohub.android.auth.Account
 import live.cohub.android.display.DisplayStatus
 import live.cohub.android.host.ScreenCaptureGrant
 import live.cohub.android.host.WebOrigin
+import live.cohub.android.ui.HostLocale
 import java.io.File
 import java.util.UUID
 
@@ -100,6 +102,7 @@ class RuntimeService : Service() {
         return START_STICKY
     }
 
+    @SuppressLint("ForegroundServiceType")
     private fun enterForeground(projecting: Boolean = false): Boolean = try {
         val types = when {
             Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> 0
@@ -224,6 +227,8 @@ class RuntimeService : Service() {
         }
     }
 
+    private val strings get() = HostLocale.strings(this)
+
     private fun showNotification(instances: List<RuntimeInstance>, display: DisplayStatus?) {
         if (instances.none { it.state == RuntimeInstance.State.CONNECTING || it.state == RuntimeInstance.State.READY }) return
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(instances, display))
@@ -233,33 +238,42 @@ class RuntimeService : Service() {
         val ready = instances.count { it.state == RuntimeInstance.State.READY }
         val sharing = display?.sharedWith != null
         val text = when {
-            sharing -> getString(R.string.display_sharing_control)
-            ready > 0 -> resources.getQuantityString(R.plurals.runtime_ready, ready, ready)
-            else -> getString(R.string.runtime_connecting)
+            sharing -> strings.getString(R.string.display_sharing_control)
+            ready > 0 -> strings.resources.getQuantityString(R.plurals.runtime_ready, ready, ready)
+            else -> strings.getString(R.string.runtime_connecting)
         }
         val only = instances.singleOrNull { it.state == RuntimeInstance.State.READY || it.state == RuntimeInstance.State.CONNECTING }
         val destination = Intent(this, MainActivity::class.java).apply {
             only?.let { data = WebOrigin.urlOf("/spaces/${it.spaceId}").toUri() }
         }
         val open = PendingIntent.getActivity(
-            this, 0, destination, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            this,
+            0,
+            destination,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val stop = PendingIntent.getService(
-            this, 1, Intent(this, RuntimeService::class.java).setAction(ACTION_STOP_ALL), PendingIntent.FLAG_IMMUTABLE,
+            this,
+            1,
+            Intent(this, RuntimeService::class.java).setAction(ACTION_STOP_ALL),
+            PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_runtime)
-            .setContentTitle(getString(R.string.runtime_title))
+            .setContentTitle(strings.getString(R.string.runtime_title))
             .setContentText(text)
             .setContentIntent(open)
         if (sharing) {
             val stopSharing = PendingIntent.getService(
-                this, 2, Intent(this, RuntimeService::class.java).setAction(ACTION_STOP_SHARING), PendingIntent.FLAG_IMMUTABLE,
+                this,
+                2,
+                Intent(this, RuntimeService::class.java).setAction(ACTION_STOP_SHARING),
+                PendingIntent.FLAG_IMMUTABLE,
             )
-            builder.addAction(0, getString(R.string.display_stop), stopSharing)
+            builder.addAction(0, strings.getString(R.string.display_stop), stopSharing)
         }
         return builder
-            .addAction(0, getString(R.string.runtime_disconnect), stop)
+            .addAction(0, strings.getString(R.string.runtime_disconnect), stop)
             .setOngoing(true)
             .setSilent(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
@@ -267,7 +281,7 @@ class RuntimeService : Service() {
     }
 
     private fun createChannel() {
-        val channel = NotificationChannel(CHANNEL_ID, getString(R.string.runtime_channel), NotificationManager.IMPORTANCE_LOW)
+        val channel = NotificationChannel(CHANNEL_ID, strings.getString(R.string.runtime_channel), NotificationManager.IMPORTANCE_LOW)
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 

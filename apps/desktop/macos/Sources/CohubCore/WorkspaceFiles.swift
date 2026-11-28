@@ -1,4 +1,5 @@
 import Foundation
+
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -9,9 +10,11 @@ import FoundationNetworking
 /// `cohub-workspace://<spaceId>/files?path=…`. The CLI hands out the endpoint;
 /// the page never sees its token.
 public final class WorkspaceFiles: Sendable {
-    public static let scheme = "cohub-workspace"
+    public static let scheme = HostProtocol.workspaceScheme
     public static let forwardedHeaders = ["Range", "If-None-Match", "If-Modified-Since", "If-Range"]
-    public static let passedHeaders = ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control", "Content-Security-Policy", "X-Content-Type-Options"]
+    public static let passedHeaders = [
+        "Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control", "Content-Security-Policy", "X-Content-Type-Options",
+    ]
 
     /// `+` and `&` stay escaped, so a path never reads as a space or a second field.
     private static let queryValue = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "+&=?#"))
@@ -24,7 +27,7 @@ public final class WorkspaceFiles: Sendable {
 
     public static func target(of url: URL) -> (spaceId: String, path: String)? {
         guard url.scheme?.lowercased() == scheme, let host = url.host, UUID(uuidString: host) != nil, url.path == "/files",
-              let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery
         else { return nil }
         for field in query.split(separator: "&") {
             let pair = field.split(separator: "=", maxSplits: 1).map(String.init)
@@ -40,10 +43,10 @@ public final class WorkspaceFiles: Sendable {
     public func request(spaceId: String, path: String, headers: [String: String]) async -> URLRequest? {
         let params: JSON = ["spaceId": .string(spaceId)]
         guard case .result(let result) = await service.call(BridgeRequest(id: "workspace", method: HostProtocol.ServiceMethod.workspaceEndpoint, params: params)),
-              let text = result["url"]?.string, let endpoint = URL(string: text), endpoint.host == "127.0.0.1",
-              let token = result["token"]?.string,
-              let encoded = path.addingPercentEncoding(withAllowedCharacters: Self.queryValue),
-              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+            let text = result["url"]?.string, let endpoint = URL(string: text), endpoint.host == "127.0.0.1",
+            let token = result["token"]?.string,
+            let encoded = path.addingPercentEncoding(withAllowedCharacters: Self.queryValue),
+            var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
         else { return nil }
         components.path = "/files"
         components.percentEncodedQuery = "path=\(encoded)"

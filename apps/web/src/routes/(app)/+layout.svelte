@@ -18,6 +18,7 @@ import MobileTabBar from "#lib/components/MobileTabBar.svelte";
 import { mediaLightbox } from "#lib/components/media-lightbox.ts";
 import ResizeHandle from "#lib/components/ResizeHandle.svelte";
 import Sidebar from "#lib/components/Sidebar.svelte";
+import SignInChooser from "#lib/components/SignInChooser.svelte";
 import TurnNotificationStack from "#lib/components/TurnNotificationStack.svelte";
 import CustomThemeLayers from "#lib/custom-theme/CustomThemeLayers.svelte";
 import { createDeferredMount } from "#lib/deferred-mount.svelte.ts";
@@ -667,6 +668,7 @@ onMount(() => {
   <SpaceWalletReturn />
   <TurnNotificationStack />
   <DownloadToasts />
+  <SignInChooser />
   <GlobalMarkCapture />
 
 {/if}

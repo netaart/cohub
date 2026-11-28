@@ -8,16 +8,12 @@ public struct WebOrigin: Sendable, Equatable {
     }
 
     public let url: URL
+    public let origin: String
 
     public init?(_ text: String) {
-        guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http", url.host != nil else { return nil }
+        guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http", let host = url.host?.lowercased() else { return nil }
         self.url = url
-    }
-
-    public var origin: String {
-        var text = "\(url.scheme!.lowercased())://\(url.host!.lowercased())"
-        if let port = url.port { text += ":\(port)" }
-        return text
+        origin = "\(scheme)://\(host)" + (url.port.map { ":\($0)" } ?? "")
     }
 
     public func contains(_ other: URL) -> Bool {
@@ -28,6 +24,15 @@ public struct WebOrigin: Sendable, Equatable {
 
     public func isOrigin(scheme: String, host: String, port: Int) -> Bool {
         "\(scheme.lowercased())://\(host.lowercased())\(port == 0 ? "" : ":\(port)")" == origin
+    }
+
+    public func dialogTitle(scheme: String, host: String, port: Int) -> String? {
+        isOrigin(scheme: scheme, host: host, port: port) ? nil : host.lowercased()
+    }
+
+    public func blobURL(_ text: String) -> URL? {
+        guard text.hasPrefix("blob:\(origin)/") else { return nil }
+        return URL(string: text)
     }
 
     public func path(of other: URL) -> String? {
@@ -52,8 +57,8 @@ public struct WebOrigin: Sendable, Equatable {
     public static func isResumable(_ path: String) -> Bool {
         guard isInAppPath(path) else { return false }
         let route = String(path.prefix { $0 != "?" && $0 != "#" })
-        if route == "/" || route == "/zh" { return false }
-        return !["/callback", "/app-auth", "/mobile"].contains { route == $0 || route.hasPrefix($0 + "/") }
+        if HostProtocol.landingPaths.contains(route) { return false }
+        return !HostProtocol.oneShotPaths.contains { route == $0 || route.hasPrefix($0 + "/") }
     }
 
     public static func newSpacePath(folder: String) -> String? {
@@ -64,17 +69,15 @@ public struct WebOrigin: Sendable, Equatable {
         return isInAppPath(path) ? path : nil
     }
 
-    public func navigation(to target: URL) -> Navigation {
-        if contains(target) { return .allow }
-        switch target.scheme?.lowercased() {
-        case "https", "http", "mailto", "tel": return .external(target)
-        default: return .deny
-        }
+    public func navigation(to target: URL, mainFrame: Bool = true) -> Navigation {
+        if !mainFrame || contains(target) { return .allow }
+        guard let scheme = target.scheme?.lowercased(), HostProtocol.externalSchemes.contains(scheme) else { return .deny }
+        return .external(target)
     }
 
     public static func path(fromDeepLink link: URL, scheme: String = "cohub") -> String? {
         guard link.scheme?.lowercased() == scheme, link.host?.lowercased() == "open",
-              let components = URLComponents(url: link, resolvingAgainstBaseURL: false)
+            let components = URLComponents(url: link, resolvingAgainstBaseURL: false)
         else { return nil }
         var path = components.percentEncodedPath.isEmpty ? "/" : components.percentEncodedPath
         if let query = components.percentEncodedQuery { path += "?\(query)" }

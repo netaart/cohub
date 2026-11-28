@@ -1,13 +1,14 @@
 import AppKit
 import CohubCore
-import os
 import ServiceManagement
+import WebKit
+import os
+
 #if APP_STORE
 import CohubAppleAuth
 #else
 import Sparkle
 #endif
-import WebKit
 
 @MainActor
 final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
@@ -22,12 +23,12 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private(set) var workspaceFiles: WorkspaceFiles?
     #if APP_STORE
     private var signingIn = false
-    private lazy var authConfig = AuthConfig(
-        endpoint: URL(string: "https://auth.neta.art/")!,
-        appId: "kpwepos08jz70jy20d3hg",
-        redirectURI: URL(string: config.origin.origin + "/mobile/auth/callback")!,
-        apiResource: "https://api.talesofai"
-    )
+    private lazy var authConfig: AuthConfig = {
+        guard let endpoint = URL(string: "https://auth.neta.art/"), let redirect = URL(string: self.config.origin.origin + HostProtocol.authCallbackPath) else {
+            preconditionFailure("Malformed sign-in configuration")
+        }
+        return AuthConfig(endpoint: endpoint, appId: "kpwepos08jz70jy20d3hg", redirectURI: redirect, apiResource: "https://api.talesofai")
+    }()
     private lazy var auth = AuthSession(store: KeychainStore(service: Bundle.main.bundleIdentifier ?? "live.cohub.ios"), config: authConfig)
     #else
     private var updater: SPUStandardUpdaterController?
@@ -36,30 +37,25 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var launched = false
     private var pendingPaths: [String] = []
     private lazy var shortcut = GlobalShortcut { [weak self] in self?.showPrimary() }
-    private lazy var status = StatusMenu(actions: .init(
-        openSpace: { [weak self] spaceId in self?.open(path: "/spaces/\(spaceId)") },
-        disconnect: { [weak self] spaceId in self?.disconnect(spaceId) },
-        newSpace: { [weak self] in self?.open(path: "/spaces/new") },
-        stopSharing: { [weak self] in self?.stopSharing() },
-        showCohub: { [weak self] in self?.showPrimary() }
-    ))
+    private lazy var status = StatusMenu(
+        actions: .init(
+            openSpace: { [weak self] spaceId in self?.open(path: "/spaces/\(spaceId)") },
+            disconnect: { [weak self] spaceId in self?.disconnect(spaceId) },
+            newSpace: { [weak self] in self?.open(path: "/spaces/new") },
+            stopSharing: { [weak self] in self?.stopSharing() },
+            showCohub: { [weak self] in self?.showPrimary() }
+        ))
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundled = Bundle.main.bundleIdentifier != nil
-        var updateMenu: NSMenuItem?
         #if !APP_STORE
         let updates = ["SUFeedURL", "SUPublicEDKey"].allSatisfy { (Bundle.main.object(forInfoDictionaryKey: $0) as? String)?.isEmpty == false }
         if bundled, updates {
             updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         }
-        updateMenu = updater.map { updater in
-            let item = NSMenuItem(title: L("Check for Updates…"), action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
-            item.target = updater
-            return item
-        }
         #endif
         if bundled { notifications = Notifications { [weak self] path in self?.open(path: path) } }
-        NSApp.mainMenu = MainMenu.build(updater: updateMenu, commandLineTool: config.commandLineTool != nil)
+        NSApp.mainMenu = mainMenu()
         NSWindow.allowsAutomaticWindowTabbing = false
         startService()
         if ShellState.globalShortcut { shortcut.set(enabled: true) }
@@ -103,6 +99,24 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if !menu.items.isEmpty { menu.addItem(.separator()) }
         menu.addItem(ActionMenuItem(L("New Window")) { [weak self] in self?.openWindow(path: "/") })
         return menu
+    }
+
+    private func mainMenu() -> NSMenu {
+        #if APP_STORE
+        let updates: NSMenuItem? = nil
+        #else
+        let updates = updater.map { updater in
+            let item = NSMenuItem(title: L("Check for Updates…"), action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
+            item.target = updater
+            return item
+        }
+        #endif
+        return MainMenu.build(updater: updates, commandLineTool: config.commandLineTool != nil)
+    }
+
+    private func localeChanged() {
+        NSApp.mainMenu = mainMenu()
+        status.rebuild()
     }
 
     private func restore(_ session: TabSession?) {
@@ -211,9 +225,11 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private func saveSession() {
         saving?.cancel()
-        ShellState.session = TabSession(windows: windows.filter { !$0.tabs.isEmpty }.map { window in
-            TabSession.Window(tabs: window.tabs.map(\.session), selected: window.selectedIndex, frame: window.window?.frameDescriptor)
-        }).sanitized()
+        ShellState.session = TabSession(
+            windows: windows.filter { !$0.tabs.isEmpty }.map { window in
+                TabSession.Window(tabs: window.tabs.map(\.session), selected: window.selectedIndex, frame: window.window?.frameDescriptor)
+            }
+        ).sanitized()
     }
 
     private var primary: ShellWindow? {
@@ -241,15 +257,22 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func router(for tab: ShellTab) -> BridgeRouter {
         typealias M = HostProtocol.Method
         typealias C = HostProtocol.Capability
-        var capabilities = [C.launch, C.appearance, C.navigation, C.share, C.files, C.cache, C.shortcuts, C.mediaCapture, C.permissions, C.badge, C.globalShortcut, C.tabs, C.about]
+        var capabilities = [C.launch, C.appearance, C.navigation, C.share, C.files, C.cache, C.shortcuts, C.mediaCapture, C.permissions, C.badge, C.appGlobalShortcut, C.tabs, C.appAbout, C.appLocale]
         if notifications != nil { capabilities.append(C.notifications) }
-        if Bundle.main.bundleIdentifier != nil { capabilities.append(C.launchAtLogin) }
+        if Bundle.main.bundleIdentifier != nil { capabilities.append(C.appLaunchAtLogin) }
         if service != nil { capabilities.append(C.runtimePicker) }
         if workspaceFiles != nil { capabilities.append(C.workspaceFiles) }
         var handlers: [String: BridgeRouter.Handler] = [
-            M.appReady: { [weak tab] _ in tab?.reveal(); return true },
+            M.appReady: { [weak tab] _ in
+                tab?.reveal()
+                return true
+            },
             M.appAbout: { [weak self] params in
                 Task { await AboutPanel.show(service: self?.service, web: params["web"]?.string) }
+                return true
+            },
+            M.appSetLocale: { [weak self] params in
+                if HostLocale.shared.set(params["locale"]?.string) { self?.localeChanged() }
                 return true
             },
             M.appearanceSet: { [weak tab] params in
@@ -285,7 +308,7 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 NSApp.dockTile.badgeLabel = count > 0 ? String(Int(count)) : nil
                 return true
             },
-            M.globalShortcut: { [weak self] params in
+            M.appGlobalShortcut: { [weak self] params in
                 guard let self else { return false }
                 if let enabled = params["enabled"]?.bool {
                     ShellState.globalShortcut = enabled
@@ -293,10 +316,9 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 }
                 return .bool(ShellState.globalShortcut)
             },
-            M.launchAtLogin: { params in
+            M.appLaunchAtLogin: { params in
                 if let enabled = params["enabled"]?.bool {
-                    do { try Permissions.setLaunchAtLogin(enabled) }
-                    catch { throw BridgeFailure.failed(error.localizedDescription) }
+                    do { try Permissions.setLaunchAtLogin(enabled) } catch { throw BridgeFailure.failed(error.localizedDescription) }
                 }
                 return .bool(SMAppService.mainApp.status == .enabled)
             },
@@ -325,7 +347,7 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
         }
         #if APP_STORE
-        capabilities += [C.authToken, C.authSignIn, C.authSession]
+        capabilities += [C.authToken, C.authSignIn, C.authSession, C.authProvider]
         handlers[M.authGetAccessToken] = { [auth] params in
             await auth.accessToken(forceRefresh: params["forceRefresh"]?.bool == true).map(JSON.string) ?? .null
         }
@@ -336,8 +358,7 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return ["authenticated": .bool(signedIn), "userUuid": .null, "subject": subject.map(JSON.string) ?? .null, "email": .null]
         }
         handlers[M.authSignIn] = { [weak self, weak tab] params in
-            self?.signIn(tab: tab, path: params["redirectPath"]?.string)
-            return true
+            .bool(self?.signIn(tab: tab, path: params["redirectPath"]?.string, provider: params["provider"]?.string) ?? false)
         }
         handlers[M.authSignOut] = { [weak self] _ in
             guard let self else { return false }
@@ -366,24 +387,37 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     #if APP_STORE
-    private func signIn(tab: ShellTab?, path: String?) {
-        guard !signingIn, let window = tab?.window?.window else { return }
+    private func signIn(tab: ShellTab?, path: String?, provider: String?) -> Bool {
+        guard !signingIn else { return false }
+        guard let window = tab?.window?.window else {
+            signInEnded(HostProtocol.AuthFlowOutcome.failed, tab: tab)
+            return true
+        }
         signingIn = true
         Task {
             defer { signingIn = false }
             do {
-                guard let grant = try await SignIn(anchor: window).run(authConfig, forceLogin: UserDefaults.standard.bool(forKey: "forceLogin")) else { return }
+                guard let grant = try await SignIn(anchor: window).run(authConfig, forceLogin: UserDefaults.standard.bool(forKey: "forceLogin"), provider: provider) else {
+                    return signInEnded(HostProtocol.AuthFlowOutcome.canceled, tab: tab)
+                }
                 try await auth.completeSignIn(code: grant.code, verifier: grant.verifier)
                 UserDefaults.standard.set(false, forKey: "forceLogin")
+                signInEnded(HostProtocol.AuthFlowOutcome.signedIn, tab: tab)
                 for other in allTabs where other !== tab { other.refresh() }
                 tab?.load(path.flatMap { WebOrigin.isInAppPath($0) ? $0 : nil } ?? "/")
             } catch {
                 log.error("Sign-in failed: \(error.localizedDescription, privacy: .public)")
+                signInEnded(HostProtocol.AuthFlowOutcome.failed, tab: tab)
                 let alert = NSAlert()
                 alert.messageText = L("Couldn't complete sign-in. Please try again.")
                 await alert.beginSheetModal(for: window)
             }
         }
+        return true
+    }
+
+    private func signInEnded(_ outcome: String, tab: ShellTab?) {
+        tab?.emit(HostProtocol.Event.authFlow, ["outcome": .string(outcome)])
     }
     #endif
 

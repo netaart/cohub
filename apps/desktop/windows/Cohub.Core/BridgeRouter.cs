@@ -38,7 +38,7 @@ public sealed class BridgeRouter(
 
     private async Task<BridgeReply> ReplyAsync(BridgeRequest request)
     {
-        if (request.Method == HostProtocol.Methods.Describe) return BridgeReply.Success(await DescribeAsync());
+        if (request.Method == HostProtocol.Methods.HostDescribe) return BridgeReply.Success(await DescribeAsync());
         if (handlers.TryGetValue(request.Method, out var handler))
         {
             try

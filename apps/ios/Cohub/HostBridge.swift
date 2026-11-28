@@ -7,8 +7,8 @@ enum HostBridge {
     typealias C = HostProtocol.Capability
 
     static let capabilities = [
-        C.authToken, C.authSignIn, C.authSession, C.launch, C.appearance, C.navigation, C.share, C.shareIncoming,
-        C.files, C.haptics, C.shortcuts, C.mediaCapture, C.permissions, C.about,
+        C.authToken, C.authSignIn, C.authSession, C.authProvider, C.launch, C.appearance, C.navigation, C.share, C.shareIncoming,
+        C.shareFileUrl, C.files, C.filesBlobUrl, C.haptics, C.shortcuts, C.mediaCapture, C.permissions, C.appAbout, C.appLocale,
     ]
 
     static func router(for surface: ShellViewController, shell: Shell) -> BridgeRouter {
@@ -25,8 +25,7 @@ enum HostBridge {
                 return ["authenticated": .bool(signedIn), "userUuid": .null, "subject": subject.map(JSON.string) ?? .null, "email": .null]
             },
             M.authSignIn: { params in
-                shell.signIn(redirectPath: params["redirectPath"]?.string)
-                return true
+                .bool(shell.signIn(redirectPath: params["redirectPath"]?.string, provider: params["provider"]?.string))
             },
             M.authSignOut: { [weak surface] _ in
                 await shell.signOut()
@@ -78,6 +77,10 @@ enum HostBridge {
                 if let surface { AboutPanel.show(from: surface, config: shell.config, web: params["web"]?.string) }
                 return true
             },
+            M.appSetLocale: { params in
+                if HostLocale.shared.set(params["locale"]?.string) { shell.localeChanged() }
+                return true
+            },
         ]
         return BridgeRouter(
             platform: "ios",
@@ -122,7 +125,9 @@ enum AboutPanel {
         if let web { lines.append(L("Web \(web)")) }
         lines.append(L("Open source under Apache-2.0."))
         let alert = UIAlertController(title: L("About Cohub"), message: lines.joined(separator: "\n"), preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: L("Source code"), style: .default) { _ in UIApplication.shared.open(ShellConfig.repository) })
+        if let repository = ShellConfig.repository {
+            alert.addAction(UIAlertAction(title: L("Source code"), style: .default) { _ in UIApplication.shared.open(repository) })
+        }
         alert.addAction(UIAlertAction(title: L("OK"), style: .cancel))
         host.topmost.present(alert, animated: true)
     }

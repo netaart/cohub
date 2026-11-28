@@ -2,10 +2,11 @@ import Foundation
 
 public enum AuthorizationRequest {
     static let scopes = "openid offline_access profile email"
+    static let providers = [HostProtocol.SignInProvider.google, HostProtocol.SignInProvider.apple, HostProtocol.SignInProvider.facebook]
 
-    public static func url(config: AuthConfig, challenge: String, state: String, forceLogin: Bool) -> URL? {
+    public static func url(config: AuthConfig, challenge: String, state: String, forceLogin: Bool, provider: String? = nil) -> URL? {
         var components = URLComponents(url: config.oidc.appendingPathComponent("auth"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [
+        var items = [
             URLQueryItem(name: "client_id", value: config.appId),
             URLQueryItem(name: "redirect_uri", value: config.redirectURI.absoluteString),
             URLQueryItem(name: "response_type", value: "code"),
@@ -16,6 +17,8 @@ public enum AuthorizationRequest {
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "state", value: state),
         ]
+        if let provider, providers.contains(provider) { items.append(URLQueryItem(name: "direct_sign_in", value: "social:\(provider)")) }
+        components?.queryItems = items
         return components?.url
     }
 

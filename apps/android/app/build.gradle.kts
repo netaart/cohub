@@ -14,28 +14,29 @@ data class Deployment(
     val logtoEndpoint: String,
     val logtoAppId: String,
     val appName: String,
-    val applicationIdSuffix: String? = null,
+    val applicationIdSuffix: String?,
 )
 
-val deployments = mapOf(
-    "prod" to Deployment(
-        webOrigin = "https://cohub.live",
-        apiOrigin = "https://api.cohub.live",
-        gatewayOrigin = "wss://gateway.cohub.live",
-        logtoEndpoint = "https://auth.neta.art/",
-        logtoAppId = "kpwepos08jz70jy20d3hg",
-        appName = "Cohub",
-    ),
-    "dev" to Deployment(
-        webOrigin = "https://dev.cohub.live",
-        apiOrigin = "https://api-dev.cohub.live",
-        gatewayOrigin = "wss://gateway-dev.cohub.live",
-        logtoEndpoint = "https://dev-auth.neta.art/",
-        logtoAppId = "grxctv83gvvo2wcmcb8xp",
-        appName = "Cohub Dev",
-        applicationIdSuffix = ".dev",
-    ),
-)
+val repoRoot: File = rootProject.layout.projectDirectory.dir("../..").asFile
+val applicationIdBase = "live.cohub.android"
+
+@Suppress("UNCHECKED_CAST")
+val nativeApps = groovy.json.JsonSlurper().parse(repoRoot.resolve("packages/protocol/src/native-apps.json")) as Map<String, Any?>
+
+@Suppress("UNCHECKED_CAST")
+val deployments: Map<String, Deployment> = (nativeApps["deployments"] as Map<String, Map<String, Any?>>).mapValues { (_, it) ->
+    val packageName = (it["android"] as Map<String, Any?>)["packageName"] as String
+    check(packageName.startsWith(applicationIdBase)) { "Android package $packageName must extend $applicationIdBase" }
+    Deployment(
+        webOrigin = it["webOrigin"] as String,
+        apiOrigin = it["apiOrigin"] as String,
+        gatewayOrigin = it["gatewayOrigin"] as String,
+        logtoEndpoint = it["logtoEndpoint"] as String,
+        logtoAppId = it["logtoAppId"] as String,
+        appName = it["appName"] as String,
+        applicationIdSuffix = packageName.removePrefix(applicationIdBase).ifEmpty { null },
+    )
+}
 
 fun prop(name: String): String? = providers.gradleProperty(name).orNull
 
@@ -46,10 +47,11 @@ val apiOrigin: String = prop("cohubApiOrigin") ?: deployment.apiOrigin
 val gatewayOrigin: String = prop("cohubGatewayOrigin") ?: deployment.gatewayOrigin
 val logtoEndpoint: String = prop("cohubLogtoEndpoint") ?: deployment.logtoEndpoint
 val logtoAppId: String = prop("cohubLogtoAppId") ?: deployment.logtoAppId
-val logtoApiResource: String = prop("cohubLogtoApiResource") ?: "https://api.talesofai"
-val oauthRedirectPath: String = prop("cohubOauthRedirectPath") ?: "/mobile/auth/callback"
+val logtoApiResource: String = prop("cohubLogtoApiResource") ?: nativeApps["logtoApiResource"] as String
 
-val repoRoot: File = rootProject.layout.projectDirectory.dir("../..").asFile
+@Suppress("UNCHECKED_CAST")
+val oauthRedirectPath: String = prop("cohubOauthRedirectPath") ?: (nativeApps["paths"] as Map<String, Any?>)["authCallback"] as String
+
 val cliVersion: String = Regex("\"version\"\\s*:\\s*\"([^\"]+)\"")
     .find(repoRoot.resolve("packages/cli/package.json").readText())?.groupValues?.get(1) ?: ""
 val commit: String = runCatching {
@@ -68,7 +70,7 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "live.cohub.android"
+        applicationId = applicationIdBase
         applicationIdSuffix = deployment.applicationIdSuffix
         minSdk = 26
         targetSdk = 37
@@ -138,7 +140,18 @@ android {
     kotlin {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            allWarningsAsErrors.set(true)
         }
+    }
+
+    lint {
+        warningsAsErrors = true
+        abortOnError = true
+        informational += setOf("AndroidGradlePluginVersion", "GradleDependency", "NewerVersionAvailable", "OldTargetApi")
+    }
+
+    bundle {
+        language { enableSplit = false }
     }
 
     packaging {
@@ -259,7 +272,10 @@ abstract class StageCli : DefaultTask() {
         staged.resolve("node").copyTo(libs.resolve("libcohub_node.so"))
         launcher.get().asFile.copyTo(libs.resolve("libcohub_cli.so"))
         val cli = staged.resolve("cli")
-        val zip = assets.get().asFile.apply { deleteRecursively(); mkdirs() }.resolve("cli.zip")
+        val zip = assets.get().asFile.apply {
+            deleteRecursively()
+            mkdirs()
+        }.resolve("cli.zip")
         ZipOutputStream(zip.outputStream()).use { out ->
             cli.walkTopDown().onEnter { it.name != ".bin" }.filter { it.isFile }.sortedBy { it.path }.forEach { file ->
                 out.putNextEntry(ZipEntry(file.relativeTo(cli).invariantSeparatorsPath))
@@ -299,8 +315,46 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services)
+    implementation(libs.googleid)
+    implementation(libs.androidx.fragment)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }
+
+val ktlint: Configuration = configurations.create("ktlint") {
+    isCanBeConsumed = false
+    attributes {
+        attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling.EXTERNAL))
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.JAR))
+    }
+}
+
+dependencies { ktlint(libs.ktlint.cli) }
+
+fun JavaExec.runKtlint(vararg options: String) {
+    classpath = ktlint
+    mainClass.set("com.pinterest.ktlint.Main")
+    workingDir = rootProject.projectDir
+    jvmArgs("--add-opens=java.base/java.lang=ALL-UNNAMED")
+    args(*options, "--relative", "app/src/**/*.kt", "*.gradle.kts", "app/*.gradle.kts")
+}
+
+val ktlintCheck = tasks.register<JavaExec>("ktlintCheck") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Checks the Kotlin style of sources and build scripts."
+    runKtlint()
+}
+
+tasks.register<JavaExec>("ktlintFormat") {
+    group = "formatting"
+    description = "Formats sources and build scripts in the Kotlin style."
+    runKtlint("--format")
+}
+
+tasks.named("check") { dependsOn(ktlintCheck) }

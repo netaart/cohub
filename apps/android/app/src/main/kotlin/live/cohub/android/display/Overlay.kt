@@ -41,7 +41,8 @@ internal class Overlay(private val service: ControlService, private val display:
     private val pill = Pill(service)
     private val panel = Panel(service)
     private val params = WindowManager.LayoutParams(
-        WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+        WindowManager.LayoutParams.WRAP_CONTENT,
+        WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
         PixelFormat.TRANSLUCENT,

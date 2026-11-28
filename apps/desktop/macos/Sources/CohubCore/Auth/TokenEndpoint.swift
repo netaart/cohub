@@ -1,4 +1,5 @@
 import Foundation
+
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -86,9 +87,9 @@ public struct HTTPTokenEndpoint: TokenEndpoint {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = Self.form(fields)
-        let data: Data, response: URLResponse
-        do { (data, response) = try await Self.session.data(for: request) }
-        catch { throw OAuthFailure(status: 0, message: error.localizedDescription) }
+        let data: Data
+        let response: URLResponse
+        do { (data, response) = try await Self.session.data(for: request) } catch { throw OAuthFailure(status: 0, message: error.localizedDescription) }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else { throw OAuthFailure(status: status, message: String(decoding: data.prefix(2_000), as: UTF8.self)) }
         return (status, data)

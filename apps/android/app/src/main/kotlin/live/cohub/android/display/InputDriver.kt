@@ -191,10 +191,13 @@ internal class InputDriver(
         val next = current.substring(0, start) + text + current.substring(end)
         if (setText(node, next) && holds(node, next)) {
             val cursor = start + text.length
-            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
-            })
+            node.performAction(
+                AccessibilityNodeInfo.ACTION_SET_SELECTION,
+                Bundle().apply {
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
+                },
+            )
             return
         }
         if (node.isPassword) throw DisplayError(DisplayError.FAILED, "the password field refused text")
@@ -218,9 +221,12 @@ internal class InputDriver(
 
     private fun shown(node: AccessibilityNodeInfo) = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
 
-    private fun setText(node: AccessibilityNodeInfo, text: String) = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
-        putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-    })
+    private fun setText(node: AccessibilityNodeInfo, text: String) = node.performAction(
+        AccessibilityNodeInfo.ACTION_SET_TEXT,
+        Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        },
+    )
 
     private suspend fun holds(node: AccessibilityNodeInfo, text: String): Boolean {
         if (node.isPassword) return true

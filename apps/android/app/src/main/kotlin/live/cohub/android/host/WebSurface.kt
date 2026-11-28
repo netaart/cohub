@@ -8,6 +8,8 @@ import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient.FileChooserParams
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.annotation.OptIn
@@ -35,6 +37,9 @@ interface SurfaceListener {
     fun onGeolocationPrompt(origin: String, callback: GeolocationPermissions.Callback)
     fun onGeolocationPromptHidden()
     fun onDownload(url: String, contentDisposition: String?, mimeType: String?)
+    fun onPageDialog(dialog: PageDialog)
+
+    fun onSharedFileRequest(request: WebResourceRequest): WebResourceResponse
 }
 
 /**

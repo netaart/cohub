@@ -1,6 +1,6 @@
 // swift-tools-version: 6.0
-import PackageDescription
 import Foundation
+import PackageDescription
 
 let appStore = ProcessInfo.processInfo.environment["COHUB_DISTRIBUTION"] == "app-store"
 

@@ -11,8 +11,12 @@ public enum HostPermissions {
 
     public static func request(_ kind: String?, notifications: Notifications?) async throws -> JSON {
         switch kind {
-        case "microphone": _ = await AVCaptureDevice.requestAccess(for: .audio); return .string(state(.audio))
-        case "camera": _ = await AVCaptureDevice.requestAccess(for: .video); return .string(state(.video))
+        case "microphone":
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+            return .string(state(.audio))
+        case "camera":
+            _ = await AVCaptureDevice.requestAccess(for: .video)
+            return .string(state(.video))
         case "notifications":
             guard let notifications else { throw BridgeFailure.failed("Notifications are not available") }
             _ = await notifications.register()

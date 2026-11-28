@@ -40,7 +40,8 @@ final class Downloads: NSObject, WKDownloadDelegate {
         let directory = try FileManager.default.url(for: .downloadsDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         var name = (suggested as NSString).lastPathComponent.replacingOccurrences(of: ":", with: "-")
         if name.isEmpty || name.hasPrefix(".") { name = "download\(name)" }
-        let base = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
         var candidate = directory.appendingPathComponent(name)
         var index = 2
         while FileManager.default.fileExists(atPath: candidate.path) {

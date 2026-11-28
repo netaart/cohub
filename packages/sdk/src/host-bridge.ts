@@ -2,6 +2,11 @@ import type * as z from "zod";
 import {
   HOST_BRIDGE_ERROR,
   HOST_BRIDGE_GLOBAL,
+  HOST_FILE_FRAME_HEADER_BYTES,
+  HOST_FILE_FRAME_MAGIC,
+  HOST_FILE_PROGRESS_EVENT,
+  HOST_FILE_SAVE_TIMEOUT_MS,
+  hostFileProgressSchema,
   HOST_BRIDGE_HANDSHAKE_TIMEOUT_MS,
   type HOST_BRIDGE_METHODS,
   HOST_BRIDGE_REQUEST_TIMEOUT_MS,
@@ -13,6 +18,7 @@ import {
   type HostBridgeRequest,
   type HostBridgeResponse,
   type HostDescription,
+  type HostFileSaved,
   type HostPlatform,
 } from "@cohub/protocol/host-bridge";
 
@@ -73,9 +79,8 @@ export class HostBridgeErrorClass extends Error {
   }
 }
 
-/** Minimal surface a host must provide (Android: web message listener). */
 export type HostBridgeChannel = {
-  postMessage(message: string): void;
+  postMessage(message: string | ArrayBuffer): void;
   addEventListener(
     type: "message",
     listener: (event: { data: unknown }) => void,
@@ -106,6 +111,7 @@ export type HostBridgeClient = {
     options?: HostBridgeCallOptions,
   ): Promise<HostBridgeResult<M>>;
   onEvent(listener: (event: HostBridgeEvent) => void): () => void;
+  postFrame(frame: ArrayBuffer): void;
   dispose(): void;
 };
 
@@ -306,6 +312,10 @@ export function createHostBridge(
       eventListeners.add(listener);
       return () => eventListeners.delete(listener);
     },
+    postFrame(frame) {
+      if (!channel || disposed) throw new HostBridgeErrorClass(HOST_BRIDGE_ERROR.failed, "Host bridge is not connected");
+      channel.postMessage(frame);
+    },
     dispose() {
       disposed = true;
       failAll(new HostBridgeErrorClass(HOST_BRIDGE_ERROR.failed, "Host bridge disposed"));
@@ -313,4 +323,74 @@ export function createHostBridge(
       if (channel) channel.removeEventListener("message", onMessage);
     },
   } as HostBridgeClient;
+}
+
+export function hostFileFrame(channel: number, offset: number, bytes: Uint8Array): ArrayBuffer {
+  const frame = new Uint8Array(HOST_FILE_FRAME_HEADER_BYTES + bytes.byteLength);
+  const view = new DataView(frame.buffer);
+  for (let index = 0; index < HOST_FILE_FRAME_MAGIC.length; index++) frame[index] = HOST_FILE_FRAME_MAGIC.charCodeAt(index);
+  view.setUint32(4, channel);
+  view.setBigUint64(8, BigInt(offset));
+  frame.set(bytes, HOST_FILE_FRAME_HEADER_BYTES);
+  return frame.buffer;
+}
+
+export async function writeHostFile(
+  client: HostBridgeClient,
+  file: { id: string; name: string; mimeType?: string },
+  blob: Blob,
+  options: { signal?: AbortSignal } = {},
+): Promise<HostFileSaved> {
+  const { signal } = options;
+  const canceled = () => new HostBridgeErrorClass(HOST_BRIDGE_ERROR.canceled, "canceled");
+  if (signal?.aborted) throw canceled();
+  let written = 0;
+  let waiting: { room: number; done: (error?: unknown) => void } | null = null;
+  const settle = (error?: unknown) => {
+    const current = waiting;
+    if (!current || (!error && written < current.room)) return;
+    waiting = null;
+    current.done(error);
+  };
+  const onAbort = () => settle(canceled());
+  const stop = client.onEvent((event) => {
+    if (event.name !== HOST_FILE_PROGRESS_EVENT) return;
+    const progress = hostFileProgressSchema.safeParse(event.payload);
+    if (!progress.success || progress.data.id !== file.id) return;
+    written = Math.max(written, progress.data.received);
+    settle();
+  });
+  signal?.addEventListener("abort", onAbort);
+  const room = (sent: number, windowBytes: number) =>
+    new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) return reject(canceled());
+      if (sent - written <= windowBytes) return resolve();
+      const timer = setTimeout(() => settle(new HostBridgeErrorClass(HOST_BRIDGE_ERROR.failed, "Host stopped writing")), HOST_BRIDGE_REQUEST_TIMEOUT_MS);
+      waiting = {
+        room: sent - windowBytes,
+        done: (error) => {
+          clearTimeout(timer);
+          if (error) reject(error);
+          else resolve();
+        },
+      };
+    });
+  let begun = false;
+  try {
+    const { channel, chunkBytes, windowBytes } = await client.call("files.write.begin", { ...file, size: blob.size }, { signal });
+    begun = true;
+    for (let offset = 0; offset < blob.size; offset += chunkBytes) {
+      const bytes = new Uint8Array(await blob.slice(offset, offset + chunkBytes).arrayBuffer());
+      await room(offset + bytes.byteLength, windowBytes);
+      client.postFrame(hostFileFrame(channel, offset, bytes));
+    }
+    if (signal?.aborted) throw canceled();
+    return await client.call("files.write.commit", { id: file.id }, { timeoutMs: HOST_FILE_SAVE_TIMEOUT_MS });
+  } catch (error) {
+    if (begun || signal?.aborted) void client.call("files.write.cancel", { id: file.id }).catch(() => {});
+    throw error;
+  } finally {
+    stop();
+    signal?.removeEventListener("abort", onAbort);
+  }
 }

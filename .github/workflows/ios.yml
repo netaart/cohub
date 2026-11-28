@@ -7,6 +7,7 @@ on:
       - 'apps/desktop/macos/Sources/CohubCore/**'
       - 'apps/desktop/macos/Sources/CohubAppleAuth/**'
       - 'packages/protocol/host-bridge.json'
+      - 'apps/.swift-format'
       - '.github/workflows/ios.yml'
   push:
     branches:
@@ -18,6 +19,7 @@ on:
       - 'apps/desktop/macos/Sources/CohubCore/**'
       - 'apps/desktop/macos/Sources/CohubAppleAuth/**'
       - 'packages/protocol/host-bridge.json'
+      - 'apps/.swift-format'
       - '.github/workflows/ios.yml'
   workflow_dispatch:
 
@@ -32,6 +34,13 @@ env:
   DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
 
 jobs:
+  lint:
+    name: Swift style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: swift format lint --strict --recursive --parallel apps/ios apps/desktop/macos/Sources/CohubCore apps/desktop/macos/Sources/CohubAppleAuth
+
   build:
     name: Build (${{ matrix.scheme }})
     runs-on: macos-15

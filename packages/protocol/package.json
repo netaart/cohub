@@ -196,6 +196,11 @@
       "source": "./src/public-identifiers.ts",
       "types": "./dist/public-identifiers.d.ts",
       "default": "./dist/public-identifiers.js"
+    },
+    "./native-apps": {
+      "source": "./src/native-apps.ts",
+      "types": "./dist/native-apps.d.ts",
+      "default": "./dist/native-apps.js"
     }
   },
   "types": "./dist/index.d.ts",

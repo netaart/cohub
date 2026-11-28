@@ -6,9 +6,13 @@ import {
 	type HostFileSaveParams,
 	hostFileProgressSchema,
 } from "@cohub/protocol/host-bridge";
-import { HostBridgeErrorClass } from "@neta-art/cohub/host-bridge";
+import {
+	HostBridgeErrorClass,
+	writeHostFile,
+} from "@neta-art/cohub/host-bridge";
 import {
 	callHost,
+	getHostBridge,
 	hostPlatform,
 	onHostEvent,
 	supportsHostCapability,
@@ -127,8 +131,8 @@ async function run(id: string, request: SaveRequest) {
 		const target = supportsHostCapability("files")
 			? await hostTarget(id, request, source)
 			: source;
-		if ("kind" in target) await saveInBrowser(id, request.name, target);
-		else await saveWithHost(id, target);
+		if (typeof target === "function") await saveWithHost(id, target);
+		else await saveInBrowser(id, request.name, target);
 	} catch (error) {
 		if (error instanceof HostBridgeErrorClass && error.isCanceled) {
 			dismiss(id);
@@ -140,7 +144,9 @@ async function run(id: string, request: SaveRequest) {
 	}
 }
 
-async function saveWithHost(id: string, params: HostFileSaveParams) {
+type HostSave = () => Promise<unknown>;
+
+async function saveWithHost(id: string, save: HostSave) {
 	update(id, { phase: "saving" });
 	const stop = onHostEvent((event) => {
 		if (event.name !== HOST_FILE_PROGRESS_EVENT) return;
@@ -153,9 +159,7 @@ async function saveWithHost(id: string, params: HostFileSaveParams) {
 		}
 	});
 	try {
-		const saved: unknown = await callHost("files.save", params, {
-			timeoutMs: HOST_FILE_SAVE_TIMEOUT_MS,
-		});
+		const saved = await save();
 		// Shells older than the `files.save` result announce the save themselves.
 		if (typeof saved !== "object" || saved === null) {
 			dismiss(id);
@@ -171,31 +175,45 @@ async function saveWithHost(id: string, params: HostFileSaveParams) {
 	}
 }
 
-/** Bytes too large for the bridge go back to the WebView, which desktop shells save natively. */
+const hostSave =
+	(params: HostFileSaveParams): HostSave =>
+	() =>
+		callHost("files.save", params, { timeoutMs: HOST_FILE_SAVE_TIMEOUT_MS });
+
 async function hostTarget(
 	id: string,
 	request: SaveRequest,
 	source: SaveSource,
-): Promise<HostFileSaveParams | SaveSource> {
-	const base = {
+): Promise<HostSave | SaveSource> {
+	const file = {
 		id,
 		name: request.name,
 		...(request.mimeType ? { mimeType: request.mimeType } : {}),
 	};
 	if (source.kind !== "blob" && /^https:/i.test(source.url)) {
-		return { ...base, url: source.url };
+		return hostSave({ ...file, url: source.url });
 	}
 	const blob =
 		source.kind === "blob"
 			? source.blob
 			: await (await fetch(source.url)).blob();
+	if (supportsHostCapability("files.blobUrl")) {
+		const blobUrl = URL.createObjectURL(blob);
+		return () =>
+			hostSave({ ...file, blobUrl })().finally(() =>
+				URL.revokeObjectURL(blobUrl),
+			);
+	}
+	if (supportsHostCapability("files.stream")) {
+		return () => writeHostFile(getHostBridge(), file, blob);
+	}
 	if (blob.size > MAX_INLINE_BYTES) {
 		if (DESKTOP_HOSTS.has(hostPlatform() ?? "unknown")) {
 			return { kind: "blob", blob };
 		}
 		throw new SaveError("tooLarge");
 	}
-	return { ...base, data: await toBase64(blob) };
+	return hostSave({ ...file, data: await toBase64(blob) });
 }
 
 async function saveInBrowser(id: string, name: string, source: SaveSource) {

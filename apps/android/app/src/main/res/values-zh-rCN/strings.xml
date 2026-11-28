@@ -54,4 +54,8 @@
     <string name="launch_offline_detail">网络恢复后会自动重试。</string>
     <string name="launch_failed">Cohub 加载失败</string>
     <string name="launch_retry">重试</string>
+    <string name="dialog_ok">确定</string>
+    <string name="dialog_cancel">取消</string>
+    <string name="dialog_leave">离开</string>
+    <string name="dialog_leave_message">要离开此页面吗？所做的更改可能不会保存。</string>
 </resources>

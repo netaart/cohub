@@ -56,12 +56,32 @@ data class FolderListing(
         put("label", label)
         put("parent", parent)
         put("spaceId", spaceId)
-        put("folders", buildJsonArray {
-            folders.forEach { add(buildJsonObject { put("name", it.name); put("path", it.path) }) }
-        })
-        put("volumes", buildJsonArray {
-            volumes.forEach { (dir, label) -> add(buildJsonObject { put("path", dir.path); put("label", label) }) }
-        })
+        put(
+            "folders",
+            buildJsonArray {
+                folders.forEach {
+                    add(
+                        buildJsonObject {
+                            put("name", it.name)
+                            put("path", it.path)
+                        },
+                    )
+                }
+            },
+        )
+        put(
+            "volumes",
+            buildJsonArray {
+                volumes.forEach { (dir, label) ->
+                    add(
+                        buildJsonObject {
+                            put("path", dir.path)
+                            put("label", label)
+                        },
+                    )
+                }
+            },
+        )
     }
 }
 

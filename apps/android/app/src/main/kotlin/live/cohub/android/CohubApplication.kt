@@ -6,27 +6,27 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import live.cohub.android.auth.Account
 import live.cohub.android.auth.AuthConfig
 import live.cohub.android.auth.AuthSession
 import live.cohub.android.auth.SealedCredentialStore
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import live.cohub.android.display.Activity
 import live.cohub.android.display.DeviceDisplay
-import live.cohub.android.helper.PhoneControl
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import live.cohub.android.files.FileSaver
+import live.cohub.android.helper.PhoneControl
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.LocalWorkspaces
 import live.cohub.android.runtime.RuntimeInstance
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.Proxy
 import java.time.Duration
 
@@ -90,6 +90,8 @@ class CohubApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        val startedAt = System.currentTimeMillis()
         scope.launch { auth.load() }
+        scope.launch(Dispatchers.IO) { files?.sweepPending(startedAt) }
     }
 }

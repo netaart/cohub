@@ -4,8 +4,13 @@ Cohub ships a web surface and native shells (Android, iOS, macOS, Windows and
 Linux). The bridge lends a web surface what a browser cannot have: the
 credential store, the OAuth round trip, deep links, and system integration.
 
-Contract: `packages/protocol/src/host-bridge.ts` (single source of truth), with
-its names in `packages/protocol/host-bridge.json` for native tests to pin.
+Contract: `packages/protocol/src/host-bridge.ts` (single source of truth).
+`pnpm --filter @cohub/protocol generate:host-bridge` writes every host's
+`HostProtocol` (Swift, Kotlin, C#) and `host-bridge.json` from it; a protocol
+test fails while one is stale. Deployments, app identities and navigation paths
+live in `packages/protocol/src/native-apps.json`, which also feeds Android Gradle,
+the iOS xcconfigs and the web's `assetlinks.json` / `apple-app-site-association`.
+`packages/protocol/fixtures/host-bridge.json` holds the envelope cases every host runs.
 Web client: `packages/sdk/src/host-bridge.ts`.
 Android: `apps/android/app/src/main/kotlin/live/cohub/android/host/`.
 iOS: `apps/ios/` (see its README).
@@ -36,7 +41,12 @@ immediately, so a browser pays nothing; with a silent host it gives up after
    side down a path that fails at runtime — worse than the browser fallback.
 3. **The web surface must run unchanged in a browser.** Every host branch is
    additive and behind a capability check.
-4. **Tokens never reach the WebView's storage.** The host keeps the only copy,
+4. **Accept what you can.** Web bundles deploy continuously and hosts update
+   slowly, so both sides drop fields they do not know instead of rejecting the
+   message; an unknown platform reads as `unknown`. Size, format and range limits
+   still hold. A new optional field that an older host would misread still needs
+   its own capability.
+5. **Tokens never reach the WebView's storage.** The host keeps the only copy,
    encrypted at rest; the web side asks per request.
 
 ## Methods
@@ -47,7 +57,7 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `auth.getAccessToken` | `auth.token` | `null` means "no session", not an error |
 | `auth.getSessionVersion` | `auth.token` | Bumps on any session change |
 | `auth.getSession` | `auth.session` | Identity for the cache partition key |
-| `auth.signIn` | `auth.signIn` | System browser + PKCE; returns immediately |
+| `auth.signIn` | `auth.signIn` | System browser + PKCE; returns immediately. With `auth.provider`, `provider` (`google`, `apple`, `facebook`) opens that provider directly, and `auth.flow` reports how it ended |
 | `auth.signOut` | `auth.token` | Clears the host store and revokes the grant, pushes `auth.signedOut`; the next sign-in prompts for login |
 | `notifications.register` | `notifications` | Asks the system for permission; `true` when notifications can show |
 | `notifications.show` | `notifications` | A system notification opening an in-app `path`; a later one with the same `id` replaces it |
@@ -68,11 +78,13 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `app.globalShortcut` | `app.globalShortcut` | ⌃⌥Space or Ctrl+Alt+Space brings the app forward; `enabled` changes it |
 | `app.about` | `app.about` | Shows the native About panel and returns without waiting for it to close: app, `web` (from the page) and, on hosts with a CLI, its version, the `cohub` on the terminal's PATH and each Runtime's version |
 | `share.take` | `share.incoming` | What another app shared here, once |
-| `share.readFile` | `share.incoming` | One shared file as base64, up to 12 MiB |
+| `share.readFile` | `share.incoming` | One shared file as base64, up to 12 MiB; hosts with `share.fileUrl` stream it at `hostShareFileUrl()` instead |
 | `appearance.set` | `appearance` | Edge color (`#rrggbb`) for the window and system bars |
 | `app.ready` | `launch` | First screen painted; the host lifts its launch screen |
 | `haptics.perform` | `haptics` | `tick`, `confirm`, `reject` or `longPress`, in the system's own feel |
-| `files.save` | `files` | Saves an https `url` (downloaded natively) or base64 `data` to shared storage |
+| `files.save` | `files` | Saves an https `url` (downloaded natively), a `blobUrl` of this document (`files.blobUrl`) or base64 `data` to shared storage |
+| `files.write.begin` / `commit` / `cancel` | `files.stream` | Saves a Blob sent as binary frames; see [Files](#files) |
+| `app.setLocale` | `app.locale` | The language of the host's own copy (`en`, `zh-CN`, or `null` for the system), kept for the next launch |
 | `navigation.interceptBack` | `navigation.back` | While enabled, system back emits `navigation.back` |
 | `shortcuts.push` | `shortcuts` | Launcher shortcut to an in-app path, ranked by recency |
 | `tabs.update` | `tabs` | Desktop: what only the page knows about its tab. `dirty` asks before the tab closes, `attention` marks it while out of sight, `captureKeys` hands the shell's tab keys to the page while it forwards keys to a remote screen. A new document starts clean |
@@ -86,6 +98,8 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `display.float` | `display.float` | Android: opens the floating indicator on an agent screen (`spaceId`, `display`); `false` when it cannot show |
 | `workspace.call` | `workspace` | One `fs.*` call on a Space this device's Runtime serves: `{result}` or the sandbox's `{error}`. `unavailable` means it never reached the Runtime, so the page uses the API |
 
+`auth.flow { outcome }` ends every sign-in a host with `auth.provider` started: `signedIn` just
+before it navigates, `canceled` when the person dismissed the browser, `failed` otherwise.
 `runtime.changed` pushes the whole `DeviceRuntime` on every change, `display.changed` the whole
 display status, and `display.open` asks the page to open a display (`spaceId`, `display`) in its Space. `display` rides on `runtime`; see [Displays](displays.md). Android advertises
 `runtime` only on Android 11+ builds that ship sandboxd; see
@@ -159,6 +173,19 @@ measurable (`adb logcat -s ActivityTaskManager` prints `Fully drawn`); iOS logs
 `First screen in … ms`. Desktop shells keep the plain rule: reveal on `app.ready`
 or after 2.5 s.
 
+## Dialogs and language
+
+Every host draws `alert`, `confirm` and `prompt` (and `beforeunload` where the
+platform has it) itself, with the same rules: one at a time, each answered once,
+cancelled when the page navigates, its process dies or the window closes, and
+titled with the asking frame's host when that is not Cohub, so an App in an
+iframe cannot pass for Cohub. On desktop, a tab that is not in front gets its
+answer as cancelled at once rather than covering the tab in front. The rules
+live in each shared core (`PageDialogs`).
+
+The page sends `app.setLocale` after the handshake and on every change; the host
+keeps it, so the launch screen of the next cold start already speaks it.
+
 ## Back
 
 A WebView alone maps back to history, so an open dialog or drawer would stay
@@ -175,8 +202,15 @@ A WebView ignores `<input type="file">` and `download` on its own. The host
 answers file inputs with the system Photo Picker when every accepted type is an
 image or video, otherwise the document picker; neither needs a permission. The
 page routes every `<a download>` (markup or programmatic) through `files.save`:
-https URLs are fetched by the host, so large media never crosses the bridge;
-`blob:` and `data:` bytes go inline as base64. Files land in
+https URLs are fetched by the host, so large media never crosses the bridge.
+In-page bytes take the cheapest path the host offers: iOS downloads the object
+URL itself (`files.blobUrl`); Android takes binary frames (`files.stream`:
+`files.write.begin` answers a `channel`, `chunkBytes` and `windowBytes`; each
+frame is `CHF1`, the channel and the byte offset, big-endian, then the data;
+`files.progress` acknowledges written bytes, and the page keeps at most
+`windowBytes` in flight; `writeHostFile` in the SDK does all of this). Only
+older hosts get base64. A failed or canceled stream leaves no partial file.
+Files land in
 `Pictures/Cohub`, `Movies/Cohub`, `Music/Cohub` or `Download/Cohub` by type,
 through MediaStore, which is why `files` needs Android 10. iOS adds images and
 videos to Photos (asking for add-only access the first time) and offers anything else,
@@ -216,6 +250,12 @@ application):
   scheme there would be claimable by any app.
 - `prompt=consent` with `offline_access`, as the web SDK sends, so Logto issues
   a refresh token.
+- With `auth.provider` the page offers Google, Apple, Facebook and email itself
+  and passes the choice as `direct_sign_in`, so the browser opens the provider
+  without Logto's page. On Android, Google signs in without a browser: Credential
+  Manager returns an ID token for Logto's Google One Tap client, which a hidden
+  WebView hands to Logto with the same PKCE request; anything that needs a
+  person there falls back to the browser. The token stays in memory.
 - The App Link fails when its verification did (no Google services, unreachable
   verifier) or when the browser will not hand over a redirect the user did not
   trigger. The web route then renders a no-JS "Open the app" page; on Android its
@@ -230,7 +270,7 @@ GTK 4, libadwaita, WebKitGTK) shells load the web origin like Android does, and 
 - **Shell methods** stay native: windows and `tabs`, `appearance`, `navigation`, `share` (macOS,
   Windows), `files` (macOS; Windows and Linux keep the WebView's own downloads), `cache`
   (macOS, Windows), `notifications`, `shortcuts` (Dock menu, Jump List, launcher actions),
-  `media.capture`, `runtime.pickFolder`, and `launch`.
+  `media.capture`, `runtime.pickFolder`, `app.locale`, page dialogs, and `launch`.
 - **Account, Runtime and screen methods** are forwarded verbatim to the bundled CLI,
   `cohub host serve`, over stdio (one JSON message per line). It answers `auth.*` from
   the CLI's own session, so signing in on the desktop signs in the terminal too and
@@ -261,10 +301,9 @@ leaves the CLI's session file; the page asks for it per request, like on Android
 ## Adding a method
 
 1. Add it to `HOST_BRIDGE_METHODS` with params and result schemas.
-2. Implement it in the host; add the capability to `HostCapabilities.advertised`.
+2. Implement it in the host and advertise its capability only where it works.
 3. Add the web-side caller behind `supportsHostCapability()`.
-4. Mirror the constant in `HostProtocol.kt` so `HostProtocolTest` passes, and run
-   `pnpm --filter @cohub/protocol generate:host-bridge`; the macOS, iOS and Windows shells
-   pin their names against `host-bridge.json`, and a protocol test fails until it is current.
+4. Run `pnpm --filter @cohub/protocol generate:host-bridge` and use the generated names;
+   never write a wire string by hand.
 5. A method only the CLI can answer goes in `packages/cli/src/host/serve.ts`;
    desktop shells forward it without changes.

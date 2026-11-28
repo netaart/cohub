@@ -50,23 +50,31 @@ object AuthorizationRequest {
     // otherwise return the same account without asking.
     private const val PROMPT_LOGIN = "login consent"
 
-    fun build(
-        endpoint: String,
+    fun parameters(
         appId: String,
         redirectUri: String,
         resource: String,
         challenge: Pkce.Challenge,
         state: String,
         forceLogin: Boolean = false,
-    ): Uri = (endpoint.trimEnd('/') + "/oidc/auth").toUri().buildUpon()
-        .appendQueryParameter("client_id", appId)
-        .appendQueryParameter("redirect_uri", redirectUri)
-        .appendQueryParameter("response_type", "code")
-        .appendQueryParameter("scope", SCOPES)
-        .appendQueryParameter("prompt", if (forceLogin) PROMPT_LOGIN else PROMPT)
-        .appendQueryParameter("resource", resource)
-        .appendQueryParameter("code_challenge", challenge.challenge)
-        .appendQueryParameter("code_challenge_method", challenge.method)
-        .appendQueryParameter("state", state)
-        .build()
+        provider: String? = null,
+        googleCredential: String? = null,
+    ): List<Pair<String, String>> = listOfNotNull(
+        "client_id" to appId,
+        "redirect_uri" to redirectUri,
+        "response_type" to "code",
+        "scope" to SCOPES,
+        "prompt" to if (forceLogin) PROMPT_LOGIN else PROMPT,
+        "resource" to resource,
+        "code_challenge" to challenge.challenge,
+        "code_challenge_method" to challenge.method,
+        "state" to state,
+        provider?.let { "direct_sign_in" to "social:$it" },
+        googleCredential?.let { "google_one_tap_credential" to it },
+    )
+
+    fun build(endpoint: String, parameters: List<Pair<String, String>>): Uri =
+        (endpoint.trimEnd('/') + "/oidc/auth").toUri().buildUpon()
+            .apply { for ((name, value) in parameters) appendQueryParameter(name, value) }
+            .build()
 }

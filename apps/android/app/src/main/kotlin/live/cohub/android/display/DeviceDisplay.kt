@@ -131,14 +131,17 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
                 if (displayId == Display.DEFAULT_DISPLAY && agents.value.isNotEmpty()) phone.helper.value?.runCatching { syncAudio() }
             }
         }
-        displays.registerDisplayListener(object : DisplayManager.DisplayListener {
-            override fun onDisplayAdded(displayId: Int) = Unit
-            override fun onDisplayRemoved(displayId: Int) = Unit
-            override fun onDisplayChanged(displayId: Int) {
-                servedOn(displayId)?.screen?.resize(sizeOf(displayId) ?: return)
-                bump()
-            }
-        }, Handler(Looper.getMainLooper()))
+        displays.registerDisplayListener(
+            object : DisplayManager.DisplayListener {
+                override fun onDisplayAdded(displayId: Int) = Unit
+                override fun onDisplayRemoved(displayId: Int) = Unit
+                override fun onDisplayChanged(displayId: Int) {
+                    servedOn(displayId)?.screen?.resize(sizeOf(displayId) ?: return)
+                    bump()
+                }
+            },
+            Handler(Looper.getMainLooper()),
+        )
         scope.launch {
             while (isActive) {
                 delay(IDLE_CHECK_MS)
@@ -344,7 +347,19 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
             .sortedBy { it.second.lowercase() }
             .take(DisplayVocabulary.MAX_APPS)
         return buildJsonObject {
-            put("apps", buildJsonArray { apps.forEach { (id, name) -> add(buildJsonObject { put("id", id); put("name", name) }) } })
+            put(
+                "apps",
+                buildJsonArray {
+                    apps.forEach { (id, name) ->
+                        add(
+                            buildJsonObject {
+                                put("id", id)
+                                put("name", name)
+                            },
+                        )
+                    }
+                },
+            )
         }
     }
 
@@ -385,7 +400,11 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
 
     private fun setHandover(served: Served, ask: HandoverAsk?) {
         served.handover = ask
-        if (ask != null) phone.notifyHandover(ask.reason) else if (served().none { it.handover != null }) phone.cancelHandover()
+        if (ask != null) {
+            phone.notifyHandover(ask.reason)
+        } else if (served().none { it.handover != null }) {
+            phone.cancelHandover()
+        }
     }
 
     internal fun takeOverAsked() {

@@ -292,7 +292,9 @@ internal sealed class ShellWindow : Window
         return Confirm(heading, Strings.L("Your changes will be lost."), Strings.L("Close"), System.Windows.Forms.TaskDialogIcon.Warning);
     }
 
-    private bool Confirm(string heading, string text, string accept, System.Windows.Forms.TaskDialogIcon icon)
+    private bool Confirm(string heading, string text, string accept, System.Windows.Forms.TaskDialogIcon icon) => Confirm(Handle, heading, text, accept, icon);
+
+    public static bool Confirm(IntPtr owner, string heading, string text, string accept, System.Windows.Forms.TaskDialogIcon icon)
     {
         var button = new System.Windows.Forms.TaskDialogButton(accept);
         var page = new System.Windows.Forms.TaskDialogPage
@@ -301,10 +303,34 @@ internal sealed class ShellWindow : Window
             Heading = heading,
             Text = text,
             Icon = icon,
-            Buttons = { button, System.Windows.Forms.TaskDialogButton.Cancel },
+            AllowCancel = true,
+            Buttons = { button, new System.Windows.Forms.TaskDialogButton(Strings.L("Cancel")) },
             DefaultButton = button,
         };
-        return System.Windows.Forms.TaskDialog.ShowDialog(Handle, page) == button;
+        return System.Windows.Forms.TaskDialog.ShowDialog(owner, page) == button;
+    }
+
+    public void ShowPageDialog(PageDialogs.Dialog dialog, PageDialogKind kind, string? title, string message, string? text)
+    {
+        if (kind == PageDialogKind.Prompt)
+        {
+            var prompt = new PromptWindow(Palette.Edge, title, message, text) { Owner = this };
+            if (dialog.Showing(prompt.Close)) dialog.Settle(prompt.ShowDialog() == true, prompt.Answer);
+            return;
+        }
+        var leaving = kind == PageDialogKind.BeforeUnload;
+        var accept = new System.Windows.Forms.TaskDialogButton(Strings.L(leaving ? "Leave" : "OK"));
+        var page = new System.Windows.Forms.TaskDialogPage
+        {
+            Caption = "Cohub",
+            Heading = leaving ? Strings.L("Leave this page?") : title,
+            Text = leaving ? Strings.L("Changes you made may not be saved.") : message,
+            AllowCancel = true,
+            Buttons = { accept },
+            DefaultButton = accept,
+        };
+        if (kind != PageDialogKind.Alert) page.Buttons.Add(new System.Windows.Forms.TaskDialogButton(Strings.L("Cancel")));
+        if (dialog.Showing(() => page.BoundDialog?.Close())) dialog.Settle(System.Windows.Forms.TaskDialog.ShowDialog(Handle, page) == accept);
     }
 
     protected override void OnClosing(CancelEventArgs e)

@@ -1,26 +1,20 @@
+import {
+	browserOnlyPatterns,
+	NATIVE_APPS,
+	nativeDeployment,
+} from "@cohub/protocol/native-apps";
 import type { RequestHandler } from "@sveltejs/kit";
 import { PUBLIC_COHUB_ENV } from "$app/env/public";
 
-const APPLE_TEAM_ID = "6RKNFNT44H";
-
-const STORE_BUNDLE_IDS: Record<string, string> = {
-	dev: "live.cohub.ios.dev",
-	prod: "live.cohub.ios",
-};
-
-const env = PUBLIC_COHUB_ENV?.trim().toLowerCase() ?? "";
-const bundleId = STORE_BUNDLE_IDS[env];
-const apps = APPLE_TEAM_ID && bundleId ? [`${APPLE_TEAM_ID}.${bundleId}`] : [];
+const bundleId = nativeDeployment(PUBLIC_COHUB_ENV)?.ios.bundleId;
+const apps = bundleId ? [`${NATIVE_APPS.appleTeamId}.${bundleId}`] : [];
 
 const association = {
 	applinks: {
 		details: apps.map((appID) => ({
 			appIDs: [appID],
 			components: [
-				{ "/": "/callback*", exclude: true },
-				{ "/": "/app-auth*", exclude: true },
-				{ "/": "/mobile/*", exclude: true },
-				{ "/": "/*/*/w/*", exclude: true },
+				...browserOnlyPatterns().map((path) => ({ "/": path, exclude: true })),
 				{ "/": "/*" },
 			],
 		})),
