@@ -16,7 +16,16 @@ import {
   parseBoardScriptInputs,
   selectBoardExportAssets,
 } from "@neta-art/cohub/board";
-import { boardExportShaders, boardExportUsesDepth, createBoardExportScene, prepareBoardExport, renderBoardExport } from "@neta-art/cohub/board/export";
+import {
+  type BoardExportOptions,
+  type BoardExportResult,
+  boardExportShaders,
+  boardExportUsesDepth,
+  createBoardExportScene,
+  prepareBoardExport,
+  renderBoardExport,
+  renderBoardExportPixels,
+} from "@neta-art/cohub/board/export";
 import {
   type BoardDepthStage,
   type BoardScriptCost,
@@ -167,14 +176,7 @@ async function modelStill(item: BoardSceneItem): Promise<Texture | null> {
   return new Texture({ source: new ImageSource({ resource: image, alphaMode: "premultiply-alpha-on-upload" }) });
 }
 
-async function upload(canvas: HTMLCanvasElement, info: BoardBrowserFrameInfo, format: BoardBrowserFrame["format"], quality?: number, ahead?: () => void): Promise<void> {
-  let body: Blob | ArrayBuffer | null;
-  if (format === "rgba") {
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("The browser could not read the frame.");
-    body = context.getImageData(0, 0, canvas.width, canvas.height).data.buffer as ArrayBuffer;
-  } else body = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, `image/${format}`, quality));
-  if (!body) throw new Error("The browser could not encode the frame.");
+async function upload(body: Blob | Uint8ClampedArray<ArrayBuffer>, info: BoardBrowserFrameInfo, ahead?: () => void): Promise<void> {
   const json = new TextEncoder().encode(JSON.stringify(info));
   const length = new Uint8Array(4);
   new DataView(length.buffer).setUint32(0, json.byteLength, true);
@@ -182,6 +184,24 @@ async function upload(canvas: HTMLCanvasElement, info: BoardBrowserFrameInfo, fo
   ahead?.();
   const response = await sent;
   if (!response.ok) throw new Error((await response.text()) || "The frame was not received.");
+}
+
+type EncodedFrame = { body: Blob | Uint8ClampedArray<ArrayBuffer>; width: number; height: number } & Pick<BoardExportResult, "plan" | "warnings">;
+
+function rgbaFrame(renderer: Renderer, board: BoardDocument, options: BoardExportOptions): EncodedFrame | null {
+  const result = renderBoardExportPixels(renderer, board, options);
+  if (!result) return null;
+  const { data, width, height } = result.pixels;
+  return { body: data as Uint8ClampedArray<ArrayBuffer>, width, height, plan: result.plan, warnings: result.warnings };
+}
+
+async function encodedFrame(renderer: Renderer, board: BoardDocument, options: BoardExportOptions, format: Exclude<BoardBrowserFrame["format"], "rgba">, quality?: number): Promise<EncodedFrame | null> {
+  const result = renderBoardExport(renderer, board, options);
+  if (!result) return null;
+  const canvas = result.canvas as unknown as HTMLCanvasElement;
+  const body = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, `image/${format}`, quality));
+  if (!body) throw new Error("The browser could not encode the frame.");
+  return { body, width: canvas.width, height: canvas.height, plan: result.plan, warnings: result.warnings };
 }
 
 type Draw = BoardBrowserFrame & {
@@ -220,7 +240,7 @@ async function draw(target: Renderer, input: Draw): Promise<BoardBrowserFrameInf
   const lifted = boardExportUsesDepth(prepared) ? await depthStage(target) : undefined;
   const drawn = lifted ? await objectModels(prepared.plan.items) : undefined;
   const shaded = boardExportShaders(prepared, input.scripts?.shaders?.(prepared.document, time ?? 0) ?? []).length > 0;
-  const result = renderBoardExport(lifted || shaded ? target : await flatRenderer(), document, {
+  const exportOptions = {
     ...options,
     ...input.theme,
     background: input.background,
@@ -229,20 +249,27 @@ async function draw(target: Renderer, input: Draw): Promise<BoardBrowserFrameInf
     backgroundTexture: input.background === "paper" ? (background ?? undefined) : undefined,
     shaderLayers: input.layers,
     ...(lifted ? { depth: lifted, models: drawn } : {}),
-  });
-  freeRetired();
-  if (!result) throw new Error("Nothing to export: the region contains no items.");
-  const canvas = result.canvas as unknown as HTMLCanvasElement;
+  };
+  const frameRenderer = lifted || shaded ? target : await flatRenderer();
+  let frame: EncodedFrame | null;
+  try {
+    frame = input.format === "rgba"
+      ? rgbaFrame(frameRenderer, document, exportOptions)
+      : await encodedFrame(frameRenderer, document, exportOptions, input.format, input.quality);
+  } finally {
+    freeRetired();
+  }
+  if (!frame) throw new Error("Nothing to export: the region contains no items.");
   const info: BoardBrowserFrameInfo = {
     time,
-    width: canvas.width,
-    height: canvas.height,
-    scale: result.plan.scale,
-    itemCount: result.plan.items.length,
-    warnings: result.warnings,
+    width: frame.width,
+    height: frame.height,
+    scale: frame.plan.scale,
+    itemCount: frame.plan.items.length,
+    warnings: frame.warnings,
     media: boardTimedMedia(prepared.scene),
   };
-  await upload(canvas, info, input.format, input.quality, input.ahead);
+  await upload(frame.body, info, input.ahead);
   return info;
 }
 

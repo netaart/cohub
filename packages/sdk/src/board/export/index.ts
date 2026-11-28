@@ -95,6 +95,12 @@ export type BoardExportResult = {
   warnings: BoardExportWarning[];
 };
 
+export type BoardExportPixelsResult = {
+  pixels: { data: Uint8ClampedArray; width: number; height: number };
+  plan: BoardExportPlan;
+  warnings: BoardExportWarning[];
+};
+
 function resolveBackdrop(options: BoardExportOptions, document: BoardDocument, theme: BoardBackdropTheme): BoardBackdrop | null {
   if (options.background === "transparent") return null;
   const backdrop = resolveBoardBackdrop(document.board, theme, "export");
@@ -164,11 +170,29 @@ export function boardExportUsesDepth({ scene, plan, camera }: PreparedBoardExpor
 
 export function boardExportShaders({ scene, plan }: PreparedBoardExport, owners: readonly BoardShaderOwner[]): BoardShaderOwner[] {
   const planned = new Set(plan.items.map((item) => item.id));
-  return owners.filter(({ id, root, output: { shader, passes } }) => Boolean(shader?.state)
-    || (Boolean(shader?.passes.some((pass) => boardShaderPassOn(pass, passes))) && (root || (planned.has(id) && scene.opacity(id) > 0))));
+  return owners.filter(({ id, root, output: { shader, passes } }) => (root || planned.has(id)) && (Boolean(shader?.state)
+    || (Boolean(shader?.passes.some((pass) => boardShaderPassOn(pass, passes))) && (root || scene.opacity(id) > 0))));
 }
 
 export function renderBoardExport(renderer: Renderer, input: BoardDocument, options: BoardExportOptions = {}): BoardExportResult | null {
+  const result = renderBoardExportWith(renderer, input, options, (texture) => renderer.texture.generateCanvas(texture));
+  return result && { canvas: result.output, plan: result.plan, warnings: result.warnings };
+}
+
+export function renderBoardExportPixels(renderer: Renderer, input: BoardDocument, options: BoardExportOptions = {}): BoardExportPixelsResult | null {
+  const result = renderBoardExportWith(renderer, input, options, (texture) => {
+    const { pixels, width, height } = renderer.texture.getPixels(texture);
+    return { data: pixels, width, height };
+  });
+  return result && { pixels: result.output, plan: result.plan, warnings: result.warnings };
+}
+
+function renderBoardExportWith<T>(
+  renderer: Renderer,
+  input: BoardDocument,
+  options: BoardExportOptions,
+  read: (texture: Texture) => T,
+): { output: T; plan: BoardExportPlan; warnings: BoardExportWarning[] } | null {
   const prepared = prepareBoardExport(input, options);
   if (!prepared) return null;
   const { document, scene, plan, sampler, camera } = prepared;
@@ -211,10 +235,10 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
       antialias: true,
       clearColor: options.background === "transparent" ? undefined : palette.bg,
     });
-    let canvas: ICanvas;
+    let output: T;
     const surface = renderer.type === RendererType.CANVAS ? texture.source.resource as ICanvas : undefined;
     try {
-      canvas = renderer.texture.generateCanvas(texture);
+      output = read(texture);
     } finally {
       texture.destroy(true);
       // CanvasRenderer drops the source reference but does not release its native surface.
@@ -254,7 +278,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     const cards = plan.items.filter((item) => isBoardModelObject(item) && scene.opacity(item.id) > 0 && !drawn?.has(item.id)).map((item) => item.id);
     if (cards.length) warnings.push({ kind: "models-flat", ids: cards });
     for (const miss of boardShaderMisses(scene, plan, owners, exportScene.shaderErrors)) warnings.push({ kind: "shader-hidden", ...miss });
-    return { canvas, plan, warnings };
+    return { output, plan, warnings };
   } finally {
     exportScene.destroy();
     flattened?.();
