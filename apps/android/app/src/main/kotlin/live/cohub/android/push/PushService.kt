@@ -5,7 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.net.toUri
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -21,12 +20,12 @@ class PushService : FirebaseMessagingService() {
         val title = data["title"]?.takeIf { it.isNotBlank() } ?: return
         val path = data["path"]?.takeIf { it.startsWith("/") && !it.startsWith("//") } ?: "/spaces/inbox"
         val tag = data["tag"] ?: data["id"] ?: path
-        val manager = NotificationManagerCompat.from(this)
+        val manager = getSystemService(NotificationManager::class.java)
         if (!manager.areNotificationsEnabled()) return
         val auth = (application as CohubApplication).auth
         val signedIn = runBlocking { auth.status() }
         if (!signedIn.authenticated || signedIn.subject != data["subject"]) return
-        ensureChannel()
+        ensureChannel(manager)
         val open = PendingIntent.getActivity(
             this,
             tag.hashCode(),
@@ -49,8 +48,7 @@ class PushService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) = Unit
 
-    private fun ensureChannel() {
-        val manager = getSystemService(NotificationManager::class.java)
+    private fun ensureChannel(manager: NotificationManager) {
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, getString(R.string.notifications_channel), NotificationManager.IMPORTANCE_HIGH))
     }
