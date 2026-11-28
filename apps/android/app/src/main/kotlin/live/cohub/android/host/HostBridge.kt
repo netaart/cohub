@@ -55,6 +55,7 @@ class HostBridge(
     private val files: FileSaver? = null,
     private val display: DeviceDisplay? = null,
     private val workspaces: LocalWorkspaces? = null,
+    private val pushToken: (suspend () -> String?)? = null,
 ) {
     private val streaming = lazy {
         if (files != null && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER)) FileStreams(files) else null
@@ -67,7 +68,8 @@ class HostBridge(
             (if (runtime != null && workspaces != null) setOf(HostProtocol.Methods.WORKSPACE_CALL) else emptySet()) +
             (if (runtime != null && display != null) DISPLAY_METHODS else emptySet()) +
             (if (files != null) setOf(HostProtocol.Methods.FILES_SAVE, HostProtocol.Methods.FILES_REVEAL) else emptySet()) +
-            (if (streams != null) STREAM_METHODS else emptySet())
+            (if (streams != null) STREAM_METHODS else emptySet()) +
+            (if (pushToken != null) setOf(HostProtocol.Methods.NOTIFICATIONS_SUBSCRIBE) else emptySet())
     }
 
     @Volatile
@@ -148,7 +150,7 @@ class HostBridge(
             put(
                 "capabilities",
                 buildJsonArray {
-                    HostCapabilities.advertised(runtime = runtime != null, files = files != null, display = display != null, fileStream = streams != null)
+                    HostCapabilities.advertised(runtime = runtime != null, files = files != null, display = display != null, fileStream = streams != null, push = pushToken != null)
                         .forEach { add(JsonPrimitive(it)) }
                 },
             )
@@ -296,6 +298,19 @@ class HostBridge(
         HostProtocol.Methods.PERMISSIONS_STATUS -> actions.permissions().status()
 
         HostProtocol.Methods.PERMISSIONS_REQUEST -> JsonPrimitive(actions.permissions().request(requireKind(params)))
+
+        HostProtocol.Methods.NOTIFICATIONS_SUBSCRIBE -> {
+            val granted = actions.permissions().requestNotifications() == "granted"
+            val token = if (granted) pushToken?.invoke() else null
+            if (token == null) {
+                JsonNull
+            } else {
+                buildJsonObject {
+                    put("transport", "fcm")
+                    put("token", token)
+                }
+            }
+        }
 
         HostProtocol.Methods.PERMISSIONS_OPEN_SETTINGS -> JsonPrimitive(actions.permissions().openSettings(requireKind(params)))
 

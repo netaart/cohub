@@ -54,6 +54,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import live.cohub.android.auth.Account
@@ -85,6 +86,7 @@ import live.cohub.android.host.WebSurface
 import live.cohub.android.host.WebWarmup
 import live.cohub.android.media.LocationAccess
 import live.cohub.android.media.MediaCapture
+import live.cohub.android.push.Push
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.RuntimeService
 import live.cohub.android.runtime.toJson
@@ -226,6 +228,7 @@ class MainActivity :
             files = app.files,
             display = app.display,
             workspaces = runtime?.takeIf { it.available }?.let { app.workspaces },
+            pushToken = if (Push.configured) ({ Push.token(applicationContext) }) else null,
         )
         fileChooser = FileChooser(this)
         mediaCapture = MediaCapture(this)
@@ -538,6 +541,7 @@ class MainActivity :
 
     override suspend fun signOut() {
         hostPrefs.edit { putBoolean(KEY_FORCE_LOGIN, true) }
+        withTimeoutOrNull(3_000) { Push.forget(applicationContext) }
         auth.signOut()
         google.forget()
     }

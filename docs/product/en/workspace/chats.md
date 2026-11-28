@@ -67,7 +67,13 @@ Prompt templates can reference the current context with `{{cohub.session.id}}`, 
 
 Use `@space` mentions when the Agent should pull context from another Space you can access. Paste a public App URL to create an App mention that the Agent can resolve or download.
 
+Type `@` and pick a member of the Space to mention a person: they get a notification in their inbox, and a push or an email if they turned those on. Only people who can open the Chat are notified.
+
 Mentions are for deliberate context references, not every message.
+
+### Notifications
+
+The inbox collects mentions and the tasks you started that finished or failed; repeated updates in one Chat fold into one entry. Opening a Chat marks its notifications read on every device. Choose push and email per kind in **Settings › Notifications**.
 
 ### Replies from other Spaces
 

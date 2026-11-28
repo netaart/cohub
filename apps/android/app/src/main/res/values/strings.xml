@@ -7,6 +7,7 @@
     <string name="file_saved">Saved to %1$s</string>
     <string name="file_save_failed">Couldn\'t save the file.</string>
     <string name="runtime_channel">Local Runtime</string>
+    <string name="notifications_channel">Notifications</string>
     <string name="runtime_title">Cohub is connected to this device</string>
     <plurals name="runtime_ready">
         <item quantity="one">Agents can work in %d folder.</item>

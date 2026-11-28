@@ -1,3 +1,4 @@
+import { USER_MENTION_URI_PREFIX } from "@cohub/protocol";
 import {
 	buildAppMentionHref,
 	buildAppMentionUri,
@@ -25,6 +26,13 @@ export type ResourceMentionTextToken =
 			href: string;
 	  }
 	| {
+			type: "userMention";
+			label: string;
+			userUuid: string;
+			raw: string;
+			uri: string;
+	  }
+	| {
 			type: "appMention";
 			label: string;
 			username: string;
@@ -37,7 +45,7 @@ export type ResourceMentionTextToken =
 	  };
 
 const RESOURCE_MENTION_PATTERN =
-	/@\[([^\]\n]+)\]\((cohub:\/\/(?:spaces|apps)\/[^\s)]+)\)/g;
+	/@\[([^\]\n]+)\]\((cohub:\/\/(?:spaces|apps|users)\/[^\s)]+)\)/g;
 const VALID_MENTION_PREFIX_PATTERN = /[\s([{<:,;!?，。！？、；：]/;
 
 function isMentionBoundary(text: string, index: number) {
@@ -61,7 +69,8 @@ export function tokenizeResourceMentionText(
 		const uri = match[2] ?? "";
 		const space = parseSpaceMentionUri(uri);
 		const app = parseAppMentionUri(uri);
-		if (!raw || !label || (!space && !app)) {
+		const userUuid = parseUserMentionUri(uri);
+		if (!raw || !label || (!space && !app && !userUuid)) {
 			tokens.push({ type: "text", text: raw });
 		} else if (space) {
 			tokens.push({
@@ -73,6 +82,8 @@ export function tokenizeResourceMentionText(
 				uri: buildSpaceMentionUri(space.spaceId, space.sessionId),
 				href: buildSpaceMentionHref(space.spaceId, space.sessionId),
 			});
+		} else if (userUuid) {
+			tokens.push({ type: "userMention", label, userUuid, raw, uri });
 		} else if (app) {
 			tokens.push({
 				type: "appMention",
@@ -88,6 +99,12 @@ export function tokenizeResourceMentionText(
 	if (cursor < text.length)
 		tokens.push({ type: "text", text: text.slice(cursor) });
 	return tokens;
+}
+
+export function parseUserMentionUri(uri: string): string | null {
+	if (!uri.startsWith(USER_MENTION_URI_PREFIX)) return null;
+	const id = uri.slice(USER_MENTION_URI_PREFIX.length);
+	return /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : null;
 }
 
 export function formatResourceMentionTextForDisplay(text: string) {

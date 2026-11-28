@@ -310,6 +310,7 @@ async function upsertUserProfile(input: {
     username: fields.username,
     displayName: fields.displayName,
     avatarUrl: fields.avatarUrl,
+    email: deliverableEmail(fields.source),
     source: fields.source,
     syncedAt: now,
     updatedAt: now,
@@ -368,6 +369,11 @@ function emailFromSource(source: Record<string, unknown>): string | null {
   );
 }
 
+function deliverableEmail(source: Record<string, unknown>): string | null {
+  const email = emailFromSource(source);
+  return email && email.length <= 320 && email.includes("@") ? email : null;
+}
+
 function emailFromAuthUser(user: AuthUser): string | null {
   return typeof user.email === "string" && user.email.trim() ? user.email.trim() : null;
 }
@@ -378,12 +384,12 @@ export async function resolveCurrentUserEmail(user: AuthUser): Promise<string | 
   if (fromAuth) return fromAuth;
 
   const [row] = await db
-    .select({ source: userProfiles.source })
+    .select({ email: userProfiles.email, source: userProfiles.source })
     .from(userProfiles)
     .where(eq(userProfiles.userUuid, user.uuid))
     .limit(1);
   if (!row) return null;
-  return emailFromSource(asRecord(row.source));
+  return row.email ?? emailFromSource(asRecord(row.source));
 }
 
 function mergeAuthEmailIntoFields(user: AuthUser, fields: UserProfileFields): UserProfileFields {

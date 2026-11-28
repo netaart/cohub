@@ -52,6 +52,13 @@ val logtoApiResource: String = prop("cohubLogtoApiResource") ?: nativeApps["logt
 @Suppress("UNCHECKED_CAST")
 val oauthRedirectPath: String = prop("cohubOauthRedirectPath") ?: (nativeApps["paths"] as Map<String, Any?>)["authCallback"] as String
 
+val fcm = mapOf(
+    "FCM_APP_ID" to "cohubFcmAppId",
+    "FCM_PROJECT_ID" to "cohubFcmProjectId",
+    "FCM_API_KEY" to "cohubFcmApiKey",
+    "FCM_SENDER_ID" to "cohubFcmSenderId",
+).mapValues { (_, property) -> prop(property) ?: "" }
+
 val cliVersion: String = Regex("\"version\"\\s*:\\s*\"([^\"]+)\"")
     .find(repoRoot.resolve("packages/cli/package.json").readText())?.groupValues?.get(1) ?: ""
 val commit: String = runCatching {
@@ -94,6 +101,7 @@ android {
         buildConfigField("boolean", "PLAY_BUILD", "false")
         buildConfigField("String", "CLI_VERSION", "\"$cliVersion\"")
         buildConfigField("String", "COMMIT", "\"$commit\"")
+        fcm.forEach { (field, value) -> buildConfigField("String", field, "\"$value\"") }
     }
 
     buildFeatures {
@@ -319,6 +327,7 @@ dependencies {
     implementation(libs.androidx.credentials.play.services)
     implementation(libs.googleid)
     implementation(libs.androidx.fragment)
+    implementation(libs.firebase.messaging)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)

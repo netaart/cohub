@@ -56,6 +56,7 @@ import { APP_AREA_ICONS, appAreaLabel } from "#lib/components/app-area.ts";
 import ChannelProviderIcon from "#lib/components/ChannelProviderIcon.svelte";
 import EntityIcon from "#lib/components/EntityIcon.svelte";
 import NewLabelPopover from "#lib/components/NewLabelPopover.svelte";
+import NotificationBell from "#lib/components/notifications/NotificationBell.svelte";
 import SessionRow from "#lib/components/SessionRow.svelte";
 import SidebarFlyout from "#lib/components/SidebarFlyout.svelte";
 import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
@@ -3215,6 +3216,7 @@ $effect(() => {
       >
         <EntityIcon name="search" class="h-4 w-4" />
       </button>
+      <div class="mt-1"><NotificationBell variant="rail" /></div>
       <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
       <nav class="mt-2 flex flex-col items-center gap-1" aria-label={m.nav_tabs_aria({}, { locale })}>
         {#each DESKTOP_APP_AREAS as item (item)}
@@ -3471,6 +3473,9 @@ $effect(() => {
           <span class="font-mono text-[11px] tracking-[0.02em]" aria-hidden="true">⌘K</span>
         {/if}
       </button>
+      {#if !isMobile}
+        <NotificationBell />
+      {/if}
       {#if isMobile}
         <a
           href={buildSessionsRoute()}

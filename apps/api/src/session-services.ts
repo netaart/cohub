@@ -20,7 +20,7 @@ import { resolvePromptModelCredential } from "./llm/models.js";
 import { enqueueReferences } from "./reference-index-queue.js";
 import { getRuntimeRegistration } from "./runtime.js";
 import { spaceWalletBilling } from "./space-wallet-billing.js";
-import { onTurnSettled } from "./turn-settled.js";
+import { onTurnSettled, onTurnWritten } from "./turn-settled.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -106,6 +106,7 @@ export function getSessionDomainServices(input?: {
       await dispatchTurnUpdated({ spaceId, sessionId: turn.sessionId, turn });
     },
     onSessionTurnSettled: onTurnSettled,
+    onUserMentionWritten: onTurnWritten,
     onSessionActivityUpdated: async ({ sessionId, changed }) => {
       const session = await getSpaceSessionById(sessionId);
       if (!session) return;

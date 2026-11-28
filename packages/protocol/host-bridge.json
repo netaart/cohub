@@ -36,7 +36,8 @@
     "auth.provider",
     "files.blobUrl",
     "files.stream",
-    "share.fileUrl"
+    "share.fileUrl",
+    "notifications.push"
   ],
   "methods": [
     "host.describe",
@@ -47,6 +48,7 @@
     "auth.signOut",
     "notifications.register",
     "notifications.show",
+    "notifications.subscribe",
     "share.text",
     "navigation.openPath",
     "cache.clear",

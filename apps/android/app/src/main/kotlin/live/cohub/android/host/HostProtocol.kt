@@ -58,6 +58,7 @@ object HostProtocol {
         const val FILES_BLOB_URL = "files.blobUrl"
         const val FILES_STREAM = "files.stream"
         const val SHARE_FILE_URL = "share.fileUrl"
+        const val NOTIFICATIONS_PUSH = "notifications.push"
     }
 
     object Methods {
@@ -69,6 +70,7 @@ object HostProtocol {
         const val AUTH_SIGN_OUT = "auth.signOut"
         const val NOTIFICATIONS_REGISTER = "notifications.register"
         const val NOTIFICATIONS_SHOW = "notifications.show"
+        const val NOTIFICATIONS_SUBSCRIBE = "notifications.subscribe"
         const val SHARE_TEXT = "share.text"
         const val NAVIGATION_OPEN_PATH = "navigation.openPath"
         const val CACHE_CLEAR = "cache.clear"

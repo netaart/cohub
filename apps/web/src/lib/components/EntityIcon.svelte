@@ -1,6 +1,7 @@
 <script lang="ts" module>
 import {
 	AudioLines,
+	Bell,
 	CircleUserRound,
 	Clock,
 	Files,
@@ -32,6 +33,7 @@ const ENTITY_ICONS = {
 	chat: { line: MessageSquare, pixel: { src: chat, cells: 16 } },
 	files: { line: Files, pixel: { src: files, cells: 16 } },
 	image: { line: ImageIcon, pixel: { src: images, cells: 20 } },
+	inbox: { line: Bell },
 	media: { line: Images, pixel: { src: images, cells: 20 } },
 	scheduled: { line: Clock },
 	search: { line: Search, pixel: { src: search, cells: 16 } },

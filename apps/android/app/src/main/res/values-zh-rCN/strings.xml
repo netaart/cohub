@@ -7,6 +7,7 @@
     <string name="file_saved">已保存到 %1$s</string>
     <string name="file_save_failed">文件保存失败。</string>
     <string name="runtime_channel">本地 Runtime</string>
+    <string name="notifications_channel">通知</string>
     <string name="runtime_title">Cohub 已连接到此设备</string>
     <plurals name="runtime_ready">
         <item quantity="other">Agent 可以在 %d 个文件夹中工作。</item>

@@ -100,6 +100,7 @@ const SETTINGS_COMMAND_PREFIX = "settings:";
 
 const SETTINGS_ALIASES: Record<SettingsSection, string[]> = {
 	general: ["general", "preferences", "profile", "language", "theme"],
+	notifications: ["notifications", "inbox", "push", "email", "mentions"],
 	activity: ["activity", "usage"],
 	referrals: ["referrals", "invite", "referral"],
 	billing: ["billing", "plan", "subscription", "balance", "credits"],

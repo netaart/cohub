@@ -147,14 +147,24 @@ const userShellCommandBlocks = $derived(
 	),
 );
 
-type ResourceMentionToken = Exclude<ResourceMentionTextToken, { type: "text" }>;
+type ResourceMentionToken = Exclude<
+	ResourceMentionTextToken,
+	{ type: "text" } | { type: "userMention" }
+>;
+type UserMentionToken = Extract<
+	ResourceMentionTextToken,
+	{ type: "userMention" }
+>;
 
 type UserTextToken =
 	| { type: "text"; text: string }
-	| (ResourceMentionToken & { text: string });
+	| ((ResourceMentionToken | UserMentionToken) & { text: string });
 
 const userMentionButtonClass =
 	"inline-flex max-w-full translate-y-[-1px] items-baseline rounded-[5px] bg-brand-muted px-1.5 py-0.5 text-[0.92em] font-medium leading-none text-brand-muted-fg ring-1 ring-brand-border/70 transition-colors hover:bg-brand-muted-hover focus:outline-none focus:ring-1 focus:ring-brand";
+
+const userMentionChipClass =
+	"inline-flex max-w-full translate-y-[-1px] items-baseline rounded-[5px] bg-brand-muted px-1.5 py-0.5 text-[0.92em] font-medium leading-none text-brand-muted-fg ring-1 ring-brand-border/70";
 
 function buildUserMentionHref(token: ResourceMentionToken) {
 	if (token.type === "appMention") return token.href;
@@ -256,7 +266,9 @@ const segments = $derived.by(() => {
 	{#if userTextBlocks.length > 0}
 		<div class="whitespace-pre-wrap [overflow-wrap:anywhere] text-inherit" class:mt-2={userShellCommandBlocks.length > 0}>
 			{#each userTextTokens as token}
-				{#if token.type !== 'text'}
+				{#if token.type === 'userMention'}
+					<span class={userMentionChipClass}>{token.text}</span>
+				{:else if token.type !== 'text'}
 					<button
 						type="button"
 						class={userMentionButtonClass}

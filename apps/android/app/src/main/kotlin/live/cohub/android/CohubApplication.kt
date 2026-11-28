@@ -19,6 +19,7 @@ import live.cohub.android.files.FileSaver
 import live.cohub.android.helper.PhoneControl
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
+import live.cohub.android.push.Push
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.LocalWorkspaces
 import live.cohub.android.runtime.RuntimeInstance
@@ -91,6 +92,7 @@ class CohubApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         val startedAt = System.currentTimeMillis()
+        Push.ensureApp(this)
         scope.launch { auth.load() }
         scope.launch(Dispatchers.IO) { files?.sweepPending(startedAt) }
     }

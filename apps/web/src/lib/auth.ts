@@ -695,11 +695,18 @@ export const signOut = async (): Promise<void> => {
 	if (typeof window === "undefined") return;
 	signingOut = true;
 	// Sign-out must still succeed locally when the API is unreachable.
-	await import("#lib/sdk.ts")
-		.then(({ sdk }) => sdk.user.revokeAppBrowserSessions())
-		.catch((error) => {
-			console.warn("[auth] Failed to end storefront sign-ins", error);
-		});
+	await Promise.all([
+		import("#lib/sdk.ts")
+			.then(({ sdk }) => sdk.user.revokeAppBrowserSessions())
+			.catch((error) => {
+				console.warn("[auth] Failed to end storefront sign-ins", error);
+			}),
+		import("#lib/notifications/push.svelte.ts")
+			.then(({ devicePush }) => devicePush.forget())
+			.catch((error) => {
+				console.warn("[auth] Failed to remove this device's push", error);
+			}),
+	]);
 	if ((await readyHost()) && hostOwnsCredentials()) {
 		try {
 			await callHost("auth.signOut");

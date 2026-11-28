@@ -42,6 +42,7 @@ import {
   wsClientEventSchema,
 } from "@cohub/protocol/realtime";
 import { getOrCreateRequestId } from "@cohub/infra/tracing";
+import { VISIBLE_DEVICE_TTL_MS, visibleDevicesKey } from "@cohub/protocol";
 import {
   ANONYMOUS_IDLE_MS,
   ANONYMOUS_REAUTHORIZE_MS,
@@ -106,6 +107,7 @@ type WsConnectionContext = {
   appRoomOpsPending: number;
   appRoomOpsTail: Promise<void>;
   appRoomPresenceRate: AppRoomPresenceRate;
+  visibleDeviceId?: string;
 };
 
 type GatewayWsBroadcastPayload = RealtimeServerEvent & {
@@ -254,6 +256,24 @@ const persistWsConnection = async (ctx: WsConnectionContext) => {
   }), "EX", WS_CONNECTION_TTL_SECONDS);
 };
 
+const visibleDeviceField = (ctx: WsConnectionContext) => `${ctx.visibleDeviceId}:${ctx.connectionId}`;
+
+const refreshVisibleDevice = async (ctx: WsConnectionContext) => {
+  if (!ctx.userId || !ctx.visibleDeviceId) return;
+  const key = visibleDevicesKey(ctx.userId);
+  await redisCommandClient.multi()
+    .hset(key, visibleDeviceField(ctx), String(Date.now() + VISIBLE_DEVICE_TTL_MS))
+    .pexpire(key, VISIBLE_DEVICE_TTL_MS * 2)
+    .exec();
+};
+
+const clearVisibleDevice = async (ctx: WsConnectionContext) => {
+  if (!ctx.userId || !ctx.visibleDeviceId) return;
+  const field = visibleDeviceField(ctx);
+  ctx.visibleDeviceId = undefined;
+  await redisCommandClient.hdel(visibleDevicesKey(ctx.userId), field);
+};
+
 const releaseAppRoomMemberships = async (ctx: WsConnectionContext) => {
   for (const roomId of [...ctx.appRooms.keys()]) {
     await releaseAppRoomSeat(ctx, roomId).catch((error) => {
@@ -269,6 +289,7 @@ const releaseAppRoomMemberships = async (ctx: WsConnectionContext) => {
  * would let the new identity publish into the previous identity's rooms.
  */
 const resetConnectionIdentity = async (ctx: WsConnectionContext) => {
+  await clearVisibleDevice(ctx).catch(() => undefined);
   await releaseAppRoomMemberships(ctx);
   unsubscribeConnectionFromAllRooms(ctx);
   ctx.compactStreamAliases.clear();
@@ -298,6 +319,7 @@ const cleanupWsConnection = async (ctx: WsConnectionContext | undefined) => {
   if (!ctx) return;
   ctx.anonymous = undefined;
   unsubscribeConnectionFromAllRooms(ctx);
+  await clearVisibleDevice(ctx).catch(() => undefined);
   await releaseAppRoomMemberships(ctx);
   wsSockets.delete(ctx.connectionId);
   wsConnections.delete(ctx.connectionId);
@@ -1173,6 +1195,7 @@ async function main() {
 
         if (message.type === "ping") {
           await touchWsConnection(ctx);
+          await refreshVisibleDevice(ctx).catch(() => undefined);
           await touchAppRoomMemberships(ctx, socket);
           sendWsEnvelope(socket, buildRealtimeEnvelope({
             domain: "system",
@@ -1438,6 +1461,17 @@ async function main() {
             }));
           } catch (error) {
             await failAppRoomOp(ctx, socket, roomId, "ROOM_LEAVE_FAILED", error, requestId);
+          }
+          return;
+        }
+
+        if (message.type === "device.state") {
+          if (message.payload.visible) {
+            if (ctx.visibleDeviceId && ctx.visibleDeviceId !== message.payload.deviceId) await clearVisibleDevice(ctx);
+            ctx.visibleDeviceId = message.payload.deviceId;
+            await refreshVisibleDevice(ctx);
+          } else {
+            await clearVisibleDevice(ctx);
           }
           return;
         }

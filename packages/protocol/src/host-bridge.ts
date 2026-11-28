@@ -53,6 +53,7 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "files.blobUrl",
   "files.stream",
   "share.fileUrl",
+  "notifications.push",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -281,6 +282,12 @@ export const hostNotificationSchema = z.object({
 });
 export type HostNotification = z.infer<typeof hostNotificationSchema>;
 
+export const hostPushSubscriptionSchema = z.object({
+  transport: z.enum(["fcm", "apns"]),
+  token: z.string().min(1).max(4_096),
+});
+export type HostPushSubscription = z.infer<typeof hostPushSubscriptionSchema>;
+
 /**
  * What only the page knows about its own tab: `dirty` asks before the tab
  * closes, `attention` marks a background tab until it is shown, and
@@ -382,6 +389,7 @@ export const HOST_BRIDGE_METHODS = {
   "auth.signOut": { params: none, result: z.boolean() },
   "notifications.register": { params: none, result: z.boolean() },
   "notifications.show": { params: hostNotificationSchema, result: z.boolean() },
+  "notifications.subscribe": { params: none, result: hostPushSubscriptionSchema.nullable() },
   "share.text": { params: z.object({ text: z.string().max(100_000), title: z.string().max(512).optional() }), result: z.boolean() },
   "navigation.openPath": { params: z.object({ path: z.string().min(1).max(2_048) }), result: z.boolean() },
   "cache.clear": { params: z.object({ scope: z.enum(["all", "user"]) }), result: z.boolean() },

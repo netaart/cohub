@@ -5,7 +5,7 @@ import live.cohub.android.host.HostProtocol.Capabilities as C
 /**
  * Capabilities this build honours. The web side gates every optional call on
  * these, so a capability is a promise — advertise one only when the feature is
- * reachable. FCM is deliberately absent: the server has no delivery channel yet.
+ * reachable. `notifications.push` needs a build with a Firebase project.
  */
 object HostCapabilities {
     private val always: List<String> = listOf(
@@ -29,8 +29,15 @@ object HostCapabilities {
         C.APP_LOCALE,
     )
 
-    fun advertised(runtime: Boolean, files: Boolean, display: Boolean = runtime, fileStream: Boolean = false): List<String> =
-        always + listOfNotNull(C.FILES.takeIf { files }, C.FILES_STREAM.takeIf { files && fileStream }) +
+    fun advertised(
+        runtime: Boolean,
+        files: Boolean,
+        display: Boolean = runtime,
+        fileStream: Boolean = false,
+        push: Boolean = false,
+    ): List<String> =
+        always +
+            listOfNotNull(C.FILES.takeIf { files }, C.FILES_STREAM.takeIf { files && fileStream }, C.NOTIFICATIONS_PUSH.takeIf { push }) +
             (if (runtime) listOf(C.RUNTIME, C.WORKSPACE, C.WORKSPACE_FILES) else emptyList()) +
             (if (runtime && display) listOf(C.DISPLAY, C.DISPLAY_PRESENTING, C.DISPLAY_FLOAT) else emptyList())
 }

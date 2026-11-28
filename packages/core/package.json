@@ -108,6 +108,10 @@
       "types": "./dist/sandbox-lifecycle/index.d.ts",
       "default": "./dist/sandbox-lifecycle/index.js"
     },
+    "./notifications": {
+      "types": "./dist/notifications/index.d.ts",
+      "default": "./dist/notifications/index.js"
+    },
     "./references": {
       "types": "./dist/references/index.d.ts",
       "default": "./dist/references/index.js"

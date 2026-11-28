@@ -7,6 +7,7 @@ import { parseSpaceSlug, parseUsername } from "@cohub/protocol";
  *   @[Core API](cohub://spaces/<spaceId>)
  *   @[Fork](cohub://spaces/<spaceId>/sessions/<sessionId>)
  *   @[Launch](cohub://apps/<username>/<spaceSlug>/<appSlug>)
+ *   @[Ada](cohub://users/<userUuid>)
  *
  * Parsing is deterministic against this structured format \u2014 not fuzzy text
  * mining \u2014 so it reliably resolves down to session granularity.
@@ -17,6 +18,11 @@ export type ParsedMention =
       type: "space";
       spaceId: string;
       sessionId?: string;
+      label: string;
+    }
+  | {
+      type: "user";
+      userUuid: string;
       label: string;
     }
   | {
@@ -31,6 +37,8 @@ const SPACE_MENTION_PATTERN =
   /@\[([^\]\n]+)\]\(cohub:\/\/spaces\/([^/\s)]+)(?:\/sessions\/([^/\s)]+))?\)/g;
 const APP_MENTION_PATTERN =
   /@\[([^\]\n]+)\]\(cohub:\/\/apps\/([^/\s)]+)\/([^/\s)]+)\/([^/?#\s)]+)(?:[?#][^\s)]*)?\)/g;
+
+const USER_MENTION_PATTERN = /@\[([^\]\n]+)\]\(cohub:\/\/users\/([A-Za-z0-9_-]{1,128})\)/g;
 
 const safeDecode = (value: string) => {
   try {
@@ -66,7 +74,15 @@ export const parseMentions = (text: string | null | undefined): ParsedMention[] 
       index: match.index ?? 0,
     });
   }
+  for (const match of text.matchAll(USER_MENTION_PATTERN)) {
+    const userUuid = match[2];
+    if (!userUuid) continue;
+    mentions.push({ type: "user", userUuid, label: match[1]?.trim() || userUuid, index: match.index ?? 0 });
+  }
   return mentions
     .sort((left, right) => left.index - right.index)
     .map(({ index: _index, ...mention }) => mention);
 };
+
+export const formatMentionsForDisplay = (text: string) =>
+  text.replace(/@\[([^\]\n]+)\]\(cohub:\/\/[^\s)]+\)/g, "@$1");

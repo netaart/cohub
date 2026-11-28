@@ -9,6 +9,7 @@ const loaders: Record<
 	() => Promise<{ default: SettingsPage }>
 > = {
 	general: () => import("./GeneralSettings.svelte"),
+	notifications: () => import("./NotificationSettings.svelte"),
 	activity: () => import("./ActivitySettings.svelte"),
 	referrals: () => import("./ReferralsSettings.svelte"),
 	billing: () => import("./BillingSettings.svelte"),

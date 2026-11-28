@@ -10,6 +10,7 @@ import { PublicAssetsApi } from "./apis/public-assets.js";
 import { SessionAccessApi } from "./apis/session-access.js";
 import { SearchApi } from "./apis/search.js";
 import { ReferencesApi } from "./apis/references.js";
+import { NotificationsApi } from "./apis/notifications.js";
 import { SpaceClient, SpacesApi, type WebSocketConnectionState } from "./apis/spaces.js";
 import { createSpaceFileServices, type SpaceFileServices } from "./apis/space-file-urls.js";
 import { createLocalWorkspaces } from "./local-workspace.js";
@@ -68,6 +69,7 @@ export class CohubClient {
   readonly sessionAccess: SessionAccessApi;
   readonly search: SearchApi;
   readonly references: ReferencesApi;
+  readonly notifications: NotificationsApi;
   readonly tasks: TasksApi;
   readonly boards: BoardsApi;
   readonly cronJobs: CronJobsApi;
@@ -183,6 +185,7 @@ export class CohubClient {
     this.sessionAccess = new SessionAccessApi(this.transport);
     this.search = new SearchApi(this.transport);
     this.references = new ReferencesApi(this.transport);
+    this.notifications = new NotificationsApi(this.transport);
     this.tasks = new TasksApi(this.transport, this.websocketClient);
     this.boards = new BoardsApi(this.transport, this.websocketClient);
     this.cronJobs = new CronJobsApi(this.transport);
@@ -332,6 +335,10 @@ export class CohubClient {
 
   space(spaceId: string) {
     return new SpaceClient(spaceId, this.transport, this.websocketClient, this.fileServices);
+  }
+
+  setDeviceState(state: { deviceId: string; visible: boolean }) {
+    this.websocketClient.setDeviceState(state);
   }
 
   onUserEvent(handler: (event: WebsocketEventPayload) => void): () => void {

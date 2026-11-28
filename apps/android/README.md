@@ -111,6 +111,11 @@ single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohu
 `cohubLogtoEndpoint`, `cohubLogtoAppId`, …), as can `cohubVersionName`,
 `cohubVersionCode` and `cohubVersionSuffix`.
 
+Remote push needs a Firebase project: `cohubFcmAppId`, `cohubFcmProjectId`, `cohubFcmApiKey` and
+`cohubFcmSenderId` (from the project's Android app). Without them the build carries no push and
+never advertises `notifications.push`; the inbox still updates live. See
+[Notifications](../../docs/notifications.md).
+
 Sign-in opens an Auth Tab when the default browser offers one; its result returns to the
 shell directly on `<applicationId>://auth/callback`. Otherwise its Custom Tab
 returns through the `/mobile/auth/callback` App Link. The Logto native

@@ -116,6 +116,14 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
     }),
   }),
   z.object({
+    type: z.literal("device.state"),
+    requestId: z.string().optional(),
+    payload: z.object({
+      deviceId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
+      visible: z.boolean(),
+    }),
+  }),
+  z.object({
     type: z.literal("ping"),
     requestId: z.string().optional(),
     payload: z.record(z.string(), z.unknown()).optional(),

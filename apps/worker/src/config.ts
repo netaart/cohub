@@ -48,6 +48,10 @@ export interface WorkerConfig {
   appCustomDomainCnameTarget: string;
   /** Author email for checkpoint git commits. */
   checkpointGitAuthorEmail: string;
+  emailUrl?: string;
+  emailFrom?: string;
+  webOrigin: string;
+  apiOrigin?: string;
 }
 
 const env = (process.env.ENV === "prod" ? "prod" : "dev") as "dev" | "prod";
@@ -113,6 +117,10 @@ export const config: WorkerConfig = {
   talesofaiBillingAdminApiKey: process.env.TALESOFAI_BILLING_ADMIN_API_KEY,
   env,
   checkpointGitAuthorEmail: process.env.CHECKPOINT_GIT_AUTHOR_EMAIL?.trim() || "noreply@cohub.live",
+  emailUrl: process.env.EMAIL_URL?.trim() || undefined,
+  emailFrom: process.env.EMAIL_FROM?.trim() || undefined,
+  webOrigin: (process.env.WEB_ORIGIN?.trim() || (env === "prod" ? "https://cohub.live" : "https://dev.cohub.live")).replace(/\/+$/, ""),
+  apiOrigin: process.env.PUBLIC_API_ORIGIN?.trim().replace(/\/+$/, "") || undefined,
 };
 
 export const assertRequiredConfig = (value: WorkerConfig = config) => {

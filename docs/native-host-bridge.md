@@ -61,6 +61,7 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `auth.signOut` | `auth.token` | Clears the host store and revokes the grant, pushes `auth.signedOut`; the next sign-in prompts for login |
 | `notifications.register` | `notifications` | Asks the system for permission; `true` when notifications can show |
 | `notifications.show` | `notifications` | A system notification opening an in-app `path`; a later one with the same `id` replaces it |
+| `notifications.subscribe` | `notifications.push` | Asks for permission, then answers this install's remote push address (`{ transport, token }`), or `null`; the page registers it with the API. See [Notifications](notifications.md) |
 | `share.text` | `share` | Native share sheet |
 | `navigation.openPath` | `navigation` | In-shell path navigation |
 | `cache.clear` | `cache` | Host state only; IndexedDB is the web app's |

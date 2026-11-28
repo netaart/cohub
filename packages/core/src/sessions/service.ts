@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { readSessionTurnOrigin, readTurnInitiator, type SessionTurnIntent, type SessionTurnRecord, type SessionTurnOrigin } from "@cohub/protocol/model";
-import { isModelThinkingLevel } from "@cohub/protocol";
+import { isModelThinkingLevel, USER_MENTION_URI_PREFIX } from "@cohub/protocol";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions, spaces } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "../content/sanitize.js";
 import { nextSessionVersion, unarchiveSessionInTx } from "../labels/session-archive.js";
@@ -186,6 +186,7 @@ export function createSessionServices(input: {
   onSessionTurnCreated?: (input: { spaceId: string; turn: SessionTurnRecord }) => void | Promise<void>;
   onSessionTurnUpdated?: (input: { spaceId: string; turn: SessionTurnRecord }) => void | Promise<void>;
   onSessionTurnSettled?: (turn: { id: string; status: string; meta: unknown }) => void | Promise<void>;
+  onUserMentionWritten?: (turnId: string) => void;
   onSessionActivityUpdated?: (input: { sessionId: string; changed: string[] }) => void | Promise<void>;
   onSessionParticipantsUpdated?: (input: { spaceId: string; sessionId: string; userUuids: string[] }) => void | Promise<void>;
   onSessionUnarchived?: (input: { spaceId: string; sessionId: string; labelId: string }) => void | Promise<void>;
@@ -327,6 +328,9 @@ export function createSessionServices(input: {
       ...(trigger ? [trigger] : []),
       ...(note ? extractTurnReferences({ spaceId, sessionId: row.sessionId, turnId: row.id, userContent: row.userContent, userText: row.userText }) : []),
     ];
+    if (input.onUserMentionWritten && row.userContent.some((block) => block.type === "text" && block.text.includes(USER_MENTION_URI_PREFIX))) {
+      input.onUserMentionWritten(row.id);
+    }
     if (references.length) {
       try {
         input.enqueueReferences?.(references);

@@ -59,6 +59,7 @@ public static partial class HostProtocol
         public const string FilesBlobUrl = "files.blobUrl";
         public const string FilesStream = "files.stream";
         public const string ShareFileUrl = "share.fileUrl";
+        public const string NotificationsPush = "notifications.push";
     }
 
     public static class Methods
@@ -71,6 +72,7 @@ public static partial class HostProtocol
         public const string AuthSignOut = "auth.signOut";
         public const string NotificationsRegister = "notifications.register";
         public const string NotificationsShow = "notifications.show";
+        public const string NotificationsSubscribe = "notifications.subscribe";
         public const string ShareText = "share.text";
         public const string NavigationOpenPath = "navigation.openPath";
         public const string CacheClear = "cache.clear";

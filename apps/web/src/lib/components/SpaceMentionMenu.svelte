@@ -3,23 +3,25 @@ import { CornerDownLeft, Loader2, SearchSlash } from "lucide-svelte";
 import ListRowText from "#lib/components/list-page/ListRowText.svelte";
 import { LIST_ROW_AVATAR } from "#lib/components/list-page/list-row.ts";
 import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
 import {
 	COMPOSER_MENU_LAYER,
 	type ComposerMenuPlacement,
 } from "#lib/composer-expansion.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import type { SpaceMentionSuggestion } from "#lib/mentions/space.ts";
+import type { MentionSuggestion } from "#lib/mentions/user.ts";
 import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	open?: boolean;
 	placement?: ComposerMenuPlacement;
-	items?: SpaceMentionSuggestion[];
+	items?: MentionSuggestion[];
 	query?: string;
 	selectedIndex?: number;
 	loading?: boolean;
 	status?: string;
-	onselect?: (item: SpaceMentionSuggestion) => void;
+	onselect?: (item: MentionSuggestion) => void;
 	onhighlight?: (index: number) => void;
 };
 
@@ -139,18 +141,27 @@ $effect(() => {
 					<div class="px-2">
 						<div class="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-text-placeholder">{m.mention({}, { locale })}</div>
 						<div class="space-y-0.5">
-							{#each items as item, index (item.spaceId)}
+							{#each items as item, index (item.id)}
 								{@const active = index === selectedIndex}
-								{@const description = secondaryText(item)}
 								<button id={itemId(index)} type="button" role="option" aria-selected={active} data-density="compact" class={`group relative flex h-[var(--list-row-height)] w-full items-center gap-[var(--list-row-gap)] rounded-[11px] px-2.5 text-left transition-colors duration-100 ${active ? 'bg-brand/7' : 'hover:bg-bg-hover'}`} onpointerenter={() => onhighlight?.(index)} onpointerdown={(event) => event.preventDefault()} onclick={() => onselect?.(item)}>
 									<span class={`absolute left-0 top-2 bottom-2 w-0.5 rounded-full transition-opacity ${active ? 'bg-brand opacity-100' : 'opacity-0'}`}></span>
-									<SpaceAvatar name={item.name} profile={item.spaceProfile} seed={item.spaceId} size={LIST_ROW_AVATAR.compact} />
-									<ListRowText tooltip={item.name}>
-										{#snippet title()}{#each highlightParts(item.name) as part}<span class={part.match ? 'text-brand' : ''}>{part.text}</span>{/each}{/snippet}
-										{#snippet badge()}{@render kind(item)}{/snippet}
-										{#snippet lead()}{@render owner(item)}{#if description}<span class="text-text-placeholder">·</span>{/if}{/snippet}
-										{#snippet subtitle()}{description}{/snippet}
-									</ListRowText>
+									{#if item.type === "user"}
+										<UserAvatar name={item.name} avatarUrl={item.avatarUrl} seed={item.userUuid} size={LIST_ROW_AVATAR.compact} />
+										<ListRowText tooltip={item.name}>
+											{#snippet title()}{#each highlightParts(item.name) as part}<span class={part.match ? 'text-brand' : ''}>{part.text}</span>{/each}{/snippet}
+											{#snippet badge()}<span class="shrink-0 text-[10px] uppercase tracking-[0.12em] text-text-placeholder">{m.mention_person({}, { locale })}</span>{/snippet}
+											{#snippet subtitle()}{item.username ? `@${item.username}` : ""}{/snippet}
+										</ListRowText>
+									{:else}
+										{@const description = secondaryText(item)}
+										<SpaceAvatar name={item.name} profile={item.spaceProfile} seed={item.spaceId} size={LIST_ROW_AVATAR.compact} />
+										<ListRowText tooltip={item.name}>
+											{#snippet title()}{#each highlightParts(item.name) as part}<span class={part.match ? 'text-brand' : ''}>{part.text}</span>{/each}{/snippet}
+											{#snippet badge()}{@render kind(item)}{/snippet}
+											{#snippet lead()}{@render owner(item)}{#if description}<span class="text-text-placeholder">·</span>{/if}{/snippet}
+											{#snippet subtitle()}{description}{/snippet}
+										</ListRowText>
+									{/if}
 									<span class={`flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border-subtle text-text-tertiary transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`}><CornerDownLeft class="h-3 w-3" /></span>
 								</button>
 							{/each}
@@ -173,14 +184,21 @@ $effect(() => {
 				{#if items.length === 0}
 					<div class="px-4 py-6 text-center"><div class="text-[12px] font-medium text-text-primary">{m.mention_none({}, { locale })}</div><div class="mt-1 text-[11px] text-text-tertiary">{m.mention_hint_typing({}, { locale })}</div></div>
 				{:else}
-					{#each items as item, index (item.spaceId)}
+					{#each items as item, index (item.id)}
 						{@const active = index === selectedIndex}
 						<button id={itemId(index)} type="button" data-density="compact" class={`flex h-[var(--list-row-height)] w-full items-center gap-[var(--list-row-gap)] px-4 text-left transition-colors active:bg-bg-hover ${active ? 'bg-brand/7' : ''}`} onpointerdown={(event) => event.preventDefault()} onclick={() => onselect?.(item)}>
-							<SpaceAvatar name={item.name} profile={item.spaceProfile} seed={item.spaceId} size={LIST_ROW_AVATAR.compact} />
-							<ListRowText title={item.name} tooltip={item.name}>
-								{#snippet badge()}{#if item.official}{@render kind(item)}{/if}{/snippet}
-								{#snippet lead()}{@render owner(item)}{/snippet}
-							</ListRowText>
+							{#if item.type === "user"}
+								<UserAvatar name={item.name} avatarUrl={item.avatarUrl} seed={item.userUuid} size={LIST_ROW_AVATAR.compact} />
+								<ListRowText title={item.name} tooltip={item.name}>
+									{#snippet lead()}{item.username ? `@${item.username}` : m.mention_person({}, { locale })}{/snippet}
+								</ListRowText>
+							{:else}
+								<SpaceAvatar name={item.name} profile={item.spaceProfile} seed={item.spaceId} size={LIST_ROW_AVATAR.compact} />
+								<ListRowText title={item.name} tooltip={item.name}>
+									{#snippet badge()}{#if item.official}{@render kind(item)}{/if}{/snippet}
+									{#snippet lead()}{@render owner(item)}{/snippet}
+								</ListRowText>
+							{/if}
 						</button>
 					{/each}
 				{/if}

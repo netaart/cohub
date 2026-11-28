@@ -4,6 +4,7 @@ import type {
 	BillingConversionIntent,
 	PromptTemplateCatalogEntry,
 	SkillCatalogEntry,
+	SpaceMember,
 	VoiceInputClient,
 } from "@neta-art/cohub";
 import {
@@ -97,11 +98,20 @@ import {
 	spaceMentionTriggerKey,
 	type TextCaret,
 } from "#lib/mentions/space-trigger.ts";
+import {
+	buildUserMentionSnippet,
+	type MentionSuggestion,
+	matchMemberMentions,
+} from "#lib/mentions/user.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { sdk } from "#lib/sdk.ts";
 import { confirmSpaceAddress } from "#lib/space-address-resolver.ts";
 import { authStore } from "#lib/stores/auth.svelte.ts";
 import { billingConversion } from "#lib/stores/billing-conversion.svelte.ts";
+import {
+	fetchSpaceMembersWithCache,
+	getCachedSpaceMembers,
+} from "#lib/stores/space-profile-cache.ts";
 import {
 	entriesFromFiles,
 	type LocalUploadEntry,
@@ -217,6 +227,7 @@ let selectedSpaceMentionId = $state<string | null>(null);
 let localSpaceMentionItems = $state<SpaceMentionSuggestion[]>([]);
 let remoteSpaceMentionItems = $state<SpaceMentionSuggestion[]>([]);
 let officialSpaceMention = $state<SpaceMentionSuggestion | null>(null);
+let mentionMembers = $state<SpaceMember[]>([]);
 let spaceMentionLocalDone = $state(true);
 let spaceMentionRemoteDone = $state(true);
 let spaceMentionRemoteError = $state<string | null>(null);
@@ -419,6 +430,19 @@ const spaceMentionItems = $derived(
 		limit: 50,
 	}),
 );
+const peopleMentionItems = $derived(
+	spaceMentionTrigger
+		? matchMemberMentions(
+				mentionMembers,
+				spaceMentionTrigger.query,
+				authStore.userUuid,
+			)
+		: [],
+);
+const mentionItems = $derived<MentionSuggestion[]>([
+	...spaceMentionItems,
+	...peopleMentionItems,
+]);
 const spaceMentionLoading = $derived(
 	!spaceMentionLocalDone || !spaceMentionRemoteDone,
 );
@@ -435,7 +459,9 @@ const shouldPrepareComposerMentionMirror = $derived(
 	!isTextareaFocused &&
 		value.length <= COMPOSER_MENTION_MIRROR_TEXT_LIMIT &&
 		value.includes("@[") &&
-		(value.includes("](cohub://spaces/") || value.includes("](cohub://apps/")),
+		(value.includes("](cohub://spaces/") ||
+			value.includes("](cohub://apps/") ||
+			value.includes("](cohub://users/")),
 );
 const composerMentionTokens = $derived.by<ResourceMentionTextToken[]>(() =>
 	shouldPrepareComposerMentionMirror ? tokenizeResourceMentionText(value) : [],
@@ -918,7 +944,21 @@ function resetSpaceMentionSearch() {
 
 function selectSpaceMentionIndex(index: number) {
 	selectedSpaceMentionIndex = index;
-	selectedSpaceMentionId = spaceMentionItems[index]?.spaceId ?? null;
+	selectedSpaceMentionId = mentionItems[index]?.id ?? null;
+}
+
+function refreshMentionMembers() {
+	const spaceId = currentSpaceId;
+	if (!spaceId) {
+		mentionMembers = [];
+		return;
+	}
+	mentionMembers = getCachedSpaceMembers(spaceId) ?? [];
+	void fetchSpaceMembersWithCache(spaceId)
+		.then((members) => {
+			if (currentSpaceId === spaceId) mentionMembers = members;
+		})
+		.catch(() => undefined);
 }
 
 function refreshOfficialSpaceMention() {
@@ -941,7 +981,10 @@ function scheduleSpaceMentionSearch(
 	const q = trigger.query.trim();
 	const searchKey = `${trigger.start}:${currentSpaceId ?? ""}:${q}`;
 	if (searchKey === activeSpaceMentionSearchKey) return;
-	if (activeSpaceMentionSearchKey == null) refreshOfficialSpaceMention();
+	if (activeSpaceMentionSearchKey == null) {
+		refreshOfficialSpaceMention();
+		refreshMentionMembers();
+	}
 
 	abortSpaceMentionSearch();
 	activeSpaceMentionSearchKey = searchKey;
@@ -1016,10 +1059,13 @@ function scheduleSpaceMentionSearch(
 	}, 180);
 }
 
-function applySpaceMention(item: SpaceMentionSuggestion) {
+function applySpaceMention(item: MentionSuggestion) {
 	const trigger = spaceMentionTrigger;
 	if (!trigger) return;
-	const snippet = `${buildSpaceMentionMarkdown({ spaceId: item.spaceId, label: item.name })} `;
+	const snippet =
+		item.type === "user"
+			? buildUserMentionSnippet(item)
+			: `${buildSpaceMentionMarkdown({ spaceId: item.spaceId, label: item.name })} `;
 	value = value.slice(0, trigger.start) + snippet + value.slice(trigger.end);
 	showSpaceMentions = false;
 	spaceMentionTrigger = null;
@@ -1295,15 +1341,15 @@ $effect(() => {
 });
 
 $effect(() => {
-	if (spaceMentionItems.length === 0) {
+	if (mentionItems.length === 0) {
 		selectedSpaceMentionIndex = 0;
 		selectedSpaceMentionId = null;
 		return;
 	}
 
 	if (selectedSpaceMentionId) {
-		const index = spaceMentionItems.findIndex(
-			(item) => item.spaceId === selectedSpaceMentionId,
+		const index = mentionItems.findIndex(
+			(item) => item.id === selectedSpaceMentionId,
 		);
 		if (index !== -1) {
 			selectedSpaceMentionIndex = index;
@@ -1313,10 +1359,9 @@ $effect(() => {
 
 	selectedSpaceMentionIndex = Math.min(
 		selectedSpaceMentionIndex,
-		spaceMentionItems.length - 1,
+		mentionItems.length - 1,
 	);
-	selectedSpaceMentionId =
-		spaceMentionItems[selectedSpaceMentionIndex]?.spaceId ?? null;
+	selectedSpaceMentionId = mentionItems[selectedSpaceMentionIndex]?.id ?? null;
 });
 </script>
 
@@ -1464,34 +1509,34 @@ $effect(() => {
 								const key = event.key.toLowerCase();
 								const isEmacsNext = event.ctrlKey && !event.metaKey && !event.altKey && key === 'n';
 								const isEmacsPrevious = event.ctrlKey && !event.metaKey && !event.altKey && key === 'p';
-								if (spaceMentionItems.length > 0 && (event.key === 'ArrowDown' || isEmacsNext)) {
+								if (mentionItems.length > 0 && (event.key === 'ArrowDown' || isEmacsNext)) {
 									event.preventDefault();
-									selectSpaceMentionIndex(Math.min(selectedSpaceMentionIndex + 1, spaceMentionItems.length - 1));
+									selectSpaceMentionIndex(Math.min(selectedSpaceMentionIndex + 1, mentionItems.length - 1));
 									return;
 								}
-								if (spaceMentionItems.length > 0 && (event.key === 'ArrowUp' || isEmacsPrevious)) {
+								if (mentionItems.length > 0 && (event.key === 'ArrowUp' || isEmacsPrevious)) {
 									event.preventDefault();
 									selectSpaceMentionIndex(Math.max(selectedSpaceMentionIndex - 1, 0));
 									return;
 								}
-								if (spaceMentionItems.length > 0 && event.key === 'Home') {
+								if (mentionItems.length > 0 && event.key === 'Home') {
 									event.preventDefault();
 									selectSpaceMentionIndex(0);
 									return;
 								}
-								if (spaceMentionItems.length > 0 && event.key === 'End') {
+								if (mentionItems.length > 0 && event.key === 'End') {
 									event.preventDefault();
-									selectSpaceMentionIndex(spaceMentionItems.length - 1);
+									selectSpaceMentionIndex(mentionItems.length - 1);
 									return;
 								}
 								if (
-									spaceMentionItems.length > 0 &&
+									mentionItems.length > 0 &&
 									(event.key === 'Tab' ||
 										(event.key === 'Enter' && !isComposingKeyboardEvent(event)))
 								) {
 									if (!(event.key === 'Enter' && event.shiftKey)) {
 										event.preventDefault();
-										const selected = spaceMentionItems[selectedSpaceMentionIndex];
+										const selected = mentionItems[selectedSpaceMentionIndex];
 										if (selected) applySpaceMention(selected);
 										return;
 									}
@@ -1585,7 +1630,7 @@ $effect(() => {
 					<SpaceMentionMenu
 						open={showSpaceMentions}
 						placement={mentionMenuPlacement}
-						items={spaceMentionItems}
+						items={mentionItems}
 						query={spaceMentionTrigger?.query ?? ""}
 						selectedIndex={selectedSpaceMentionIndex}
 						loading={spaceMentionLoading}

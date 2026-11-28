@@ -16,10 +16,10 @@ import MediaLightbox from "#lib/components/MediaLightbox.svelte";
 import MobileSidebarDrawer from "#lib/components/MobileSidebarDrawer.svelte";
 import MobileTabBar from "#lib/components/MobileTabBar.svelte";
 import { mediaLightbox } from "#lib/components/media-lightbox.ts";
+import NotificationAlerts from "#lib/components/notifications/NotificationAlerts.svelte";
 import ResizeHandle from "#lib/components/ResizeHandle.svelte";
 import Sidebar from "#lib/components/Sidebar.svelte";
 import SignInChooser from "#lib/components/SignInChooser.svelte";
-import TurnNotificationStack from "#lib/components/TurnNotificationStack.svelte";
 import CustomThemeLayers from "#lib/custom-theme/CustomThemeLayers.svelte";
 import { createDeferredMount } from "#lib/deferred-mount.svelte.ts";
 import { linkDeviceDisplays } from "#lib/device-display.svelte.ts";
@@ -63,13 +63,13 @@ import {
 	beginMobileSessionViewTransition,
 	resolveMobileSessionNavTransition,
 } from "#lib/navigation-transition.ts";
+import { notificationAlerts } from "#lib/notifications/alerts.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { goto, onNavigate } from "$app/navigation";
 import { page } from "$app/state";
 import "#lib/theme.svelte.ts";
 import { authStore } from "#lib/stores/auth.svelte.ts";
 import { initSpacePinRealtime } from "#lib/stores/space-pins.svelte.ts";
-import { turnNotifications } from "#lib/stores/turn-notifications.svelte.ts";
 import { LEFT_SIDEBAR_RAIL, uiState } from "#lib/stores/ui.svelte.ts";
 import { installViewportOffsetGuard } from "#lib/viewport-offset-guard.ts";
 import { resolveWorkspaceSpaceId } from "#lib/workspace-route.ts";
@@ -527,7 +527,6 @@ $effect(() => {
 
 $effect(() => {
 	uiState.loadLayoutPrefs(currentLayoutSpaceId);
-	turnNotifications.syncActiveSessionPresence();
 });
 
 // Lock body scroll when drawer is open
@@ -553,6 +552,7 @@ onMount(() => {
 	}
 
 	let stopDesktopCommands: (() => void) | null = null;
+	let stopNotifications: (() => void) | null = null;
 	let stopLiveLists: (() => void) | null = null;
 	const stopViewportOffsetGuard = installViewportOffsetGuard();
 	const stopLayoutTweenPause = pauseLayoutTweensOnWindowResize();
@@ -564,7 +564,7 @@ onMount(() => {
 		markHostReady();
 		scheduleCacheCleanup();
 		if (authStore.isAuthenticated) {
-			turnNotifications.start();
+			stopNotifications = notificationAlerts.start();
 			// Listen in the shell, not a page, so delivery never depends on route.
 			stopDesktopCommands = startDesktopCommandListener();
 			stopLiveLists = startLiveLists();
@@ -591,7 +591,7 @@ onMount(() => {
 		stopLiveLists?.();
 		stopHostDownloads();
 		stopViewportOffsetGuard();
-		turnNotifications.stop();
+		stopNotifications?.();
 		vConsoleRequestId += 1;
 		vConsole?.destroy();
 		vConsole = null;
@@ -666,7 +666,7 @@ onMount(() => {
   <BillingConversionCenter />
   <CheckoutReturnHandler />
   <SpaceWalletReturn />
-  <TurnNotificationStack />
+  <NotificationAlerts />
   <DownloadToasts />
   <SignInChooser />
   <GlobalMarkCapture />

@@ -2,6 +2,7 @@ import "./checkpoint-compact/index.js";
 import "./checkpoint-storage-backfill/index.js";
 import "./fs-cdn-cache/index.js";
 import "./index-references/index.js";
+import "./notifications/index.js";
 import "./sandbox-idle-check/index.js";
 import "./sandbox-idle-reaper/index.js";
 import "./session-message-postprocess/index.js";

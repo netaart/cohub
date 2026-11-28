@@ -60,6 +60,10 @@
       "types": "./dist/board-session-sync-queue.d.ts",
       "default": "./dist/board-session-sync-queue.js"
     },
+    "./notifications": {
+      "types": "./dist/notifications/index.d.ts",
+      "default": "./dist/notifications/index.js"
+    },
     "./session-turn-settled": {
       "types": "./dist/session-turn-settled.d.ts",
       "default": "./dist/session-turn-settled.js"
@@ -135,10 +139,13 @@
     "bullmq": "^6.7.8",
     "bullmq-otel": "^2.0.1",
     "ioredis": "6.0.0",
+    "nodemailer": "^10.6.1",
+    "web-push": "^3.6.7",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/web-push": "^3.6.4",
     "typescript": "catalog:"
   }
 }

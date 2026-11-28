@@ -17,6 +17,7 @@ import type { AppArtifactDescriptor, AppContentKind, AppVersionSource } from "..
 import type { AppDomainRecord, AppDomainRemovedReason } from "../app-domains.js";
 import type { AppRtcPublication } from "../rtc/index.js";
 import type { Actor, ActorKind, ActorModel } from "../provenance.js";
+import type { NotificationReadTarget, NotificationRecord, NotificationSummary } from "../notifications.js";
 import type {
   BoardAwarenessClientPayload,
   BoardAwarenessUpdate,
@@ -32,7 +33,7 @@ export const REALTIME_OUTBOUND_CHANNEL = "pubsub:realtime:outbound";
 export const AGENT_REALTIME_PATCH_CHANNEL = "pubsub:realtime:agent_patches";
 export const REALTIME_ROOM_KEY_PREFIX = "cohub:realtime-room:v1";
 
-export const REALTIME_DOMAINS = ["system", "session", "space", "label", "room", "ui", "desktop"] as const;
+export const REALTIME_DOMAINS = ["system", "session", "space", "label", "room", "ui", "desktop", "notification"] as const;
 export type RealtimeDomain = (typeof REALTIME_DOMAINS)[number];
 
 export const isRealtimeDomain = (value: unknown): value is RealtimeDomain =>
@@ -110,6 +111,7 @@ export type WsClientEvent =
   | { type: "realtime.room.detach"; requestId?: string; payload: { roomId: string } }
   | { type: "realtime.room.presence.update"; requestId?: string; payload: { roomId: string; presence: Record<string, unknown> | null } }
   | { type: "realtime.room.history"; requestId?: string; payload: { roomId: string; after?: number; limit?: number } }
+  | { type: "device.state"; requestId?: string; payload: { deviceId: string; visible: boolean } }
   | { type: "ping"; requestId?: string; payload?: Record<string, unknown> }
   | { type: "ack"; requestId?: string; payload?: { eventId?: string } };
 
@@ -1014,6 +1016,22 @@ export type DesktopCommandDispatchedEvent = {
   payload: DesktopCommandDispatchedPayload;
 };
 
+export type NotificationChangedEvent = {
+  id: string;
+  timestamp: number;
+  domain: "notification";
+  type: "notification.changed";
+  requestId?: string | null;
+  spaceId?: null;
+  sessionId?: null;
+  rooms?: RealtimeRoom[];
+  payload: {
+    upserted?: NotificationRecord[];
+    read?: NotificationReadTarget & { readAt: string };
+    summary: NotificationSummary;
+  };
+};
+
 export type RealtimeServerEvent =
   | SystemReadyEvent
   | SystemAuthOkEvent
@@ -1050,6 +1068,7 @@ export type RealtimeServerEvent =
   | TaskUpdatedEvent
   | LabelAssignmentsUpdatedEvent
   | DesktopCommandDispatchedEvent
+  | NotificationChangedEvent
   | RealtimeRoomEvent
   | RealtimeRoomJoinedEvent
   | RealtimeRoomHistoryResultEvent

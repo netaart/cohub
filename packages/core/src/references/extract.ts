@@ -91,6 +91,7 @@ export const extractTurnReferences = (turn: TurnReferenceSource): ReferenceInput
   const mentionText = turn.userContent?.length ? collectText(turn.userContent) : turn.userText ?? "";
   const seenMentions = new Map<string, ReferenceInput>();
   for (const mention of parseMentions(mentionText)) {
+    if (mention.type === "user") continue;
     const targetType = mention.type === "app"
       ? ("app" as const)
       : mention.sessionId

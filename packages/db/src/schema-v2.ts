@@ -20,6 +20,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { TaskPayload } from "@cohub/protocol/task";
+import type { NotificationCategory, NotificationChannelSettings, NotificationKind, PushTransport } from "@cohub/protocol";
 import type {
   SessionTurnExecutionKind,
   SessionTurnIntent,
@@ -72,6 +73,8 @@ export const userProfiles = v2.table(
     username: varchar("username", { length: 39 }),
     displayName: varchar("display_name", { length: 120 }).notNull(),
     avatarUrl: text("avatar_url"),
+    email: varchar("email", { length: 320 }),
+    locale: varchar("locale", { length: 16 }),
     source: jsonb("source").$type<Record<string, unknown>>().notNull(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -1493,5 +1496,88 @@ export const resourceReferences = v2.table(
       table.sourceSessionId,
       table.kind,
     ),
+  }),
+);
+
+export const notifications = v2.table(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    recipientId: varchar("recipient_id", { length: 255 }).notNull(),
+    category: varchar("category", { length: 20 }).$type<NotificationCategory>().notNull(),
+    kind: varchar("kind", { length: 40 }).$type<NotificationKind>().notNull(),
+    groupKey: text("group_key").notNull(),
+    spaceId: uuid("space_id"),
+    sessionId: uuid("session_id"),
+    turnId: uuid("turn_id"),
+    actorIds: text("actor_ids").array().notNull().default(sql`'{}'::text[]`),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    count: integer("count").notNull().default(1),
+    revision: integer("revision").notNull().default(1),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    recipientGroupUniqueIdx: uniqueIndex("v2_uq_notifications_recipient_group").on(table.recipientId, table.groupKey),
+    recipientUpdatedIdx: index("v2_idx_notifications_recipient_updated").on(table.recipientId, table.updatedAt.desc(), table.id.desc()),
+    recipientCategoryUpdatedIdx: index("v2_idx_notifications_recipient_category_updated").on(
+      table.recipientId,
+      table.category,
+      table.updatedAt.desc(),
+      table.id.desc(),
+    ),
+    recipientUnreadIdx: index("v2_idx_notifications_recipient_unread").on(table.recipientId, table.category).where(sql`${table.readAt} is null`),
+    recipientSessionUnreadIdx: index("v2_idx_notifications_recipient_session_unread")
+      .on(table.recipientId, table.sessionId)
+      .where(sql`${table.readAt} is null and ${table.sessionId} is not null`),
+  }),
+);
+
+export const notificationPreferences = v2.table(
+  "notification_preferences",
+  {
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    scopeType: varchar("scope_type", { length: 16 }).$type<"global" | "space" | "session">().notNull(),
+    scopeId: text("scope_id").notNull().default(""),
+    category: varchar("category", { length: 20 }).$type<NotificationCategory>().notNull(),
+    channels: jsonb("channels").$type<Partial<NotificationChannelSettings>>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ name: "v2_pk_notification_preferences", columns: [table.userId, table.scopeType, table.scopeId, table.category] }),
+    scopeTypeCheck: check("v2_chk_notification_preferences_scope_type", sql`${table.scopeType} in ('global', 'space', 'session')`),
+  }),
+);
+
+export const notificationUserState = v2.table(
+  "notification_user_state",
+  {
+    userId: varchar("user_id", { length: 255 }).primaryKey(),
+    emailLastSentAt: timestamp("email_last_sent_at", { withTimezone: true }),
+    emailLastSentId: uuid("email_last_sent_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+export const pushTargets = v2.table(
+  "push_targets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    deviceId: varchar("device_id", { length: 64 }).notNull(),
+    transport: varchar("transport", { length: 16 }).$type<PushTransport>().notNull(),
+    token: text("token").notNull(),
+    keys: jsonb("keys").$type<{ p256dh: string; auth: string } | null>(),
+    locale: varchar("locale", { length: 16 }),
+    failureCount: integer("failure_count").notNull().default(0),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    transportTokenUniqueIdx: uniqueIndex("v2_uq_push_targets_transport_token").on(table.transport, table.token),
+    userActiveIdx: index("v2_idx_push_targets_user_active").on(table.userId).where(sql`${table.disabledAt} is null`),
+    transportCheck: check("v2_chk_push_targets_transport", sql`${table.transport} in ('webpush', 'fcm', 'apns')`),
   }),
 );

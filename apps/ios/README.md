@@ -9,7 +9,9 @@ page goes through the versioned `cohub.host.v1` bridge — see
 This build is the client: it uses Spaces on Cohub's cloud and on computers that serve
 them, but does not serve this device's own files (no `runtime`, `workspace` or `display`
 capability), so the page never offers it. Nor does it advertise `notifications` or
-`badge`: iOS suspends a hidden page within seconds, so those wait for push delivery.
+`badge`: iOS suspends a hidden page within seconds, so those wait for push delivery. The server
+already reserves an `apns` push transport; APNs support means answering `notifications.subscribe`
+with the device token and advertising `notifications.push`.
 
 ```
 Cohub/

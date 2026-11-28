@@ -56,6 +56,7 @@ public enum HostProtocol {
         public static let filesBlobUrl = "files.blobUrl"
         public static let filesStream = "files.stream"
         public static let shareFileUrl = "share.fileUrl"
+        public static let notificationsPush = "notifications.push"
     }
 
     public enum Method {
@@ -67,6 +68,7 @@ public enum HostProtocol {
         public static let authSignOut = "auth.signOut"
         public static let notificationsRegister = "notifications.register"
         public static let notificationsShow = "notifications.show"
+        public static let notificationsSubscribe = "notifications.subscribe"
         public static let shareText = "share.text"
         public static let navigationOpenPath = "navigation.openPath"
         public static let cacheClear = "cache.clear"

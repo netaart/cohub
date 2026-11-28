@@ -270,6 +270,8 @@ export class WebsocketClient {
   private readonly compactStreamContexts = new Map<string, CompactStreamContext>();
   private readonly patchStreamBuffers = new Map<string, PatchStreamBuffer>();
   private readonly roomSubscriptions = new Map<RealtimeRoom, RoomSubscriptionState>();
+  private deviceState: { deviceId: string; visible: boolean } | null = null;
+  private signedIn = false;
   private readonly serverCapabilities = new Set<string>();
 
   public state: WebsocketClientState = "idle";
@@ -420,6 +422,7 @@ export class WebsocketClient {
           if (!isCurrentConnection()) return;
           this.state = "open";
           this.restoreRoomSubscriptions();
+          this.flushDeviceState();
           this.reconnectAttempt = 0;
           this.emit("open", { connectionId: this.connectionId });
           resolveOnce();
@@ -698,6 +701,17 @@ export class WebsocketClient {
     });
   }
 
+  setDeviceState(state: { deviceId: string; visible: boolean }) {
+    if (this.deviceState?.deviceId === state.deviceId && this.deviceState.visible === state.visible) return;
+    this.deviceState = { ...state };
+    this.flushDeviceState();
+  }
+
+  private flushDeviceState() {
+    if (!this.deviceState || !this.signedIn || this.state !== "open" || this.ws?.readyState !== WebSocket.OPEN) return;
+    this.send({ type: "device.state", payload: this.deviceState });
+  }
+
   ping(requestId?: string) {
     const effectiveRequestId = requestId ?? `ping-${Date.now()}`;
     this.awaitingPong = true;
@@ -726,6 +740,7 @@ export class WebsocketClient {
       ? await this.getAccessToken(forceRefresh ? { forceRefresh: true } : undefined)
       : null;
     if (!token && !this.anonymous) throw new WebsocketAuthError("missing access token");
+    this.signedIn = Boolean(token);
 
     const waiter = this.createAuthWaiter();
     this.send({
