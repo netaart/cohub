@@ -1,5 +1,24 @@
 # @neta-art/cohub-cli
 
+## 10.41.0
+
+### Minor Changes
+
+- cefd3a8: Subagents of local harnesses sync as Sessions of their own, created by an agent and linked from the Turn and tool call that spawned them: Claude Code subagents, Codex `spawn_agent` threads, Cursor subagents and nested Antigravity conversations. In a `claude -p` session, a background task's completion now stays in the Turn that launched it instead of appearing as a separate Turn.
+- 1cd95cc: Notifications: each kind reaches you over the channels you keep on for it — inbox, push and email, independently. `client.inbox` lists, summarizes and reads the inbox; `client.notifications` edits per-kind channels and registers this device's push address. Realtime delivers `inbox.changed` for inbox state and `notification.sent` for notices that should get your attention now. Prompts and notes can mention people with `@[Name](cohub://users/<uuid>)`; finished turns push by default and can be kept in the inbox. `cohub inbox` lists and reads the inbox; `cohub notifications prefs` shows and changes channels.
+
+### Patch Changes
+
+- 4043139: The host bridge accepts what it can: unknown fields are dropped instead of rejected, so newer pages and older hosts (including `cohub host serve`) keep working together. `writeHostFile` streams a Blob to a host with `files.stream` as binary frames, within the host's window, and `HostBridgeClient.postFrame` sends one frame.
+- 556daff: `cohub spaces files cp` copies between Spaces when one is on a local Runtime, passing the files through this machine instead of failing. Copies into a Space also create empty directories.
+- 8251d3a: LLM model rankings carry the `credential` that served them (`platform` or `user`) and the `host` a user connection called, and keep the provider as its source names it. `cohub spaces activity` shows both, and local Claude Code and Codex Turns report the host they call.
+- Updated dependencies [493e0f8]
+- Updated dependencies [4043139]
+- Updated dependencies [cefd3a8]
+- Updated dependencies [1cd95cc]
+- Updated dependencies [8251d3a]
+  - @neta-art/cohub@13.34.0
+
 ## 10.40.0
 
 ### Minor Changes
