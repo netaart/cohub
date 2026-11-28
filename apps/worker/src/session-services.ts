@@ -4,6 +4,7 @@ import { createLocalHarnessValidator, createSessionServices } from "@cohub/core/
 import { parseRuntimeRegistration, runtimeRegistrationKey } from "@cohub/protocol";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
 import { db } from "./db.js";
+import { resolvePromptModelCredential } from "./models.js";
 import { redisCommandClient } from "./redis.js";
 import { config } from "./config.js";
 import type { PromptTemplateService } from "./prompt-templates.js";
@@ -50,6 +51,7 @@ export function getSessionDomainServices(input: {
     promptTemplateService: input.promptTemplateService,
     skillService: input.skillService,
     billingUsageGate,
+    resolvePromptModelCredential,
     validateLocalHarness: createLocalHarnessValidator(async (spaceId) => {
       const raw = await redisCommandClient.get(runtimeRegistrationKey(spaceId));
       return raw ? parseRuntimeRegistration(raw) : null;

@@ -89,12 +89,12 @@ async function totals(tx: Tx, sessionId: string) {
 
 async function labels(tx: Tx, sessionId: string) {
   const rows = await tx
-    .select({ harness: stats.harness, provider: stats.provider, model: stats.model, tokens: sql<string>`sum(${stats.totalTokens})::text`, rows: sql<string>`count(*)::text` })
+    .select({ harness: stats.harness, credential: stats.credential, provider: stats.provider, host: stats.host, model: stats.model, tokens: sql<string>`sum(${stats.totalTokens})::text`, rows: sql<string>`count(*)::text` })
     .from(stats)
     .where(eq(stats.sessionId, sessionId))
-    .groupBy(stats.harness, stats.provider, stats.model)
-    .orderBy(stats.harness, stats.provider, stats.model);
-  return rows.map((row) => `${row.harness}:${row.provider ?? "∅"}/${row.model ?? "∅"} ${row.tokens} tokens in ${row.rows} rows`);
+    .groupBy(stats.harness, stats.credential, stats.provider, stats.host, stats.model)
+    .orderBy(stats.harness, stats.credential, stats.provider, stats.host, stats.model);
+  return rows.map((row) => `${row.harness}:${row.credential}:${row.provider ?? "∅"}@${row.host ?? "∅"}/${row.model ?? "∅"} ${row.tokens} tokens in ${row.rows} rows`);
 }
 
 const aggregatedCount = async (tx: Tx, sessionId: string) => {

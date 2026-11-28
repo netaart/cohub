@@ -101,7 +101,7 @@ export function piTranslator(emit: (event: RuntimeExecutionEvent) => void): Tran
 }
 
 /** Codex app-server notifications for one Turn of one thread. */
-export function codexTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string | null; model: string | null }): Translator {
+export function codexTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string | null; host?: string | null; model: string | null }): Translator {
   let ordinal = -1;
   const items = new Map<string, JsonRecord>();
   const ordinals = new Map<string, number>();
@@ -113,6 +113,7 @@ export function codexTranslator(emit: (event: RuntimeExecutionEvent) => void, id
   let baseline: CodexTokenTotals | undefined;
   let exhaustedUntil: string | null = null;
   const { provider, model } = identity;
+  const host = identity.host ? { host: identity.host } : {};
   const latest = (): RuntimeMessage => {
     if (pending && pending.ordinal >= ordinal) return pending;
     const item = [...items.entries()].find(([id]) => ordinals.get(id) === ordinal)?.[1];
@@ -174,7 +175,7 @@ export function codexTranslator(emit: (event: RuntimeExecutionEvent) => void, id
         const itemOrdinal = ordinals.get(text(item.id)) ?? ++ordinal;
         if (!ordinals.has(text(item.id))) { ordinals.set(text(item.id), itemOrdinal); emit({ type: "message.start", ordinal: itemOrdinal }); }
         items.set(text(item.id), item);
-        const message: RuntimeMessage = { ordinal: itemOrdinal, content: codexItemContent(item), provider, model, stopReason: "stop" };
+        const message: RuntimeMessage = { ordinal: itemOrdinal, content: codexItemContent(item), provider, ...host, model, stopReason: "stop" };
         emit({ type: "content.replace", ordinal: itemOrdinal, content: message.content });
         if (pending && pending.ordinal > itemOrdinal) emit({ type: "message.commit", message });
         else {
@@ -193,7 +194,7 @@ export function codexTranslator(emit: (event: RuntimeExecutionEvent) => void, id
         const code = typeof error.codexErrorInfo === "string" ? error.codexErrorInfo : Object.keys(record(error.codexErrorInfo))[0];
         const limited = turn.status === "failed" && (code === "usageLimitExceeded" || code === "rateLimitExceeded");
         final = {
-          ...latest(), provider, model, stopReason: turn.status === "interrupted" ? "aborted" : turn.status === "failed" ? "error" : "stop", errorMessage: text(error.message) || null,
+          ...latest(), provider, ...host, model, stopReason: turn.status === "interrupted" ? "aborted" : turn.status === "failed" ? "error" : "stop", errorMessage: text(error.message) || null,
           ...(limited ? { usageLimit: { resetAt: exhaustedUntil } } : {}),
         };
         return true;

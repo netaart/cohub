@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import type { UsageCredential } from "@cohub/protocol/runtime";
 
 export const MODELS_REDIS_KEY_VERSION = "v2";
 export const PLATFORM_MODELS_REDIS_KEY = `configs:models:${MODELS_REDIS_KEY_VERSION}:platform`;
@@ -47,6 +48,7 @@ export type ModelDef = {
   contextWindowSource?: ModelContextWindowSource;
   /** Runtime-only: source detail, for example a mod mount slug. */
   contextWindowSourceRef?: string;
+  credential?: UsageCredential;
   maxTokens?: number;
   requestProfile?: ModelRequestProfile;
   /** `false` sends remote images inline instead of as URLs. */
@@ -443,7 +445,7 @@ export function resolveModelsConfigContext(input: {
 
     const models = (providerConfig.models ?? []).map((model): ModelDef => {
       if (!usesPlatform) {
-        return isPositiveInteger(model.contextWindow) ? { ...model, contextWindowSource: "user" } : model;
+        return { ...model, credential: "user", ...(isPositiveInteger(model.contextWindow) ? { contextWindowSource: "user" } : {}) };
       }
 
       const platformModel = platformProvider?.models?.find((item) => item.id === model.id);
@@ -464,6 +466,7 @@ export function resolveModelsConfigContext(input: {
       const contextWindow = clampContextWindow(value, limit);
       return {
         ...model,
+        credential: "platform",
         ...(contextWindow ? { contextWindow } : {}),
         ...(limit ? { contextWindowLimit: limit } : {}),
         contextWindowSource: source,
@@ -543,16 +546,21 @@ export function flattenModelsCatalog(config: ModelsConfig | null | undefined): M
   return entries;
 }
 
+export function findRuntimeModelCredential(
+  configs: Array<ModelsConfig | null | undefined>,
+  provider: string,
+  modelId: string,
+): UsageCredential | null {
+  const providerConfig = mergeModelsConfigs(...configs).providers[provider];
+  const model = providerConfig?.models?.find((entry) => entry.id === modelId);
+  if (!model || !(model.api ?? providerConfig?.api) || !(model.baseUrl ?? providerConfig?.baseUrl)) return null;
+  return model.credential ?? "platform";
+}
+
 export function isRuntimeModelAvailable(
   configs: Array<ModelsConfig | null | undefined>,
   provider: string,
   modelId: string,
 ): boolean {
-  const providerConfig = mergeModelsConfigs(...configs).providers[provider];
-  const model = providerConfig?.models?.find((entry) => entry.id === modelId);
-  return Boolean(
-    model &&
-    (model.api ?? providerConfig?.api) &&
-    (model.baseUrl ?? providerConfig?.baseUrl),
-  );
+  return findRuntimeModelCredential(configs, provider, modelId) !== null;
 }

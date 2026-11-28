@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
 import { basename, join } from "node:path";
-import { projectNativeSession, type ContentBlock, type RuntimeMessage, type RuntimeTurnInput } from "@neta-art/cohub";
+import { baseUrlHost, projectNativeSession, type ContentBlock, type RuntimeMessage, type RuntimeTurnInput } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { codexModelCatalog } from "../model-catalog.js";
 import { describeError } from "../../network-error.js";
@@ -18,6 +19,12 @@ import type { HarnessRun, HarnessTurn, LocalHarnessAdapter, ThreadKind } from ".
 
 /** A stop request that the harness does not honour within this long ends its private process. */
 const ABORT_ESCALATION_MS = 5_000;
+
+const CONFIG_READ_TIMEOUT_MS = 2_000;
+
+function codexProviderHost(config: JsonRecord | null, provider: string): string | null {
+  return baseUrlHost(record(record(record(config?.config).model_providers)[provider]).base_url);
+}
 
 function codexSessionPath(nativeSessionId: string): string {
   const home = process.env.CODEX_HOME?.trim() || join(homedir(), ".codex");
@@ -73,6 +80,10 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
       },
     };
     const existing = { ...threadOptions, threadId: session.nativeSessionId, path: session.path, excludeTurns: true };
+    const config = Promise.race([
+      codex.request("config/read", { includeLayers: false, cwd: executor.cwd }).catch(() => null),
+      delay(CONFIG_READ_TIMEOUT_MS, null, { ref: false }),
+    ]);
     const opened = prepared.resume === "new" ? await codex.request("thread/start", threadOptions)
       : prepared.resume === "restored" ? await codex.request("thread/fork", existing)
         : await resumeThread(codex, existing);
@@ -84,7 +95,8 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
       session = { ...session, nativeSessionId: threadId, path: thread.path };
       executor.ingest.adopt(session, input.sessionId);
     }
-    const translator = codexTranslator(turn.emit, { provider: text(opened.modelProvider) || "codex", model: text(opened.model) || input.model || null });
+    const provider = text(opened.modelProvider) || "codex";
+    const translator = codexTranslator(turn.emit, { provider, host: codexProviderHost(await config, provider), model: text(opened.model) || input.model || null });
     const content = await codexPrompt(input);
     signal.throwIfAborted();
     await turn.started(session);

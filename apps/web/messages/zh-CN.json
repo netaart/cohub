@@ -671,6 +671,7 @@
 	"activity_llm_models": "LLM 模型",
 	"activity_tokens_cost": "Token · 费用",
 	"activity_no_llm_usage": "此范围内没有 LLM 用量。",
+	"activity_own_key": "自有密钥",
 	"activity_generation_models": "生成模型",
 	"activity_calls_cost": "调用 · 费用",
 	"activity_calls": "调用",

@@ -18,7 +18,7 @@ const router = new Hono();
  * GET /api/spaces/:id/activity?days=N
  * Everything the space Activity page renders in one response: usage hourly
  * rollups + summary, model/app rankings, and per-user contributor stats.
- * Cost figures are zeroed for viewers without `member.view`.
+ * Viewers without `member.view` get zeroed costs and masked user labels.
  */
 router.get("/", async (c) => {
 	const user = getOptionalAuth(c);
@@ -32,6 +32,7 @@ router.get("/", async (c) => {
 		const activity = await loadSpaceActivity({
 			spaceId,
 			daysParam: c.req.query("days"),
+			masked: !includeCost,
 		});
 		return c.json(includeCost ? activity : stripActivityCost(activity));
 	} catch (error) {

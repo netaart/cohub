@@ -135,8 +135,9 @@ export function printActivityReport(activity: SpaceActivityResponse): void {
 		console.log("\n  Top LLM models:");
 		table(llmModels, [
 			{ key: "model", label: "Model" },
-			{ key: "provider", label: "Provider" },
+			{ key: "provider", label: "Provider", format: (provider, row) => row.host && row.host !== provider ? `${provider} (${row.host})` : String(provider) },
 			{ key: "harness", label: "Harness", format: (harness) => harnessLabel(resolveHarness({ harness })) },
+			{ key: "credential", label: "Credential" },
 			{ key: "totalTokens", label: "Tokens", format: formatNumber },
 			{ key: "requestCount", label: "Requests", format: formatNumber },
 			...(showCost ? [{ key: "costTotal", label: "Cost", format: formatCost }] : []),

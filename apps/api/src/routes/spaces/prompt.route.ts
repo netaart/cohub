@@ -38,7 +38,7 @@ import { enqueueAgentTurnJob } from "../../agent-turn-queue.js";
 import { requestAgentTurnAbort } from "../../agent-turn-abort.js";
 import { billingBlockedResponse } from "../../lib/billing-blocked.js";
 import { getRequestSource, resolveSessionSourceFromRequest } from "../../lib/request-source.js";
-import { validatePromptModel } from "../../llm/models.js";
+import { resolvePromptModelCredential } from "../../llm/models.js";
 import { applySessionLabels, resolveLabelRefIds } from "./session-labels.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -530,12 +530,10 @@ router.post("/:id/prompt", async (c) => {
   const localHarness = isLocalHarness(body.harness);
   const requestedProvider = body.provider?.trim() || (requestedModel && !localHarness ? "cohub" : null);
   if (mode !== "immediate" && localHarness) return c.json({ message: "Local Harness scheduling is unavailable" }, 422);
-  if (
-    requestedModel &&
-    requestedProvider &&
-    !localHarness &&
-    !(await validatePromptModel({ userId: user.uuid, provider: requestedProvider, model: requestedModel }))
-  ) {
+  const modelCredential = requestedModel && requestedProvider && !localHarness
+    ? await resolvePromptModelCredential({ userId: user.uuid, provider: requestedProvider, model: requestedModel })
+    : null;
+  if (requestedModel && requestedProvider && !localHarness && !modelCredential) {
     return c.json({ code: "model_unavailable", message: "requested model is not available" }, 422);
   }
 
@@ -625,8 +623,8 @@ router.post("/:id/prompt", async (c) => {
         accessMode,
         env: promptEnv,
         context: { kind: "public_api", requestId: getCurrentRequestId(), auth: await getPromptAuthContext(c, spaceId) },
-      }, {}, requestedModel && requestedProvider
-        ? { prevalidatedModel: { provider: requestedProvider, model: requestedModel } }
+      }, {}, requestedModel && requestedProvider && modelCredential
+        ? { prevalidatedModel: { provider: requestedProvider, model: requestedModel, credential: modelCredential } }
         : {});
       const response = await buildSpacePromptTurnResponse(await getSpaceSessionById(sessionId), turnId);
       if (!response) return c.json({ message: "turn not found" }, 500);

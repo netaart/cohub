@@ -1,6 +1,7 @@
 import { resolveWalletMessageEligibility } from "@cohub/core/space-wallet";
 import { and, asc, eq, gte, sql } from "drizzle-orm";
 import type { Usage } from "@cohub/protocol/core";
+import { usageCredentialMeta, type UsageCredential } from "@cohub/protocol/runtime";
 import type {
   ContextCompactionMeta,
   ContextCompactionScope,
@@ -32,7 +33,7 @@ type PersistCompactionEventInput = {
   tokensBefore: number;
   estimatedTokensAfter: number | null;
   firstKeptEntryId: string;
-  model: { provider: string; id: string };
+  model: { provider: string; id: string; credential?: UsageCredential; baseUrl?: string };
   contextWindow: number;
   keepRecentTokens: number;
   summarizedMessageCount: number;
@@ -214,6 +215,7 @@ export async function persistCompactionEvent(
           turnId: messageTurnId,
           actorUserId: input.actorUserId,
           ...compactionMeta,
+          ...usageCredentialMeta(input.model),
           walletBillingEligible: resolveWalletMessageEligibility(),
         },
         startedAt,

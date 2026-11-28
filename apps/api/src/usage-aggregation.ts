@@ -1,5 +1,7 @@
 import { generationUsageStatsHourly, tokenUsageStatsHourly } from "@cohub/db";
-import { resolveHarness, type HarnessKind } from "@cohub/protocol/runtime";
+import { resolveHarness, type HarnessKind, type UsageCredential } from "@cohub/protocol/runtime";
+import { sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 const toFiniteNumber = (value: unknown): number => {
   const numberValue = Number(value);
@@ -22,7 +24,9 @@ export type UsageRow = {
   successCount: number;
   errorCount: number;
   harness: string;
+  credential: string;
   provider: string | null;
+  host: string | null;
   model: string | null;
 };
 
@@ -197,9 +201,18 @@ export const USAGE_SELECT_COLUMNS = {
   successCount: tokenUsageStatsHourly.successCount,
   errorCount: tokenUsageStatsHourly.errorCount,
   harness: tokenUsageStatsHourly.harness,
+  credential: tokenUsageStatsHourly.credential,
   provider: tokenUsageStatsHourly.provider,
+  host: tokenUsageStatsHourly.host,
   model: tokenUsageStatsHourly.model,
 } as const;
+
+export const publicUsageLabel = (column: AnyPgColumn) => sql<string | null>`case
+  when ${tokenUsageStatsHourly.credential} <> 'user' or ${column} is null then ${column}
+  when char_length(${column}) > 7 then left(${column}, 2) || '***' || right(${column}, 2)
+  else left(${column}, 1) || '***' end`;
+
+export const asUsageCredential = (value: string): UsageCredential => value === "user" ? "user" : "platform";
 
 export const resolveUsageDays = (daysParam: string | undefined): number => {
   const parsedDays = parseInt(daysParam ?? "", 10);
@@ -310,7 +323,9 @@ type GenerationUsageAggregationResult = {
 export type UserModelRankings = {
   llmModels: Array<{
     harness: HarnessKind;
+    credential: UsageCredential;
     provider: string;
+    host: string | null;
     model: string;
     totalTokens: number;
     requestCount: number;
@@ -331,9 +346,10 @@ export function aggregateUserModelRankings(
   const llmModels = new Map<string, UserModelRankings["llmModels"][number]>();
   for (const row of usageRows) {
     const harness = resolveHarness(row);
+    const credential = asUsageCredential(row.credential);
     const provider = row.provider ?? "unknown";
     const model = row.model ?? "unknown";
-    const key = `${harness}\0${provider}\0${model}`;
+    const key = `${harness}\0${credential}\0${provider}\0${row.host ?? ""}\0${model}`;
     const current = llmModels.get(key);
     if (current) {
       current.totalTokens += row.totalTokens;
@@ -342,7 +358,9 @@ export function aggregateUserModelRankings(
     } else {
       llmModels.set(key, {
         harness,
+        credential,
         provider,
+        host: row.host,
         model,
         totalTokens: row.totalTokens,
         requestCount: row.requestCount,

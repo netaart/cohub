@@ -1,5 +1,11 @@
 <script lang="ts">
+import {
+	harnessLabel,
+	isLocalHarness,
+	type LocalHarness,
+} from "@cohub/protocol/runtime";
 import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import HarnessIcon from "#lib/components/composer/HarnessIcon.svelte";
 import ListRowText from "#lib/components/list-page/ListRowText.svelte";
 import { LIST_ROW_AVATAR } from "#lib/components/list-page/list-row.ts";
 import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
@@ -110,6 +116,10 @@ function getSpaceHref(row: AnyRow): string | null {
 	return buildSpaceLandingRoute(row.spaceId);
 }
 
+function getLocalHarness(row: AnyRow): LocalHarness | null {
+	return "harness" in row && isLocalHarness(row.harness) ? row.harness : null;
+}
+
 function getUserProfile(row: AnyRow): UserProfile | null {
 	if (isSpaceRow(row) || isUserRow(row)) return row.userProfile;
 	return null;
@@ -119,7 +129,8 @@ function getRowKey(row: AnyRow): string {
 	const board = activeBoard;
 	if (isSpaceRow(row)) return `${board}:spaces:${row.spaceId}`;
 	if (isUserRow(row)) return `${board}:users:${row.userId}`;
-	return `${board}:models:${row.provider}:${row.model}`;
+	const source = "harness" in row ? `${row.harness}:${row.credential}:` : "";
+	return `${board}:models:${source}${row.provider}:${row.model}`;
 }
 
 function getPrimaryMetric(row: AnyRow): string {
@@ -307,6 +318,7 @@ const boardHint = $derived(
 					{@const spaceHref = getSpaceHref(row)}
 					{@const secondary = getSecondaryMetrics(row)}
 					{@const hasAvatar = isSpaceRow(row) || (isUserRow(row) && Boolean(userProfile))}
+					{@const localHarness = getLocalHarness(row)}
 					<div
 						data-density="compact"
 						class="trending-table-row px-0"
@@ -337,7 +349,12 @@ const boardHint = $derived(
 								<UserAvatar name={userProfile.displayName} avatarUrl={userProfile.avatarUrl} seed={userProfile.userUuid} size={LIST_ROW_AVATAR.compact} />
 							{/if}
 							{#snippet owner()}by {userProfile?.displayName}{/snippet}
-							<ListRowText title={getDisplayName(row)} tooltip={getDisplayName(row)} subtitle={isSpaceRow(row) && userProfile ? owner : undefined} />
+							{#snippet harnessSource()}
+								{#if localHarness}
+									<span class="inline-flex items-center gap-1"><HarnessIcon harness={localHarness} size={11} />{harnessLabel(localHarness)}</span>
+								{/if}
+							{/snippet}
+							<ListRowText title={getDisplayName(row)} tooltip={getDisplayName(row)} subtitle={isSpaceRow(row) && userProfile ? owner : localHarness ? harnessSource : undefined} />
 						</svelte:element>
 
 						<div class="flex h-[var(--list-row-height)] items-center justify-end">

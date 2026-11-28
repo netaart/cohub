@@ -2,7 +2,7 @@ import type { ModelTaskConfig } from "@cohub/infra/config-runtime/model-tasks";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { createModelsFromRegistry } from "./pi-models-adapter.js";
 
-export type TaskRuntimeModel = Model<Api> & Pick<ModelTaskConfig["model"], "requestProfile" | "imageUrlInput">;
+export type TaskRuntimeModel = Model<Api> & Pick<ModelTaskConfig["model"], "requestProfile" | "imageUrlInput" | "credential">;
 
 function finiteOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -33,6 +33,7 @@ export function toTaskRuntimeModel(
     compat: model.compat as Model<Api>["compat"],
     requestProfile: model.requestProfile,
     imageUrlInput: model.imageUrlInput,
+    credential: model.credential,
   };
 }
 

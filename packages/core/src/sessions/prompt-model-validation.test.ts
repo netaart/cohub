@@ -14,14 +14,14 @@ const input: SubmitSessionPromptInput = {
   provider: null,
 };
 
-function createDeps(validatePromptModel: SessionPromptDependencies["validatePromptModel"]): SessionPromptDependencies {
+function createDeps(resolvePromptModelCredential: SessionPromptDependencies["resolvePromptModelCredential"]): SessionPromptDependencies {
   return {
     randomUUID: () => "message-id",
     expandPromptTemplate: async () => null,
     createSessionTurn: async () => ({ id: "turn-id", spaceId: "space-1" }),
     enqueueSpacePrompt: async () => undefined,
     failSessionTurn: async () => undefined,
-    validatePromptModel,
+    resolvePromptModelCredential,
   };
 }
 
@@ -30,11 +30,11 @@ test("matching prevalidated model skips duplicate model validation", async () =>
   const result = await submitSessionPrompt(
     createDeps(async () => {
       validationCalls += 1;
-      return false;
+      return null;
     }),
     input,
     {},
-    { prevalidatedModel: { provider: "cohub", model: "model-1" } },
+    { prevalidatedModel: { provider: "cohub", model: "model-1", credential: "platform" } },
   );
 
   assert.deepEqual(result, { turnId: "turn-id", userMessageId: "message-id" });
@@ -48,11 +48,11 @@ test("mismatched prevalidated model still validates the requested model", async 
     submitSessionPrompt(
       createDeps(async (modelInput) => {
         validatedInput = modelInput;
-        return false;
+        return null;
       }),
       input,
       {},
-      { prevalidatedModel: { provider: "cohub", model: "other-model" } },
+      { prevalidatedModel: { provider: "cohub", model: "other-model", credential: "platform" } },
     ),
     ModelUnavailableError,
   );

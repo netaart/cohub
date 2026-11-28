@@ -16,7 +16,7 @@ import { dispatchSessionUpdated, dispatchTurnCreated } from "./realtime-events.j
 import { dispatchTurnUpdated } from "./session-output.js";
 import { hydrateTurnAuthorProfiles } from "./session-turns.js";
 import { createLogger } from "@cohub/infra/logging";
-import { validatePromptModel } from "./llm/models.js";
+import { resolvePromptModelCredential } from "./llm/models.js";
 import { enqueueReferences } from "./reference-index-queue.js";
 import { getRuntimeRegistration } from "./runtime.js";
 import { spaceWalletBilling } from "./space-wallet-billing.js";
@@ -74,7 +74,7 @@ export function getSessionDomainServices(input?: {
     skillService: input?.skillService ?? defaultSkillService,
     billingUsageGate,
     validateLocalHarness: createLocalHarnessValidator(getRuntimeRegistration),
-    validatePromptModel: ({ userId, provider, model }) => validatePromptModel({ userId, provider, model }),
+    resolvePromptModelCredential,
     sandboxRecovery: {
       maybeRecoverForPrompt: async ({ spaceId, userId, source }) => {
         const sandbox = await sandboxLifecycle.getSandbox(spaceId);

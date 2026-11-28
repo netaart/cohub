@@ -28,7 +28,9 @@ function usageRow(
     successCount: 0,
     errorCount: 0,
     harness: "cohub",
+    credential: "platform",
     provider: null,
+    host: null,
     model: null,
     userId: null,
     sessionId: "00000000-0000-0000-0000-000000000001",
@@ -129,7 +131,7 @@ test("stripActivityCost zeroes every cost surface while keeping the shape", () =
     totals: { totalTokens: 10, requestCount: 2, successCount: 2, errorCount: 0, costTotal: 2 },
     rankings: {
       llmModels: [
-        { harness: "cohub" as const, provider: "anthropic", model: "claude", totalTokens: 10, requestCount: 1, costTotal: 1 },
+        { harness: "cohub" as const, credential: "platform" as const, provider: "anthropic", host: null, model: "claude", totalTokens: 10, requestCount: 1, costTotal: 1 },
       ],
       generationModels: [
         { provider: "openai.images", model: "seedream", requestCount: 1, costTotal: 1 },

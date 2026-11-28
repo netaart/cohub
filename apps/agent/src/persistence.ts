@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { ContentBlock, Usage } from "@cohub/protocol/core";
 import type { PersistMessageInput, SessionTurnStatus } from "@cohub/protocol/model";
 import type { AgentTurnAbortEvent } from "@cohub/protocol";
+import { usageCredentialMeta } from "@cohub/protocol/runtime";
 import { sessionMessages, sessionTurns, spaceSessions } from "@cohub/db";
 import { collectImageToTextTiming, collectToolMetrics } from "@cohub/protocol/model";
 import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen, withNextSessionMessageSequence, addImageToTextCallsToSummary, claimSessionFallbackTitle, countToolCallsInContent, deriveMessagePreviewText, deriveSessionFallbackTitle, finalizeImageToTextUsageSummary, readImageToTextCalls, readSessionTitleSource, resolveMessageTurnId, shouldGenerateSessionTitle, createImageToTextUsageSummaryAccumulator, sumImageToTextUsage } from "@cohub/core/sessions";
@@ -20,6 +21,7 @@ import { buildAssistantIdempotencyKey, buildUserIdempotencyKey, completeMessageT
 import { publishMessagePersisted, publishTurnFinalized, publishTurnState } from "./persistence-events.js";
 import { addUsage, buildIntermediateObjectsForTurn } from "./persistence-intermediates.js";
 import { dispatchFinalAssistantToGateway } from "./persistence-gateway.js";
+import type { CohubModelRegistry } from "./runtime/model-registry.js";
 export { publishSessionTurnsUpdated } from "./persistence-events.js";
 export { persistCompactionEvent } from "./persistence-compaction.js";
 
@@ -228,7 +230,7 @@ export async function persistUserMessage(input: { spaceId: string; sessionId: st
 
 const EMPTY_ASSISTANT_MESSAGE_ERROR = "LLM returned an empty assistant message after streaming completed.";
 
-export async function persistAssistantMessage(input: { spaceId: string; spaceSessionId: string; userMessageId: string; event: Record<string, unknown>; userId?: string | null; turnId?: string | null; startedAt?: string | null; completedAt?: string | null; messageOrdinal?: number | null; thinkingLevel?: string | null; contextWindow?: number | null; contextWindowSource?: string | null; idempotencyKey?: string }) {
+export async function persistAssistantMessage(input: { spaceId: string; spaceSessionId: string; userMessageId: string; event: Record<string, unknown>; userId?: string | null; turnId?: string | null; startedAt?: string | null; completedAt?: string | null; messageOrdinal?: number | null; thinkingLevel?: string | null; contextWindow?: number | null; contextWindowSource?: string | null; idempotencyKey?: string; modelRegistry?: Pick<CohubModelRegistry, "find"> }) {
   const assistantMessage = input.event.message;
   const contextMeta = typeof input.contextWindow === "number" && input.contextWindow > 0
     ? { contextWindow: input.contextWindow, ...(input.contextWindowSource ? { contextWindowSource: input.contextWindowSource } : {}) }
@@ -247,14 +249,17 @@ export async function persistAssistantMessage(input: { spaceId: string; spaceSes
   const effectiveStopReason = isEmptySuccessfulAssistant ? "error" : stopReason;
   const effectiveErrorMessage = isEmptySuccessfulAssistant ? EMPTY_ASSISTANT_MESSAGE_ERROR : errorMessage;
   const timing = completeMessageTiming({ startedAt: input.startedAt, completedAt: input.completedAt });
+  const provider = typeof assistant.provider === "string" ? assistant.provider : null;
+  const model = typeof assistant.model === "string" ? assistant.model : null;
+  const credentialMeta = input.modelRegistry ? usageCredentialMeta(provider && model ? input.modelRegistry.find(provider, model) : null) : {};
 
   const message: PersistMessageInput["message"] = {
     role: "assistant",
     externalMessageId: typeof assistant.id === "string" ? assistant.id : null,
     protocolMessageId: typeof assistant.id === "string" ? assistant.id : null,
     content: normalized.content,
-    provider: typeof assistant.provider === "string" ? assistant.provider : null,
-    model: typeof assistant.model === "string" ? assistant.model : null,
+    provider,
+    model,
     stopReason: effectiveStopReason,
     errorMessage: effectiveErrorMessage,
     // messageOrdinal 必须与 stream_update(session.turn.patch) 事件里的 messageOrdinal 保持同一套编号体系，
@@ -263,7 +268,7 @@ export async function persistAssistantMessage(input: { spaceId: string; spaceSes
     // 与 stream-snapshot API 重新编号的 ordinal:N 不在同一套去重 key 体系里，
     // 导致同一条中间消息在快照恢复与实时事件两条路径里无法合并，最终在
     // ProcessCard/ToolCallList 的 {#each ... (id)} 产生重复 key(each_key_duplicate)。
-    meta: { ...(normalizeRecord(assistant.meta) ?? {}), turnId: input.turnId ?? null, spaceId: input.spaceId, sessionId: input.spaceSessionId, nativeApi: typeof assistant.api === "string" ? assistant.api : null, rawStopReason: stopReason, messageOrdinal: input.messageOrdinal ?? null, ...contextMeta, ...(isEmptySuccessfulAssistant ? { emptyAssistantMessageConvertedToError: true } : {}), thinking: normalized.thinking, thinkingSummary: normalized.thinkingSummary, toolCallRenderStates: normalized.toolCallRenderStates, agentSessionEntryId: typeof assistant.sessionEntryId === "string" ? assistant.sessionEntryId : null },
+    meta: { ...(normalizeRecord(assistant.meta) ?? {}), turnId: input.turnId ?? null, spaceId: input.spaceId, sessionId: input.spaceSessionId, nativeApi: typeof assistant.api === "string" ? assistant.api : null, rawStopReason: stopReason, messageOrdinal: input.messageOrdinal ?? null, ...contextMeta, ...(isEmptySuccessfulAssistant ? { emptyAssistantMessageConvertedToError: true } : {}), thinking: normalized.thinking, thinkingSummary: normalized.thinkingSummary, toolCallRenderStates: normalized.toolCallRenderStates, agentSessionEntryId: typeof assistant.sessionEntryId === "string" ? assistant.sessionEntryId : null, ...credentialMeta },
     usage: normalizeUsage(assistant.usage as PersistMessageInput["message"]["usage"]),
     ...timing,
   };

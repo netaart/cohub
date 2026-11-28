@@ -1,14 +1,12 @@
 import { sessionMessages, tokenUsageStatsHourly } from "@cohub/db";
 import type { Usage } from "@cohub/protocol/core";
-import { resolveHarness, type HarnessKind } from "@cohub/protocol/runtime";
+import { readUsageCredential, readUsageHost, resolveHarness, type HarnessKind, type UsageCredential } from "@cohub/protocol/runtime";
 import { and, eq, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { readImageToTextCalls } from "./image-to-text.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: any Postgres driver, including transactions.
 type Executor = PgDatabase<PgQueryResultHKT, any, any>;
-
-export const LOCAL_USAGE_PROVIDER = "local";
 
 export type LlmRequestStats = {
   requestCount: number;
@@ -27,7 +25,9 @@ export type TokenUsageIncrement = LlmRequestStats & {
   spaceId: string;
   sessionId: string;
   harness: HarnessKind;
+  credential: UsageCredential;
   provider: string | null;
+  host: string | null;
   model: string | null;
   usage: Usage | null;
 };
@@ -91,14 +91,18 @@ export function tokenUsageIncrements(
   return [
     {
       ...base,
-      provider: meta?.runtime === "local" ? LOCAL_USAGE_PROVIDER : message.provider,
+      credential: readUsageCredential(meta),
+      provider: message.provider,
+      host: readUsageHost(meta),
       model: message.model,
       usage: asRecord(message.usage) as Usage | null,
       ...resolveLlmRequestStats(message),
     },
     ...readImageToTextCalls(message.meta).map((call) => ({
       ...base,
+      credential: call.credential,
       provider: call.provider,
+      host: call.host,
       model: call.model,
       usage: call.usage,
       requestCount: 1,
@@ -131,7 +135,9 @@ export async function recordTokenUsage(db: Executor, increment: TokenUsageIncrem
     spaceId: increment.spaceId,
     sessionId: increment.sessionId,
     harness: increment.harness,
+    credential: increment.credential,
     provider: increment.provider,
+    host: increment.host,
     model: increment.model,
     requestCount: increment.requestCount,
     successCount: increment.successCount,
@@ -140,7 +146,7 @@ export async function recordTokenUsage(db: Executor, increment: TokenUsageIncrem
     ...costs,
     updatedAt: new Date(),
   }).onConflictDoUpdate({
-    target: [t.bucketStartAt, t.userId, t.spaceId, t.sessionId, t.harness, t.provider, t.model],
+    target: [t.bucketStartAt, t.userId, t.spaceId, t.sessionId, t.harness, t.credential, t.provider, t.host, t.model],
     set: {
       requestCount: sql`${t.requestCount} + ${increment.requestCount}`,
       successCount: sql`${t.successCount} + ${increment.successCount}`,

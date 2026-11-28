@@ -16,7 +16,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { db } from "../db.js";
 import { dispatchLabelAssignmentsUpdated } from "../label-events.js";
 import { UnrecoverableError } from "bullmq";
-import { validatePromptModel } from "../models.js";
+import { resolvePromptModelCredential } from "../models.js";
 
 const MAX_TASK_SOURCE_LENGTH = 255;
 
@@ -69,7 +69,8 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
   const promptEnv = parsePromptEnv(env);
   const modelId = model?.trim();
   const providerId = provider?.trim() || "cohub";
-  if (modelId && !(await validatePromptModel({ userId, provider: providerId, model: modelId }))) {
+  const modelCredential = modelId ? await resolvePromptModelCredential({ userId, provider: providerId, model: modelId }) : null;
+  if (modelId && !modelCredential) {
     throw new UnrecoverableError(`Requested model is not available: ${providerId}/${modelId}`);
   }
   const source = normalizeTaskSource(payloadSource);
@@ -125,7 +126,7 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
       cronJobId: payload.cronJobId ?? null,
       auth: sanitizedAuth,
     } satisfies SubmitSessionPromptContext,
-  });
+  }, {}, modelId && modelCredential ? { prevalidatedModel: { provider: providerId, model: modelId, credential: modelCredential } } : {});
 
   return {
     sessionId: promptSessionId,

@@ -378,6 +378,7 @@ export function subscribeSessionEvents(handle: SessionHandle) {
             thinkingLevel: handle.session.agent.state.thinkingLevel,
             contextWindow: handle.session.agent.state.model.contextWindow,
             contextWindowSource: (handle.session.agent.state.model as CohubModel).contextWindowSource,
+            modelRegistry: handle.session.modelRegistry,
           });
         } catch (error) {
           if (error instanceof Error) span.recordException(error);

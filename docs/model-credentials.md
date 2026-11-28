@@ -20,6 +20,12 @@ The name `cohub` is reserved for platform connections. Users may adjust paramete
 
 Raw file/cache values stay unresolved. Runtime resolution returns an in-memory copy and does not mutate or republish the cached config. Existing raw Redis cache entries are checked on use, so no cache schema change or flush is required for this fix.
 
+## Billing and usage
+
+Every resolved model carries a runtime-only `credential`: `platform` when it calls through platform configuration (the platform catalog, a parameter-only override, a platform task model), `user` for a user-owned provider. Local Harness Turns are always `user`. Only `platform` calls spend Cohub credits; `user` calls are neither charged nor gated on the Cohub balance, whether a chat Turn, scheduled prompt, compaction, image-to-text call or raw completion. A prompt without a model keeps the Session's current one (its latest Cohub agent Turn's, skipping compaction), so the gate checks that model, or the default when the user can no longer run it. Generation and decision calls always run on platform credentials.
+
+Messages record it in `meta.credential` and, for user connections, `meta.host`: the base URL's hostname, never its port or path. Hourly usage keeps `harness`, `credential`, the provider as its source names it, and `host`, so owners see where their usage went. Public views (Trending, and Space activity for viewers without `member.view`) mask a `user` provider and host: a name longer than seven characters keeps its first and last two (`gateway.example.com` becomes `ga***om`), a shorter one only its first (`openai` becomes `o***`). Messages written before credentials were recorded count as `platform`.
+
 ## Model parameter overrides
 
 `contextWindow` drives compaction, truncation, and handoff decisions. Overrides of a platform model may tighten or relax it but are capped at the platform value.

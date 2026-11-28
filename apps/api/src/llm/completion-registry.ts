@@ -5,6 +5,7 @@ import {
   type ModelDef,
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
+import type { UsageCredential } from "@cohub/protocol/runtime";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 export type RuntimeLlmModel = Model<Api> & {
@@ -13,6 +14,7 @@ export type RuntimeLlmModel = Model<Api> & {
   imageUrlInput?: boolean;
   /** Discovery hint: hidden models stay resolvable by id but never become implicit defaults. */
   hidden?: boolean;
+  credential?: UsageCredential;
 };
 
 function finiteNumberOrZero(value: unknown): number {
@@ -61,6 +63,7 @@ export class CompletionModelRegistry {
           imageUrlInput: modelDef.imageUrlInput ?? providerConfig.imageUrlInput,
           headers: mergeHeaders(providerConfig.headers, modelDef.headers),
           compat: (modelDef.compat ?? providerConfig.compat) as Model<Api>["compat"],
+          credential: modelDef.credential,
           hidden: modelDef.hidden === true,
         } as RuntimeLlmModel);
       }

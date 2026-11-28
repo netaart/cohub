@@ -1,4 +1,5 @@
 import type { Usage } from "@cohub/protocol/core";
+import { usageCredentialMeta, type UsageCredential } from "@cohub/protocol/runtime";
 import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import type {
   Api,
@@ -25,6 +26,8 @@ export type AgentImageToTextCall = {
   sourceKey: string;
   provider: string;
   model: string;
+  credential: UsageCredential;
+  host?: string;
   status: "succeeded" | "failed";
   usage: Usage | null;
   durationMs: number;
@@ -285,6 +288,7 @@ export async function prepareAgentImagesForModel(input: {
         sourceKey: image.sourceKey,
         provider: input.config?.model.provider ?? "unknown",
         model: input.config?.model.id ?? "unknown",
+        ...usageCredentialMeta(input.config?.model),
         status: "failed",
         usage: null,
         durationMs: Math.max(0, Date.now() - startedAt),
@@ -321,6 +325,7 @@ export async function prepareAgentImagesForModel(input: {
       sourceKey: image.sourceKey,
       provider: description.provider,
       model: description.model,
+      ...usageCredentialMeta(input.config?.model),
       status: "succeeded",
       usage: description.usage,
       durationMs: Math.max(0, Date.now() - startedAt),

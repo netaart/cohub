@@ -13,6 +13,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "../config.js";
 import { redisCommandClient } from "../redis.js";
+import { asUsageCredential, publicUsageLabel } from "../usage-aggregation.js";
+import { resolveHarness } from "@cohub/protocol/runtime";
 
 const router = new Hono();
 
@@ -205,35 +207,37 @@ async function loadTrendingUsers() {
 async function loadTrendingModels() {
   const { yesterdayStart, todayStart } = getYesterdayWindow();
   const modelsCatalog = await loadPlatformModelsCatalog();
+  const usage = schema.tokenUsageStatsHourly;
+  const provider = publicUsageLabel(usage.provider);
 
   const rows = await db
     .select({
-      provider: schema.tokenUsageStatsHourly.provider,
-      model: schema.tokenUsageStatsHourly.model,
-      totalTokens: sql<number>`SUM(${schema.tokenUsageStatsHourly.totalTokens})`.as("total_tokens"),
-      costTotal: sql<string>`SUM(${schema.tokenUsageStatsHourly.costTotal})`.as("cost_total"),
-      sessionCount: sql<number>`COUNT(DISTINCT ${schema.tokenUsageStatsHourly.sessionId})`.as("session_count"),
-      requestCount: sql<number>`SUM(${schema.tokenUsageStatsHourly.requestCount})`.as("request_count"),
+      harness: usage.harness,
+      credential: usage.credential,
+      provider,
+      model: usage.model,
+      totalTokens: sql<number>`SUM(${usage.totalTokens})`.as("total_tokens"),
+      costTotal: sql<string>`SUM(${usage.costTotal})`.as("cost_total"),
+      sessionCount: sql<number>`COUNT(DISTINCT ${usage.sessionId})`.as("session_count"),
+      requestCount: sql<number>`SUM(${usage.requestCount})`.as("request_count"),
     })
-    .from(schema.tokenUsageStatsHourly)
-    .where(
-      and(
-        gte(schema.tokenUsageStatsHourly.bucketStartAt, yesterdayStart),
-        lt(schema.tokenUsageStatsHourly.bucketStartAt, todayStart),
-      ),
-    )
-    .groupBy(schema.tokenUsageStatsHourly.provider, schema.tokenUsageStatsHourly.model)
+    .from(usage)
+    .where(and(gte(usage.bucketStartAt, yesterdayStart), lt(usage.bucketStartAt, todayStart)))
+    .groupBy(usage.harness, usage.credential, provider, usage.model)
     .orderBy(sql`total_tokens DESC`)
     .limit(10);
 
   return rows.map((r, i) => {
+    const credential = asUsageCredential(r.credential);
     const provider = r.provider ?? "unknown";
     const model = r.model ?? "unknown";
     return {
       rank: i + 1,
+      harness: resolveHarness(r),
+      credential,
       provider,
       model,
-      modelDisplay: buildLlmModelDisplayName(modelsCatalog, provider, model),
+      modelDisplay: credential === "platform" ? buildLlmModelDisplayName(modelsCatalog, provider, model) : `${provider}/${model}`,
       totalTokens: toFiniteNumber(r.totalTokens),
       costTotal: toFiniteNumber(r.costTotal),
       sessionCount: toFiniteNumber(r.sessionCount),
@@ -394,7 +398,7 @@ router.get("/users", async (c) => {
 
 router.get("/models", async (c) => {
   setTrendingCacheHeaders(c);
-  return c.json(await getCachedTrending("models", loadTrendingModels));
+  return c.json(await getCachedTrending("models:v2", loadTrendingModels));
 });
 
 router.get("/generations/spaces", async (c) => {

@@ -671,6 +671,7 @@
 	"activity_llm_models": "LLM models",
 	"activity_tokens_cost": "Tokens · Cost",
 	"activity_no_llm_usage": "No LLM usage in this range.",
+	"activity_own_key": "Own key",
 	"activity_generation_models": "Generation models",
 	"activity_calls_cost": "Calls · Cost",
 	"activity_calls": "Calls",

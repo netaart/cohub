@@ -30,6 +30,12 @@ const withCost = (value: number, cost: number) =>
 	showCost
 		? `${formatCompact(value, locale)} · ${formatCost(cost, locale)}`
 		: formatCompact(value, locale);
+
+const llmSource = ({
+	provider,
+	host,
+}: UserActivityRankings["llmModels"][number]) =>
+	host && host !== provider ? `${provider} · ${host}` : provider;
 </script>
 
 <div class="grid gap-8 py-7 md:grid-cols-2 md:gap-x-10 lg:grid-cols-3">
@@ -40,20 +46,22 @@ const withCost = (value: number, cost: number) =>
 		</div>
 		{#if rankings.llmModels.length}
 			<ol class="space-y-3">
-				{#each rankings.llmModels as row, index (`${row.harness}:${row.provider}:${row.model}`)}
+				{#each rankings.llmModels as row, index (`${row.harness}:${row.credential}:${row.provider}:${row.host}:${row.model}`)}
 					{@const harness = resolveHarness(row)}
+					{@const source = llmSource(row)}
 					<li class="grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 text-[12px]">
 						<span class="font-mono text-[10px] text-text-placeholder">{index + 1}</span>
-						<div class="min-w-0" title={`${row.provider}/${row.model}`}>
+						<div class="min-w-0" title={`${source}/${row.model}`}>
 							<div class="truncate text-text-secondary">{row.model}</div>
-							{#if harness === "cohub"}
-								<div class="truncate text-[10px] text-text-placeholder">{row.provider}</div>
-							{:else}
-								<div class="flex min-w-0 items-center gap-1 text-[10px] text-text-placeholder">
+							<div class="flex min-w-0 items-center gap-1 text-[10px] text-text-placeholder">
+								{#if harness !== "cohub"}
 									<HarnessIcon {harness} size={10} />
-									<span class="truncate">{harnessLabel(harness)}</span>
-								</div>
-							{/if}
+									<span class="shrink-0">{harnessLabel(harness)} ·</span>
+								{:else if row.credential === "user"}
+									<span class="shrink-0 rounded-[3px] border border-border-subtle px-1 leading-[14px]">{m.activity_own_key({}, { locale })}</span>
+								{/if}
+								<span class="truncate">{source}</span>
+							</div>
 						</div>
 						<div class="whitespace-nowrap text-right font-mono text-text-secondary">{withCost(row.totalTokens, row.costTotal)}</div>
 					</li>

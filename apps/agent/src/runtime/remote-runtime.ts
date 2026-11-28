@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { sessionTurns } from "@cohub/db";
 import { readRuntimeRecovery, runtimeRecoveryActive, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { db } from "../db.js";
-import { assertHarnessAccess, findRuntimeModel, resolveRuntimeServiceTier, resolveRuntimeThinkingLevel, runtimeRegistrationKey, parseRuntimeRegistration, supportsApprovalMode, type ApprovalMode, type LocalHarness, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
+import { assertHarnessAccess, findRuntimeModel, resolveRuntimeServiceTier, resolveRuntimeThinkingLevel, runtimeRegistrationKey, parseRuntimeRegistration, readUsageHost, supportsApprovalMode, type ApprovalMode, type LocalHarness, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
 import { redis, sendOutput } from "../redis.js";
 import { env } from "../env.js";
 import { logger } from "../logger.js";
@@ -17,6 +17,7 @@ import { exchangeRuntimeTurn, RuntimeExecutionUncertainError, RuntimeNotStartedE
 export { RuntimeExecutionUncertainError } from "./exchange.js";
 
 function nativeAssistant(event: Extract<RuntimeExecutionEvent, { type: "message.commit" | "turn.end" }>, turnId: string, harness: string, final: boolean) {
+  const host = readUsageHost(event.message);
   return {
     id: `runtime:${turnId}:${event.message.ordinal}:${final ? "final" : "intermediate"}`,
     role: "assistant", content: event.message.content,
@@ -27,6 +28,7 @@ function nativeAssistant(event: Extract<RuntimeExecutionEvent, { type: "message.
       turnId, harness, runtime: "local", messageKind: final ? "assistant_final" : "assistant_intermediate",
       ...(final ? { runtimeArchiveStatus: "archive" in event && event.archive ? "pending" : "failed" } : {}),
       ...(event.message.usageLimit ? { usageLimit: event.message.usageLimit } : {}),
+      ...(host ? { host } : {}),
     },
   };
 }

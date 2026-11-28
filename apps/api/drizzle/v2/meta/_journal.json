@@ -631,6 +631,13 @@
       "when": 1795774252108,
       "tag": "0089_token_usage_harness",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1795860580099,
+      "tag": "0090_token_usage_credential",
+      "breakpoints": true
     }
   ]
 }

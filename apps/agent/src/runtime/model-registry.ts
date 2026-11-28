@@ -1,3 +1,4 @@
+import type { UsageCredential } from "@cohub/protocol/runtime";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   DEFAULT_CONTEXT_WINDOW,
@@ -15,6 +16,7 @@ export type CohubModel<TApi extends Api = Api> = Model<TApi> & {
   imageUrlInput?: boolean;
   contextWindowLimit?: number;
   contextWindowSource?: ModelDef["contextWindowSource"];
+  credential?: UsageCredential;
 };
 
 function finiteNumberOrZero(value: unknown): number {
@@ -76,6 +78,7 @@ export class CohubModelRegistry {
           imageUrlInput: modelDef.imageUrlInput ?? providerConfig.imageUrlInput,
           headers: mergeHeaders(providerConfig.headers, modelDef.headers),
           compat: (modelDef.compat ?? providerConfig.compat) as Model<Api>["compat"],
+          credential: modelDef.credential,
         } as CohubModel);
       }
     }

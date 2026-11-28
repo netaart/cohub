@@ -58,7 +58,7 @@ import type {
   PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
 import type { MessageRecord, SessionTurnReplyMode } from "@cohub/protocol/model";
-import type { ApprovalMode, HarnessKind, ModelThinkingLevel, SearchTextRange } from "@cohub/protocol";
+import type { ApprovalMode, HarnessKind, ModelThinkingLevel, SearchTextRange, UsageCredential } from "@cohub/protocol";
 import type { TaskRunBoard } from "@cohub/protocol/task";
 export type { TaskRunBoard } from "@cohub/protocol/task";
 
@@ -1904,7 +1904,10 @@ export type UserActivityRange = {
 export type UserActivityRankings = {
   llmModels: Array<{
     harness: HarnessKind;
+    /** `user` providers and hosts are masked for viewers outside the Space. */
+    credential: UsageCredential;
     provider: string;
+    host: string | null;
     model: string;
     totalTokens: number;
     requestCount: number;

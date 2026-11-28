@@ -11,6 +11,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getCurrentToolExecutionContext } from "../tool-context.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
+import type { UsageCredential } from "@cohub/protocol/runtime";
 import { createModelsFromCohubRegistry } from "./pi-models-adapter.js";
 import { loadContextCompactionConfig } from "./model-tasks-config.js";
 import { createTaskModels, toTaskRuntimeModel } from "./task-model.js";
@@ -66,7 +67,9 @@ function resolveCompactionSettings(contextWindow: number) {
 }
 
 /** The `contextCompaction` task model summarizes when configured; otherwise the session model does. */
-async function resolveSummarizer(handle: SessionHandle, model: Model<Api>, actorUserId: string | null): Promise<{ model: Model<Api>; models: Models } | null> {
+type SummarizerModel = Model<Api> & { credential?: UsageCredential };
+
+async function resolveSummarizer(handle: SessionHandle, model: SummarizerModel, actorUserId: string | null): Promise<{ model: SummarizerModel; models: Models } | null> {
   const config = await loadContextCompactionConfig(actorUserId).catch((error) => {
     logger.warn(`[Compaction] contextCompaction task unavailable; using session model sessionId=${handle.sessionId}:`, error);
     return null;
@@ -335,7 +338,7 @@ export async function maybeAutoCompact(
         tokensBefore: result.tokensBefore,
         estimatedTokensAfter,
         firstKeptEntryId,
-        model: { provider: summarizer.model.provider, id: summarizer.model.id },
+        model: { provider: summarizer.model.provider, id: summarizer.model.id, credential: summarizer.model.credential, baseUrl: summarizer.model.baseUrl },
         contextWindow,
         keepRecentTokens: settings.keepRecentTokens,
         summarizedMessageCount,

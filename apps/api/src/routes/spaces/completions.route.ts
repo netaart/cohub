@@ -376,18 +376,17 @@ router.post("/", async (c) => {
   // Pre-check balance before spending tokens. Fail-open if credit lookup errors.
   const usageType = COHUB_BILLING_USAGE_TYPES.generationLlmRaw;
   const fallback = needsImageToText(messages, model, imageToTextConfig) ? imageToTextConfig?.model : null;
-  const admitted = await admitPricing(user.uuid, [
-    { usageType, model: model.id, provider: model.provider },
-    ...(fallback ? [{ usageType, model: fallback.id, provider: fallback.provider }] : []),
-  ]);
+  const billed = [model, ...(fallback ? [fallback] : [])].filter((item) => item.credential !== "user");
+  const admitted = await admitPricing(user.uuid, billed.map((item) => ({ usageType, model: item.id, provider: item.provider })));
   if (!admitted) return requestErrorResponse(c, 503, "pricing_unavailable", "Pricing is temporarily unavailable. Please try again later.");
   const { price, free } = admitted;
-  const decision = free ? null : await billingUsageGate.evaluate({
+  const gated = billed[0];
+  const decision = free || !gated ? null : await billingUsageGate.evaluate({
     userId: user.uuid,
     usageKind: "llm.raw_completion",
     source: "raw_completion",
-    model: model.id,
-    provider: model.provider,
+    model: gated.id,
+    provider: gated.provider,
     spaceId,
   });
   if (decision?.status === "blocked") {
@@ -412,7 +411,7 @@ router.post("/", async (c) => {
 
   const finalize = async (outcome: RunCompletionOutcome) => {
     const completedAt = new Date();
-    await recordCompletionBilling({
+    if (model.credential !== "user") await recordCompletionBilling({
       spaceId,
       completionId,
       userId: user.uuid,
@@ -423,7 +422,7 @@ router.post("/", async (c) => {
       error: outcome.error,
       price,
     });
-    await Promise.all(outcome.imageToTextCalls.map((call, index) => call.status === "succeeded"
+    await Promise.all(outcome.imageToTextCalls.map((call, index) => call.status === "succeeded" && imageToTextConfig?.model.credential !== "user"
       ? recordCompletionBilling({
           spaceId,
           completionId: `${completionId}:image-to-text:${call.messageIndex}:${call.imageIndex}:${index}`,

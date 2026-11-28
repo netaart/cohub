@@ -3,7 +3,7 @@ import { join } from "node:path";
 import {
   createCachedModelsConfig,
   getUserModelsRedisKey,
-  isRuntimeModelAvailable,
+  findRuntimeModelCredential,
   MODELS_CACHE_TTL_SEC,
   parseCachedModelsConfig,
   parseModelsConfig,
@@ -12,6 +12,7 @@ import {
   type CachedModelsConfig,
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
+import type { UsageCredential } from "@cohub/protocol/runtime";
 import { config } from "../config.js";
 import { redisCommandClient } from "../redis.js";
 import { CompletionModelRegistry, type RuntimeLlmModel } from "./completion-registry.js";
@@ -101,15 +102,13 @@ export async function loadRuntimeModelsConfigs(userId?: string | null): Promise<
   return [resolveRuntimeModelsConfig({ platform, user })];
 }
 
-export async function validatePromptModel(input: {
+export async function resolvePromptModelCredential(input: {
   userId: string;
   provider?: string | null;
-  model?: string | null;
-}) {
-  const modelId = input.model?.trim();
-  if (!modelId) return true;
+  model: string;
+}): Promise<UsageCredential | null> {
   const provider = input.provider?.trim() || "cohub";
-  return isRuntimeModelAvailable(await loadRuntimeModelsConfigs(input.userId), provider, modelId);
+  return findRuntimeModelCredential(await loadRuntimeModelsConfigs(input.userId), provider, input.model.trim());
 }
 
 export async function resolveCompletionModel(input: {

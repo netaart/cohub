@@ -32,6 +32,7 @@ export type StreamJsonProfile = {
   binary: string;
   provider: string;
   endpoint?(named?: string | null): string;
+  host?(): string | null;
   /** Root holding `projects/<project>/<session>.jsonl`. */
   dataRoot(): string;
   projectDirectory(cwd: string): string;
@@ -137,7 +138,7 @@ const nativeModel = (value: unknown) => { const model = text(value); return mode
 
 /** Maps stream-json output onto Cohub's streaming protocol; sub-agent traffic stays in the native transcript. */
 /** `spent`: the cumulative `total_cost_usd` a kept process already reported. */
-export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; model: string | null }, spent = 0) {
+export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; host?: string | null; model: string | null }, spent = 0) {
   const messages = new Map<string, Message>();
   const owners = new Map<string, Message>();
   /** A complete call is already running: the CLI starts each tool as its block completes. */
@@ -152,13 +153,14 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
   let model = identity.model;
   let final: RuntimeMessage | null = null;
   let rejected: RuntimeMessage["usageLimit"] = null;
+  const host = identity.host ? { host: identity.host } : {};
   const merge = (usage: JsonRecord | undefined, value: unknown): JsonRecord => {
     const merged = { ...usage };
     for (const [key, count] of Object.entries(record(value))) if (typeof count === "number") merged[key] = Math.max(count, Number(merged[key]) || 0);
     return merged;
   };
   const snapshot = (message: Message): RuntimeMessage => ({
-    ordinal: message.ordinal, content: [...message.content, ...message.partial.values()], provider: identity.provider, model: message.model ?? model,
+    ordinal: message.ordinal, content: [...message.content, ...message.partial.values()], provider: identity.provider, ...host, model: message.model ?? model,
     usage: streamUsage(message.usage, undefined),
     stopReason: message.content.some((block) => block.type === "tool_use") ? "tool_use" : "stop",
   });
@@ -173,7 +175,7 @@ export function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => voi
     emit({ type: "message.start", ordinal: message.ordinal });
     return message;
   };
-  const last = (): RuntimeMessage => current ? snapshot(current) : { ordinal: 0, content: [], provider: identity.provider, model };
+  const last = (): RuntimeMessage => current ? snapshot(current) : { ordinal: 0, content: [], provider: identity.provider, ...host, model };
   return {
     /** The final `result`, or `null` while the Turn runs. */
     result: () => final,
@@ -300,7 +302,7 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
   const host = kept ?? new JsonRpcProcess(...harnessCommand(executable, args, executor.cwd), executor.cwd, "stream", profile.warm ? sessionEnvironment : turnEnvironment(input));
   turn.spawned(host);
   let background = false;
-  const translator = streamJsonTranslator(turn.emit, { provider: profile.endpoint?.(input.provider) || input.provider || profile.provider, model: input.model && input.model !== DEFAULT_MODEL ? input.model : null }, spentBy.get(host));
+  const translator = streamJsonTranslator(turn.emit, { provider: profile.endpoint?.(input.provider) || input.provider || profile.provider, host: profile.host?.(), model: input.model && input.model !== DEFAULT_MODEL ? input.model : null }, spentBy.get(host));
   let message: RuntimeMessage = { ordinal: 0, content: [] };
   let begun = false;
   // Open approvals close with the process, not only when the Turn is stopped.

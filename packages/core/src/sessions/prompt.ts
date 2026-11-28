@@ -3,7 +3,7 @@ import type { ContentBlock } from "@cohub/protocol/core";
 import type { GenerationPolicy } from "@cohub/protocol/generation";
 import { normalizeSessionTurnOrigin, readTurnInitiator, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind, type SessionTurnReply } from "@cohub/protocol/model";
 import { isRequestSourceClientId, normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
-import { assertHarnessAccess, harnessSchema, isApprovalMode, isLocalHarness, runtimeServiceTierIdSchema, supportsApprovalMode, type ApprovalMode, type HarnessKind, type RuntimeRegistration } from "@cohub/protocol/runtime";
+import { assertHarnessAccess, harnessSchema, isApprovalMode, isLocalHarness, runtimeServiceTierIdSchema, supportsApprovalMode, type ApprovalMode, type HarnessKind, type RuntimeRegistration, type UsageCredential } from "@cohub/protocol/runtime";
 import { findRuntimeModel, isModelThinkingLevel } from "@cohub/protocol";
 import { normalizeContentBlocks } from "../content/normalize.js";
 import type { PromptEnv } from "./prompt-env.js";
@@ -181,7 +181,7 @@ export type SubmitSessionPromptHooks = {
 };
 
 export type SubmitSessionPromptOptions = {
-  prevalidatedModel?: { provider: string; model: string };
+  prevalidatedModel?: { provider: string; model: string; credential: UsageCredential };
 };
 
 export type ExpandedPromptTemplate = {
@@ -246,7 +246,8 @@ export type SessionPromptDependencies = {
     errorMessage: string;
   }): Promise<unknown>;
   validateLocalHarness?(input: SubmitSessionPromptInput): Promise<void>;
-  validatePromptModel?(input: { userId: string; provider: string; model: string }): Promise<boolean>;
+  resolvePromptModelCredential?(input: { userId: string; provider: string; model: string }): Promise<UsageCredential | null>;
+  resolveSessionModel?(sessionId: string): Promise<{ provider: string; model: string } | null>;
   billingUsageGate?: BillingUsageGate;
 };
 
@@ -298,6 +299,12 @@ function normalizeDirectShellCommandContent(content: ContentBlock[]): ContentBlo
   const command = rawText.slice(1);
   if (!command.trim()) throw new Error("shell command is empty");
   return [{ type: "shell_command", command, rawText } satisfies ContentBlock];
+}
+
+async function resolveCurrentModel(deps: SessionPromptDependencies, userId: string, sessionId: string) {
+  const model = await deps.resolveSessionModel?.(sessionId);
+  const credential = model && await deps.resolvePromptModelCredential?.({ userId, ...model });
+  return model && credential ? { ...model, credential } : null;
 }
 
 function normalizePromptModelProvider(input: Pick<SubmitSessionPromptInput, "model" | "provider" | "harness">): {
@@ -415,21 +422,16 @@ export const submitSessionPrompt = async (
     if (!deps.validateLocalHarness) throw new Error("Local Harness execution is unavailable on this prompt entry point");
     await deps.validateLocalHarness(input);
   }
-  const modelPrevalidated = Boolean(
-    modelProvider.model &&
+  const prevalidated = modelProvider.model &&
     modelProvider.provider &&
     options.prevalidatedModel?.model === modelProvider.model &&
-    options.prevalidatedModel.provider === modelProvider.provider,
-  );
-  if (
-    modelProvider.model &&
-    modelProvider.provider &&
-    !modelPrevalidated &&
-    !localHarness &&
-    deps.validatePromptModel &&
-    !(await deps.validatePromptModel({ userId, provider: modelProvider.provider, model: modelProvider.model }))
-  ) {
-    throw new ModelUnavailableError(modelProvider.provider, modelProvider.model);
+    options.prevalidatedModel.provider === modelProvider.provider
+    ? options.prevalidatedModel
+    : null;
+  let modelCredential = prevalidated?.credential ?? null;
+  if (modelProvider.model && modelProvider.provider && !prevalidated && !localHarness && deps.resolvePromptModelCredential) {
+    modelCredential = await deps.resolvePromptModelCredential({ userId, provider: modelProvider.provider, model: modelProvider.model });
+    if (!modelCredential) throw new ModelUnavailableError(modelProvider.provider, modelProvider.model);
   }
 
   if (deps.sandboxRecovery) {
@@ -470,14 +472,16 @@ export const submitSessionPrompt = async (
   const userMessageId = deps.randomUUID();
   const requestedThinkingLevel = typeof input.thinkingLevel === "string" && isModelThinkingLevel(input.thinkingLevel.trim()) ? input.thinkingLevel.trim() : undefined;
   const requestedContextWindow = typeof input.contextWindow === "number" && Number.isSafeInteger(input.contextWindow) && input.contextWindow > 0 ? input.contextWindow : undefined;
-  const billingDecision: BillingAccessDecision | null = isDirectShellCommand || localHarness
+  const current = modelProvider.model || isDirectShellCommand || localHarness ? null : await resolveCurrentModel(deps, userId, input.sessionId);
+  const gatedModel = current ?? modelProvider;
+  const billingDecision: BillingAccessDecision | null = isDirectShellCommand || localHarness || (current?.credential ?? modelCredential) === "user"
     ? null
     : (await deps.billingUsageGate?.evaluate({
       userId,
       usageKind: "llm.turn",
       source: input.context?.kind === "scheduled_task" ? "scheduled_prompt" : "session_prompt",
-      model: modelProvider.model,
-      provider: modelProvider.provider,
+      model: gatedModel.model,
+      provider: gatedModel.provider,
       spaceId: input.spaceId,
       sessionId: input.sessionId,
     })) ?? null;

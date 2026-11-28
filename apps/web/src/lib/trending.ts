@@ -1,3 +1,4 @@
+import type { HarnessKind, UsageCredential } from "@cohub/protocol/runtime";
 import { PUBLIC_API_ORIGIN } from "$app/env/public";
 
 export type UserProfile = {
@@ -35,6 +36,8 @@ export type UserRow = TrendingRow & {
 };
 
 export type ModelRow = TrendingRow & {
+	harness: HarnessKind;
+	credential: UsageCredential;
 	provider: string;
 	model: string;
 	modelDisplay: string;

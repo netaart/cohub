@@ -22,7 +22,7 @@ import {
   normalizeSessionTitle,
   setSessionTitleMeta,
 } from "./session-meta.js";
-import { submitSessionPrompt, type PromptHarness, type ExpandedPromptTemplate, type ExpandedSkillCommand, expandPromptContent, type SubmitSessionPromptHooks, type SubmitSessionPromptInput, type SubmitSessionPromptOptions } from "./prompt.js";
+import { submitSessionPrompt, type PromptHarness, type ExpandedPromptTemplate, type ExpandedSkillCommand, expandPromptContent, type SubmitSessionPromptHooks, type SubmitSessionPromptInput, type SubmitSessionPromptOptions, type SessionPromptDependencies } from "./prompt.js";
 
 export type PromptTemplateService = {
   expand(text: string, options?: { userId?: string | null; spaceId?: string | null; sessionId?: string | null }): Promise<ExpandedPromptTemplate | null>;
@@ -33,6 +33,25 @@ export type SkillService = {
 };
 
 type DrizzleDb = PostgresJsDatabase<Record<string, unknown>>;
+
+export async function readSessionModel(db: Pick<DrizzleDb, "select">, sessionId: string): Promise<{ provider: string; model: string } | null> {
+  const [turn] = await db
+    .select({ provider: sessionTurns.provider, model: sessionTurns.model, meta: sessionTurns.meta })
+    .from(sessionTurns)
+    .where(and(
+      eq(sessionTurns.sessionId, sessionId),
+      eq(sessionTurns.executionKind, "agent"),
+      sql`${sessionTurns.intent} <> 'compact'`,
+      sql`coalesce(${sessionTurns.meta}->>'harness', 'cohub') = 'cohub'`,
+      sql`(${sessionTurns.model} is not null or (${sessionTurns.meta}->>'model' is not null and ${sessionTurns.status} in ('running', 'abort_requested')))`,
+    ))
+    .orderBy(desc(sessionTurns.sequence))
+    .limit(1);
+  if (!turn) return null;
+  const meta = (turn.meta ?? {}) as { provider?: unknown; model?: unknown };
+  const [provider, model] = turn.model ? [turn.provider, turn.model] : [meta.provider, meta.model];
+  return typeof provider === "string" && provider && typeof model === "string" && model ? { provider, model } : null;
+}
 type Transaction = Parameters<Parameters<DrizzleDb["transaction"]>[0]>[0];
 
 async function nextTurnSequence(tx: Transaction, sessionId: string) {
@@ -148,7 +167,7 @@ export function createSessionServices(input: {
   skillService?: SkillService;
   billingUsageGate?: BillingUsageGate;
   validateLocalHarness?: (input: SubmitSessionPromptInput) => Promise<void>;
-  validatePromptModel?: (input: { userId: string; provider: string; model: string }) => Promise<boolean>;
+  resolvePromptModelCredential?: SessionPromptDependencies["resolvePromptModelCredential"];
   sandboxRecovery?: {
     maybeRecoverForPrompt(input: {
       spaceId: string;
@@ -475,7 +494,8 @@ export function createSessionServices(input: {
       enqueueSpacePrompt,
       failSessionTurn,
       validateLocalHarness: input.validateLocalHarness,
-      validatePromptModel: input.validatePromptModel,
+      resolvePromptModelCredential: input.resolvePromptModelCredential,
+      resolveSessionModel: (sessionId) => readSessionModel(input.db, sessionId),
       billingUsageGate: input.billingUsageGate,
     }, promptInput, hooks, options);
   }

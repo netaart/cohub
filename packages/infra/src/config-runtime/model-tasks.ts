@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { UsageCredential } from "@cohub/protocol/runtime";
 import {
   assertUserModelCredentials,
   createCachedModelsConfig,
@@ -210,9 +211,9 @@ export function resolveModelTasksConfig(input: {
         if (!catalogModel) throw new Error("User model tasks must select a configured platform model");
         const parameters = selectModelParameters(provider, modelOverride, getProtectedModelFields(resolvedProvider, catalogModel), resolvedProvider.headers);
         task = resolveTask(name, { ...platform, ...user, model: { ...parameters, provider } },
-          resolvePlatformModelsConfig({ providers: { [provider]: resolvedProvider } }));
+          resolvePlatformModelsConfig({ providers: { [provider]: resolvedProvider } }), "platform");
       } else {
-        task = resolveTask(name, { ...platform, ...user, model: user.model }, input.userModels ?? { providers: {} });
+        task = resolveTask(name, { ...platform, ...user, model: user.model }, input.userModels ?? { providers: {} }, "user");
         assertUserModelCredentials(task.model);
       }
     } else {
@@ -222,7 +223,7 @@ export function resolveModelTasksConfig(input: {
         ...platform.model,
         apiKey: resolvePlatformModelApiKey(platform.model.apiKey),
       };
-      task = resolveTask(name, { ...platform, ...user, model }, resolvePlatformModelsConfig(platformModels));
+      task = resolveTask(name, { ...platform, ...user, model }, resolvePlatformModelsConfig(platformModels), "platform");
     }
     result[name] = task;
   }
@@ -233,6 +234,7 @@ function resolveTask(
   name: ModelTaskName,
   task: ModelTaskConfigOverride,
   models: ModelsConfig,
+  credential: UsageCredential,
 ): ModelTaskConfig {
   const provider = task.model?.provider?.trim();
   const id = task.model?.id?.trim();
@@ -259,6 +261,7 @@ function resolveTask(
     compat: task.model?.compat ?? catalogModel?.compat ?? providerConfig?.compat,
     requestProfile: task.model?.requestProfile ?? catalogModel?.requestProfile ?? providerConfig?.requestProfile,
     imageUrlInput: task.model?.imageUrlInput ?? catalogModel?.imageUrlInput ?? providerConfig?.imageUrlInput,
+    credential,
   };
 
   if (typeof model.api !== "string" || typeof model.baseUrl !== "string") {

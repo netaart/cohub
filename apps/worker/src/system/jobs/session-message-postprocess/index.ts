@@ -8,6 +8,7 @@ import {
   type SessionMessagePostprocessJobData,
   type Usage,
 } from "@cohub/protocol";
+import { readUsageCredential } from "@cohub/protocol/runtime";
 import type { Job } from "bullmq";
 import { and, eq, isNull } from "drizzle-orm";
 import { createLogger } from "@cohub/infra/logging";
@@ -28,13 +29,12 @@ type LlmCharge = { officialUsd: number; operationId: string; provider: string; m
 
 /** The LLM calls of a message that cost money: the message itself and its succeeded image-to-text calls. */
 const billableLlmCharges = (message: typeof sessionMessages.$inferSelect, usage: Usage | null): LlmCharge[] => {
-  if ((message.meta as { runtime?: unknown } | null)?.runtime === "local") return [];
   const charges: LlmCharge[] = [];
-  if (!message.errorMessage && message.stopReason !== "error" && message.stopReason !== "aborted") {
+  if (readUsageCredential(message.meta) === "platform" && !message.errorMessage && message.stopReason !== "error" && message.stopReason !== "aborted") {
     charges.push({ officialUsd: normalizePositiveUsd(usage?.cost?.total), operationId: `llm:${message.id}`, provider: message.provider ?? "unknown", model: message.model ?? "unknown" });
   }
   for (const call of readImageToTextCalls(message.meta)) {
-    if (call.status !== "succeeded") continue;
+    if (call.status !== "succeeded" || call.credential !== "platform") continue;
     charges.push({ officialUsd: normalizePositiveUsd(call.usage?.cost?.total), operationId: `llm:image-to-text:${message.id}:${call.sourceKey}`, provider: call.provider, model: call.model });
   }
   return charges.filter((charge) => charge.officialUsd > 0);

@@ -1,9 +1,12 @@
 import type { Usage } from "@cohub/protocol/core";
+import { readUsageHost, type UsageCredential } from "@cohub/protocol/runtime";
 
 export type ImageToTextCallRecord = {
   sourceKey: string;
   provider: string;
   model: string;
+  credential: UsageCredential;
+  host: string | null;
   status: "succeeded" | "failed";
   usage: Usage | null;
   durationMs: number;
@@ -70,6 +73,8 @@ export function readImageToTextCalls(meta: unknown): ImageToTextCallRecord[] {
       sourceKey,
       provider,
       model,
+      credential: call.credential === "user" ? "user" : "platform",
+      host: readUsageHost(call),
       status,
       usage: normalizeUsage(call.usage),
       durationMs: Math.max(0, Math.floor(finiteNumber(call.durationMs) ?? 0)),

@@ -44,7 +44,9 @@ const response: SpaceActivityResponse = {
 		llmModels: [
 			{
 				harness: "cohub",
+				credential: "platform",
 				provider: "anthropic",
+				host: null,
 				model: "claude-sonnet-4-5",
 				totalTokens: 8200,
 				requestCount: 40,

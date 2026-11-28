@@ -791,11 +791,12 @@ Never infer that a disconnected execution has stopped.
   postprocessing and bound external channels are best effort; durable Session data remains
   authoritative and reloadable when a notification fails.
 - Messages keep the provider the Harness reported (a gateway host, or none for transcript-synced
-  Claude Code), since replaying signed thinking depends on it. Hourly usage stats instead record the
-  Harness with provider `local`, so a private endpoint never reaches usage pages or public trending.
-  `scripts/rebuild-local-token-usage.ts` relabels usage recorded before this rule. Usage jobs that
-  run on a worker mismatched with migration `0089` fail unclaimed; re-drive them with
-  `scripts/requeue-unaggregated-usage.ts`.
+  Claude Code), since replaying signed thinking depends on it. Claude Code and Codex also report the
+  hostname they call (`ANTHROPIC_BASE_URL`, or the Codex provider's `base_url`). Hourly usage keeps
+  both under credential `user`, masked in public views as [model credentials](model-credentials.md#billing-and-usage)
+  describes. `scripts/rebuild-local-token-usage.ts` restores the reported provider of usage recorded
+  as `local` before migration `0090`. Usage jobs that run on a worker mismatched with migration
+  `0089` or `0090` fail unclaimed; re-drive them with `scripts/requeue-unaggregated-usage.ts`.
 
 ## Verification
 

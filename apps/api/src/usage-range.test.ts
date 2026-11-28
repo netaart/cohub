@@ -27,7 +27,9 @@ function usageRow(overrides: Partial<UsageRow>): UsageRow {
     successCount: 0,
     errorCount: 0,
     harness: "cohub",
+    credential: "platform",
     provider: null,
+    host: null,
     model: null,
     ...overrides,
   };
@@ -84,7 +86,9 @@ test("model rankings reuse usage rows and aggregate matching models", () => {
 
   assert.deepEqual(rankings.llmModels[0], {
     harness: "cohub",
+    credential: "platform",
     provider: "openai",
+    host: null,
     model: "gpt-5",
     totalTokens: 350,
     requestCount: 3,

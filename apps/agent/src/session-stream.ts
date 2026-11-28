@@ -348,6 +348,7 @@ export async function persistInterruptedAssistantSnapshot(
       thinkingLevel: handle.session.agent.state.thinkingLevel,
       contextWindow: handle.session.agent.state.model.contextWindow,
       contextWindowSource: (handle.session.agent.state.model as CohubModel).contextWindowSource,
+      modelRegistry: handle.session.modelRegistry,
     });
   });
 

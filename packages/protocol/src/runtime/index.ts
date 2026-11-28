@@ -8,6 +8,7 @@ import { nativeRuntimeEventSchema } from "./native.js";
 import { isLocalHarness, LOCAL_HARNESSES, localHarnessSchema, type LocalHarness } from "./harnesses.js";
 import { clampThinkingLevel, isModelThinkingLevel, modelThinkingLevelSchema, type ModelThinkingLevel } from "../model/thinking.js";
 export * from "./archive.js";
+export * from "./credential.js";
 export * from "./harnesses.js";
 export * from "./native.js";
 export {
@@ -278,6 +279,7 @@ export type RuntimeMessage = {
   ordinal: number;
   content: ContentBlock[];
   provider?: string | null;
+  host?: string | null;
   model?: string | null;
   usage?: Usage | null;
   stopReason?: string | null;
@@ -307,6 +309,7 @@ const runtimeMessageSchema = z.object({
   ordinal,
   content,
   provider: z.string().nullable().optional(),
+  host: z.string().max(255).nullable().optional(),
   model: z.string().nullable().optional(),
   usage: usageSchema.nullable().optional(),
   stopReason: z.string().max(64).nullable().optional(),

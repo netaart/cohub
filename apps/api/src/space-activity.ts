@@ -14,6 +14,7 @@ import {
 	aggregateUsage,
 	aggregateUserModelRankings,
 	buildUsageDateRange,
+	publicUsageLabel,
 	resolveUsageDays,
 	stripUsageCost,
 	type GenerationUsageRow,
@@ -243,6 +244,7 @@ function workTitle(meta: unknown, slug: string): string {
 export async function loadSpaceActivity(input: {
 	spaceId: string;
 	daysParam: string | undefined;
+	masked: boolean;
 }): Promise<SpaceActivityResponse> {
 	const days = resolveUsageDays(input.daysParam);
 	const { startDate, now } = buildUsageDateRange(days);
@@ -272,7 +274,9 @@ export async function loadSpaceActivity(input: {
 						successCount: sql<number>`coalesce(sum(${tokenUsage.successCount}), 0)::double precision`,
 						errorCount: sql<number>`coalesce(sum(${tokenUsage.errorCount}), 0)::double precision`,
 						harness: tokenUsage.harness,
-						provider: tokenUsage.provider,
+						credential: tokenUsage.credential,
+						provider: input.masked ? publicUsageLabel(tokenUsage.provider) : tokenUsage.provider,
+						host: input.masked ? publicUsageLabel(tokenUsage.host) : tokenUsage.host,
 						model: tokenUsage.model,
 					})
 					.from(tokenUsage)
@@ -286,13 +290,17 @@ export async function loadSpaceActivity(input: {
 					.groupBy(
 						tokenUsage.bucketStartAt,
 						tokenUsage.harness,
+						tokenUsage.credential,
 						tokenUsage.provider,
+						tokenUsage.host,
 						tokenUsage.model,
 					)
 					.orderBy(
 						asc(tokenUsage.bucketStartAt),
 						asc(tokenUsage.harness),
+						asc(tokenUsage.credential),
 						asc(tokenUsage.provider),
+						asc(tokenUsage.host),
 						asc(tokenUsage.model),
 					),
 				db

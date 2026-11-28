@@ -149,7 +149,7 @@ test("a same-name user provider replaces credentials, headers, extensions and mo
     },
   };
   const result = resolveRuntimeModelsConfig({ platform: trusted, user });
-  assert.deepEqual(result.providers.external, user.providers.external);
+  assert.deepEqual(result.providers.external, { ...user.providers.external, models: [{ id: "custom", credential: "user" }] });
   assert.ok(!JSON.stringify(result).includes("synthetic-"));
   assert.deepEqual(mergeModelsConfigs(trusted, user).providers.external, user.providers.external);
   assert.equal(isRuntimeModelAvailable([trusted, user], "external", "default"), false);

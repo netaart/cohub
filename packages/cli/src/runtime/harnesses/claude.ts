@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { ApprovalMode, CanonicalProjectionMessage, ContentBlock, NativeProjection } from "@neta-art/cohub";
+import { baseUrlHost, type ApprovalMode, type CanonicalProjectionMessage, type ContentBlock, type NativeProjection } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { copyNativeArchive } from "../native/archive.js";
 import { projectChainedSession, projectionMeta, projectionToolId, rebindSessionId } from "./chained-projection.js";
@@ -61,6 +61,7 @@ const profile: StreamJsonProfile = {
   binary: "claude",
   provider: "anthropic",
   endpoint: (named) => claudeEndpoint(named),
+  host: () => baseUrlHost(process.env.ANTHROPIC_BASE_URL),
   dataRoot,
   projectDirectory: claudeProjectDirectory,
   effortLevels: ["low", "medium", "high", "xhigh", "max"],

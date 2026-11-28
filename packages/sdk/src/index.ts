@@ -2,14 +2,14 @@ export {
   RUNTIME_PROTOCOL_VERSION, RUNTIME_MAX_FRAME_BYTES, RUNTIME_RECOVERY_BATCH_SIZE, RUNTIME_CONTROL_FEATURES, runtimeCommandSchema, runtimeEventSchema, runtimeReadySchema,
   MODEL_THINKING_LEVELS, isModelThinkingLevel, supportedThinkingLevels, clampThinkingLevel, thinkingLevelMapFor, findRuntimeModel, runtimeCapabilitiesSchema, runtimeHelloCapabilities, runtimeServiceTierSchema, RUNTIME_MAX_SERVICE_TIERS,
   APPROVAL_MODES, approvalModeSchema, isApprovalMode, supportsApprovalMode, resolveRuntimeServiceTier, STANDARD_SERVICE_TIER,
-  contextToPiMessages, selectRuntimeContextMessages, isLocalHarness, resolveHarness, harnessLabel, assertHarnessAccess,
+  contextToPiMessages, selectRuntimeContextMessages, isLocalHarness, resolveHarness, harnessLabel, assertHarnessAccess, USAGE_CREDENTIALS, baseUrlHost,
   LOCAL_HARNESSES, LOCAL_HARNESS_SPECS, harnessSchema, localHarnessSchema,
   fingerprintProjectionTurns, isProjectionCompaction, isProjectionPendingGeneration, projectNativeMessageMeta, projectNativeSession, serializeProjection, serializeProjectionRecords, trimProjectionTurnsToCompaction,
   RUNTIME_ARCHIVE_SEGMENT_BYTES, RUNTIME_EXECUTION_RESOLVED_CODE, NATIVE_STOP_CONFIRMATION_REQUIRED, harnessArchiveIndexSchema, validateArchiveBoundary,
   runtimeCatalogRefreshSchema, nativeTurnCompleteSchema, nativeTurnProgressSchema, nativeIngestTurnSchema, nativeRuntimeEventSchema, runtimeNativeStopSchema, runtimeApprovalDecisionSchema, runtimeApprovalSchema, approvalDecisionSchema, APPROVAL_DECISIONS, NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, NATIVE_SYNC_SOURCE, isNativeClientTurn,
 } from "@cohub/protocol";
 export type {
-  ApprovalMode, ContentBlock, HarnessKind, LocalHarness, LocalHarnessSpec, RuntimeCapabilities, RuntimeClient, RuntimeModel, RuntimeCommand, RuntimeContext, RuntimePendingExecution,
+  ApprovalMode, ContentBlock, HarnessKind, UsageCredential, LocalHarness, LocalHarnessSpec, RuntimeCapabilities, RuntimeClient, RuntimeModel, RuntimeCommand, RuntimeContext, RuntimePendingExecution,
   RuntimeContextMessage, RuntimeTurnInput, RuntimeTurnUserMessage, RuntimeMessage, RuntimeExecutionEvent, HarnessArchive,
   CanonicalProjectionMessage, CanonicalProjectionTurn, NativeProjection, ProjectionCursor, ProjectionInput, ProjectionRecord, ProjectionTarget, ProjectionWarning,
   RuntimeStatus, RuntimeSessionRecoveryStatus, RuntimeStopConfirmation, HarnessArchiveIndex, RuntimeArchiveSegment, RuntimeArchiveUpload, RuntimeArchivePage,

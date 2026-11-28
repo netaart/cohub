@@ -3,13 +3,15 @@ import { join } from "node:path";
 import {
   createCachedModelsConfig,
   getUserModelsRedisKey,
-  isRuntimeModelAvailable,
+  findRuntimeModelCredential,
   MODELS_CACHE_TTL_SEC,
   parseCachedModelsConfig,
   parseModelsConfig,
   PLATFORM_MODELS_REDIS_KEY,
+  resolveRuntimeModelsConfig,
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
+import type { UsageCredential } from "@cohub/protocol/runtime";
 import { config } from "./config.js";
 import { redisCommandClient } from "./redis.js";
 
@@ -47,18 +49,18 @@ export async function loadConfig(
   return content;
 }
 
-export async function validatePromptModel(input: { userId: string; provider: string; model: string }) {
-  const configs = [
-    await loadConfig(
+export async function resolvePromptModelCredential(input: { userId: string; provider: string; model: string }): Promise<UsageCredential | null> {
+  const [platform, user] = await Promise.all([
+    loadConfig(
       PLATFORM_MODELS_REDIS_KEY,
       join(config.platformConfigRoot, "platform", ".cohub", "models.json"),
       false,
     ),
-    await loadConfig(
+    loadConfig(
       getUserModelsRedisKey(input.userId),
       join(config.platformConfigRoot, "users", input.userId, ".cohub", "models.json"),
       true,
     ),
-  ];
-  return isRuntimeModelAvailable(configs, input.provider, input.model);
+  ]);
+  return findRuntimeModelCredential([resolveRuntimeModelsConfig({ platform, user })], input.provider, input.model);
 }
