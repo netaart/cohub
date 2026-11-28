@@ -4,6 +4,20 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.115 — 2026-11-28
+
+- **Contextual Board export**: the export dialog now opens where you are — video from the timeline for the current animation, image from the canvas for the current view at the playhead. It explains why video is unavailable, sizes whole-Board output from the first frame like the CLI, and offers the latest saved input recording, replayed by default only when it was just recorded.
+- **Simplified animation timeline**: the dock keeps what authors use — pick an animation, play, record changes, export. Rare editing (time insert/remove, chapter sequences, camera keys, easing and interpolation, delay and end modes) moves to the Agent and CLI, while values they write still display and play; Record changes now keys any Board edit at the playhead.
+- **Faster, sharper Board exports**: a frame renders with WebGL only when it shows 3D, a tilted camera or a drawing shader, and Canvas 2D otherwise; draw-only scripts start once they enter the view; scripts render at the output resolution instead of up to 2×; video frames are read straight from the render texture; and MP4/WebM encode with x264 superfast and VP9 realtime.
+- **Harness-aware usage accounting**: hourly token usage gains a `harness` dimension, and local Harness calls record provider `local` so a private gateway endpoint never reaches usage pages or public trending. Migration 0089 merges the duplicate NULL-provider rows, aggregation moves into `@cohub/core`, and activity rankings carry the harness through API, SDK, CLI and web.
+- **Stop confirmation for unreachable native runs**: a native turn that stops reporting can now be settled by user confirmation instead of waiting forever, fenced on its last observed activity so a run that reports in stays alive and drops stale prompts. Recovery changes publish over realtime, and the CLI gains `spaces sessions turns stop <sessionId> <turnId>` with `--confirm-stopped`.
+
+### Bug Fixes
+
+- Composer runtime picker: focus follows input modality (keyboard focuses search, touch focuses the list), the Generation tab no longer blocks arrow keys in local Harness lists, Escape closes the thinking-level menu first, tabs remain reachable when a local Harness has no Runtime, and ⌘⇧M selects Agent before opening the picker.
+- Export scripts receive the frame's view before drawing, so the first frame no longer lays out screen layers at the 1600×900 fallback and layers no longer trail a moving camera by a frame.
+- `cohub boards export --timeout` now bounds the browser render call instead of a fixed two minutes, and the shared browser resets when a caller leaves mid-frame.
+
 ## v2.114 — 2026-11-27
 
 - **One composer chip for every Space**: Cohub joins the local Harnesses as a tab in the composer runtime picker, listing the Cloud catalog with its generation policy, so picking a model commits Harness and model together; without a local Runtime the tabs are hidden and the chip shows the model name alone. The separate session model dialog is gone.
