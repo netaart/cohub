@@ -67,9 +67,16 @@ The SDK exports `SessionTurnOrigin`, `readSessionTurnOrigin(meta, spaceId?)` and
 `normalizeSessionTurnOrigin`. The reader also supports historical background-task
 origins when supplied their owning Space. Existing Turn HTTP/realtime payloads and
 Web caches retain origin inside `meta`, without new fetches, subscriptions or loading
-states. Native harness subagent import is separate runtime work. Native subthreads
-not imported as Cohub Turns and direct-generation executions are outside this
-prompt-origin path.
+states. Direct-generation executions are outside this prompt-origin path.
+
+A local harness's subagent thread syncs as its own Session through native ingest, whose Turns carry
+`caller: { sessionId, turnId, toolCallId? }`. The server resolves it like a prompt's caller (the
+user needs `session.view` on it) when it creates the Turn, records `kind: "prompt"` in the Turn's and the new
+Session's `meta.origin`, marks the Turn's `initiator` as `agent`, and appends `messagesSent` and the
+`turn_trigger` edge as below. The caller Turn is the parent Turn running when the subagent's Turn
+began; only the first Turn names the spawning tool call, and only when the harness records it (Claude
+Code, Codex). A caller the server cannot resolve leaves the Turn unlinked; the caller is never part
+of the Turn's identity.
 
 ## Caller side
 

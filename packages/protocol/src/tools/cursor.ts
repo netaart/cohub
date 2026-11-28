@@ -1,4 +1,4 @@
-import { deleteFile, editFile, fetchUrl, listFiles, readFile, search, shell, todos, webSearch, writeFile } from "./kit.js";
+import { delegate, deleteFile, editFile, fetchUrl, listFiles, readFile, search, shell, todos, webSearch, writeFile } from "./kit.js";
 import type { HarnessTools } from "./view.js";
 
 const PATH = ["path", "target_file", "file_path"];
@@ -26,5 +26,6 @@ export const cursor: HarnessTools = {
     webSearch: webSearch({ query: ["searchTerm", "search_term", "query"] }),
     WebSearch: webSearch({ query: ["search_term", "query"] }),
     WebFetch: fetchUrl({ url: "url" }),
+    Task: delegate({ title: "description", agent: "subagent_type", prompt: "prompt" }),
   },
 };

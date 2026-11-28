@@ -11,6 +11,7 @@ import { array, missing, text } from "./process.js";
 import type { SessionHeader } from "./types.js";
 
 const TRANSCRIPTS = "agent-transcripts";
+const SUBAGENTS = "subagents";
 const USER_QUERY = /<user_query>\s*([\s\S]*?)\s*<\/user_query>/;
 const TIMESTAMP = /<timestamp>([^<]*)<\/timestamp>/;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -51,13 +52,24 @@ const ownsProject = (name: string | undefined, cwd: string, platform = process.p
 
 export function acceptsCursorDirectory(path: string, root: string, cwd: string): boolean {
   const parts = transcriptParts(path, root);
-  if (!parts || parts.length > 3 || !ownsProject(parts[0], cwd)) return false;
-  return parts.length === 1 || parts[1] === TRANSCRIPTS;
+  if (!parts || parts.length > 4 || !ownsProject(parts[0], cwd)) return false;
+  return parts.length === 1 || (parts[1] === TRANSCRIPTS && (parts.length < 4 || parts[3] === SUBAGENTS));
 }
 
 export function acceptsCursorTranscript(path: string, cwd: string): boolean {
+  return transcriptOf(cursorSubagent(path)?.parentPath ?? path, cwd);
+}
+
+function transcriptOf(path: string, cwd: string): boolean {
   const parts = transcriptParts(path, cursorProjectsRoot());
   return parts?.length === 4 && ownsProject(parts[0], cwd) && parts[1] === TRANSCRIPTS && parts[3] === `${parts[2]}.jsonl`;
+}
+
+export function cursorSubagent(path: string): { parentPath: string } | null {
+  const folder = dirname(path);
+  if (basename(folder) !== SUBAGENTS || !path.endsWith(".jsonl")) return null;
+  const session = dirname(folder);
+  return { parentPath: join(session, `${basename(session)}.jsonl`) };
 }
 
 /**
@@ -91,6 +103,11 @@ export async function projectDirectory(name: string, platform = process.platform
  */
 export async function cursorSessionHeader(path: string): Promise<SessionHeader | null> {
   const nativeSessionId = basename(path, ".jsonl");
+  const subagent = cursorSubagent(path);
+  if (subagent) {
+    const parent = await cursorSessionHeader(subagent.parentPath);
+    return parent && { harness: "cursor", nativeSessionId, cwd: parent.cwd, thread: "spawned", parent: { nativeSessionId: parent.nativeSessionId, path: subagent.parentPath } };
+  }
   if (basename(dirname(path)) !== nativeSessionId) return null;
   const known = headers.get(nativeSessionId);
   if (known) return known;

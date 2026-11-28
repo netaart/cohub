@@ -52,6 +52,10 @@ export async function publishNativeIngest(spaceId: string, effects: NativeIngest
     }
     if (session) await dispatchSessionUpdated({ session, changed: ["latestMessageText", "lastMessageAt", "lastMessageId"] }).catch(warn("session.updated"));
   }
+  for (const caller of new Map(effects.callers.map((entry) => [entry.turnId, entry])).values()) {
+    const turn = await getSessionTurnById(caller.sessionId, caller.turnId).catch(() => null);
+    if (turn) await dispatchTurnUpdated({ spaceId: caller.spaceId, sessionId: caller.sessionId, turn }).catch(warn("caller turn.updated"));
+  }
   for (const entry of settled) {
     for (const message of byTurn.get(entry.turnId) ?? []) {
       if (message.role === "assistant") await enqueueSessionMessagePostprocess({ sessionId: entry.sessionId, message }).catch(warn("postprocess enqueue"));

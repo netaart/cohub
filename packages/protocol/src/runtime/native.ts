@@ -11,6 +11,7 @@ const usage = z.object({
   cost: z.object({ input: count, output: count, cacheRead: count, cacheWrite: count, total: count }).nullable().optional(),
 });
 const nativeOrigin = z.enum(["local_import"]);
+const nativeCaller = z.object({ sessionId: id, turnId: id, toolCallId: z.string().min(1).max(255).optional() }).strict();
 
 /** One native execution maps to one Cohub Turn. No message-level fork anchors. */
 export const nativeTurnStartSchema = z.object({
@@ -24,11 +25,13 @@ export const nativeTurnStartSchema = z.object({
   startedAt: z.iso.datetime(),
   sessionStartedAt: z.iso.datetime().optional(),
   origin: nativeOrigin.optional(),
+  caller: nativeCaller.optional(),
   controllable: z.boolean().optional(),
 }).strict().refine((value) => value.sessionId !== null || value.parentTurnId === null, "A parent Turn requires a Session");
 export type NativeTurnStart = z.infer<typeof nativeTurnStartSchema>;
 export type NativeTurnBinding = { sessionId: string; turnId: string; forked: boolean };
 export type NativeOrigin = z.infer<typeof nativeOrigin>;
+export type NativeCaller = z.infer<typeof nativeCaller>;
 
 export const nativeTurnMessageSchema = z.object({
   content,
@@ -79,6 +82,7 @@ export const nativeIngestTurnSchema = z.object({
   userContent: content,
   startedAt: z.iso.datetime(),
   origin: nativeOrigin.optional(),
+  caller: nativeCaller.optional(),
   result: nativeTurnCompleteSchema.nullable(),
   controllable: z.boolean().optional(),
 }).strict();

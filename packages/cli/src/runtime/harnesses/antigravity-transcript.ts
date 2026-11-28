@@ -130,8 +130,10 @@ export async function antigravitySessionHeader(path: string): Promise<SessionHea
     }
     const cwd = row && primaryWorkspace(row.workspace_uris);
     if (!row || !cwd) return null;
-    const nested = Boolean(text(row.parent_conversation_id).trim()) || (typeof row.nesting_depth === "number" && row.nesting_depth > 0);
-    return { harness: "antigravity", nativeSessionId: parsed.nativeSessionId, cwd, thread: nested ? "spawned" : "user" };
+    const parent = text(row.parent_conversation_id).trim();
+    const nested = Boolean(parent) || (typeof row.nesting_depth === "number" && row.nesting_depth > 0);
+    return { harness: "antigravity", nativeSessionId: parsed.nativeSessionId, cwd, thread: nested ? "spawned" : "user",
+      ...(parent ? { parent: { nativeSessionId: parent, path: join(parsed.appDataRoot, "brain", parent, SYSTEM_GENERATED, LOGS_DIR, TRANSCRIPT_FILE) } } : {}) };
   }
 }
 

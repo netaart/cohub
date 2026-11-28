@@ -10,7 +10,7 @@ import { sanitizePostgresJsonValue } from "../content/sanitize.js";
 import { nextSessionVersion, unarchiveSessionInTx } from "../labels/session-archive.js";
 import { resolveSessionTurnOrigin } from "./turn-origin.js";
 import { requestAgentTurnAbort, steerStopsTurnAtOnce, type AgentTurnAbortRedis } from "./turn-abort.js";
-import { appendSentTurn, sentTurnRefFor } from "./sent-turns.js";
+import * as sentTurns from "./sent-turns.js";
 import { withNextSessionMessageSequence } from "./message-sequence.js";
 import { extractTurnReferences } from "../references/extract.js";
 import { turnTriggerReference } from "../references/turn-trigger.js";
@@ -247,14 +247,11 @@ export function createSessionServices(input: {
   }
 
   async function recordSentTurn(child: { spaceId: string; sessionId: string; turnId: string; meta: unknown }) {
-    const origin = readSessionTurnOrigin(child.meta, child.spaceId);
-    const ref = sentTurnRefFor(origin, child);
-    if (!origin || !ref) return;
     try {
-      const caller = await appendSentTurn(input.db, origin, ref);
-      if (caller) await input.onSessionTurnUpdated?.({ spaceId: origin.spaceId, turn: toSessionTurnRecord(caller) });
+      const caller = await sentTurns.recordSentTurn(input.db, child);
+      if (caller) await input.onSessionTurnUpdated?.({ spaceId: caller.spaceId, turn: toSessionTurnRecord(caller.turn) });
     } catch (error) {
-      logger.warn("[Session] failed to record sent turn on caller", { callerTurnId: origin.turnId, childTurnId: child.turnId, error });
+      logger.warn("[Session] failed to record sent turn on caller", { callerTurnId: readSessionTurnOrigin(child.meta, child.spaceId)?.turnId, childTurnId: child.turnId, error });
     }
   }
 

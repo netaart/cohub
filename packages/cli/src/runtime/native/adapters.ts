@@ -1,9 +1,9 @@
 import type { LocalHarness } from "@neta-art/cohub";
 import { transcriptFormat } from "../harnesses/index.js";
-import type { SessionHeader, ThreadKind } from "../harnesses/types.js";
+import type { SessionHeader, ThreadKind, ThreadParent } from "../harnesses/types.js";
 import type { NativeTranscript, NativeTranscriptTurn } from "./transcript.js";
 
-export type { NativeTranscript, NativeTranscriptTurn, SessionHeader, ThreadKind };
+export type { NativeTranscript, NativeTranscriptTurn, SessionHeader, ThreadKind, ThreadParent };
 export type Harness = LocalHarness;
 
 /** Directories holding this harness's transcripts; a transcript's header says which project it is. */

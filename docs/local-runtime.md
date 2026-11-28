@@ -221,13 +221,18 @@ already has and reads forward from there, so there are no local delivery receipt
 duplicates. Turn identity is derived from the Space and the file (Codex turn id; Pi session id + entry
 id), so a folder bound to a new Space syncs there afresh. Only a rebuildable cache lives locally
 (`~/.local/state/cohub/runtime/<space-id>/native/ledger.jsonl`, an append-only journal compacted when
-it outgrows its content). Codex's own threads (reviews, compaction, memory) and
-spawned sub-agents are skipped. Raw bytes of the latest settled Turn are
-archived so a conversation can be restored natively on another machine.
+it outgrows its content). Codex's own threads (reviews, compaction, memory) are skipped. A subagent's
+thread (Claude Code `subagents/agent-*.jsonl`, Codex `thread_spawn`, Cursor `subagents/`, nested
+Antigravity conversations) syncs as a Session of its own, created by an agent: each of its Turns names
+the parent Turn running when it began and, for the first, the spawning tool call when the harness
+records one (see [Session and Turn origins](session-turn-origins.md)). It waits until that parent Turn
+is synced, never copies history it inherited, and is not archived. Raw bytes of the latest settled Turn
+are archived so a conversation can be restored natively on another machine.
 
 **数据面。** 原生会话文件就是唯一的持久记录和发件箱。Runtime 监听所有 Harness 的会话目录（绑定目录及其子目录），
 只在 Turn 开始或结束时解析并经 Runtime WS 上报（由控制面事件或新追加字节中的边界记录触发），其间只扫描新字节、不重解析、不轮询。服务端是唯一账本：重启或断线后先询问服务端已有哪些 Turn 再继续读，
-本地不再保存投递回执，重放不会重复。本地只有可重建的缓存。Codex 自身的内部线程与子 Agent 不同步。
+本地不再保存投递回执，重放不会重复。本地只有可重建的缓存。Codex 自身的内部线程不同步。子 Agent 的线程同步为
+由 Agent 创建的独立 Session，每个 Turn 关联启动它时正在运行的父 Turn，第一个 Turn 在 Harness 有记录时还关联发起它的工具调用。
 
 **Control plane.** Each harness is driven through the interface its own terminal client uses:
 

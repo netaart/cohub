@@ -1,4 +1,4 @@
-import { applyPatch, fileChanges, mcpTool, readFile, shell, todos, webSearch } from "./kit.js";
+import { applyPatch, delegate, fileChanges, mcpTool, readFile, shell, todos, webSearch } from "./kit.js";
 import type { HarnessTools, ToolAdapter } from "./view.js";
 
 const command = shell({ command: "command", cwd: "workdir", timeout: "timeout_ms", timeoutUnit: "ms", description: "justification" });
@@ -15,6 +15,7 @@ export const codex: HarnessTools = {
     update_plan: todos({ list: "plan", text: "step", status: "status" }),
     view_image: readFile({ path: "path" }),
     web_search: webSearch({ query: "query" }),
+    spawn_agent: delegate({ title: ["task_name", "agent_type"], agent: "agent_type", prompt: "message" }),
   },
   other: mcpTool,
 };

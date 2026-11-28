@@ -539,7 +539,6 @@ test("Claude Code terminal Turns sync and settle on their recorded end; Cohub's 
     const path = w.claudePath(cwd, id);
     // Fresh bytes: a recorded end settles the Turn without waiting for a quiet period.
     await w.write(path, claudeTurn(id, cwd, cloudTurnId, null, "from the web", false) + claudeTurn(id, cwd, "u2", `a-${cloudTurnId}`, "from the terminal"));
-    await w.write(join(path.slice(0, -".jsonl".length), "subagents", "agent-x.jsonl"), claudeTurn(id, cwd, "s1", null, "sub-agent"));
     const ingest = w.ingest({ harnesses: ["claude"] });
     await ingest.load();
     ingest.connect(server.transport);
@@ -547,6 +546,30 @@ test("Claude Code terminal Turns sync and settle on their recorded end; Cohub's 
     const terminal = server.batches.flatMap((batch) => batch.turns);
     assert.deepEqual(terminal.map((turn) => [turn.turnId, turn.parentTurnId, turn.result?.status]), [[turnIdOf("claude", id, "u2"), cloudTurnId, "completed"]]);
     assert.equal(server.turns.get(turnIdOf("claude", id, "u2"))?.sessionId, sessionId);
+    await ingest.close(AbortSignal.timeout(2_000));
+  } finally { await w.cleanup(); }
+});
+
+test("a Claude Code subagent's thread is a Session of its own, started by the Turn that spawned it", async () => {
+  const w = await workspace();
+  try {
+    const server = fakeServer();
+    const id = randomUUID(), path = w.claudePath(w.project, id);
+    const record = (value: Record<string, unknown>) => claudeRecord(id, w.project, value);
+    await w.write(path, record({ type: "user", uuid: "u1", parentUuid: null, promptId: "p1", promptSource: "typed", message: { role: "user", content: "delegate" } })
+      + record({ type: "assistant", uuid: "a1", parentUuid: "u1", message: { id: "m1", role: "assistant", content: [{ type: "tool_use", id: "toolu_agent", name: "Agent", input: { description: "probe", prompt: "go" } }], stop_reason: "tool_use" } })
+      + record({ type: "user", uuid: "r1", parentUuid: "a1", promptId: "p1", toolUseResult: { status: "async_launched", agentId: "x" }, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_agent", content: "launched" }] } })
+      + record({ type: "assistant", uuid: "a2", parentUuid: "r1", message: { id: "m2", role: "assistant", content: [{ type: "text", text: "waiting" }], stop_reason: "end_turn" } })
+      + record({ type: "system", subtype: "turn_duration", uuid: "d1", parentUuid: "a2" }), new Date(Date.now() - 60_000));
+    await w.write(join(path.slice(0, -".jsonl".length), "subagents", "agent-x.jsonl"), claudeTurn(id, w.project, "s1", null, "go").replaceAll('"isSidechain":false', '"isSidechain":true'));
+    const ingest = w.ingest({ harnesses: ["claude"] });
+    await ingest.load();
+    ingest.connect(server.transport);
+    const child = turnIdOf("claude", "x", "s1"), parent = turnIdOf("claude", id, "u1");
+    await until(() => server.turns.get(child)?.settled === true, 15_000);
+    assert.deepEqual(server.turns.get(child)?.caller, { sessionId: server.turns.get(parent)?.sessionId, turnId: parent, toolCallId: "toolu_agent" });
+    assert.notEqual(server.turns.get(child)?.sessionId, server.turns.get(parent)?.sessionId);
+    assert.equal(server.turns.get(child)?.parentTurnId, null);
     await ingest.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
 });
@@ -586,7 +609,6 @@ test("Cursor terminal Turns sync through their chat's project; a Turn Cohub runs
     server.turns.set(cloudTurnId, { sessionId, settled: true, parentTurnId: null });
     await w.write(join(cursorChatDirectory(terminal, cwd), "meta.json"), JSON.stringify({ cwd }));
     await w.write(cursorTranscriptPath(terminal, cwd), cursorTurn("from the terminal"));
-    await w.write(join(cursorTranscriptPath(terminal, cwd), "..", "subagents", "s1.jsonl"), cursorTurn("sub-agent"));
     const path = cursorTranscriptPath(id, w.project);
     const ingest = w.ingest({ harnesses: ["cursor"] });
     await ingest.load();

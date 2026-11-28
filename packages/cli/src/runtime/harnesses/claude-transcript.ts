@@ -1,7 +1,10 @@
+import { readFile } from "node:fs/promises";
+import { basename, dirname } from "node:path";
 import type { ContentBlock, NativeTurnMessage } from "@neta-art/cohub";
 import { record } from "../json-rpc.js";
 import { iso, type NativeTranscript, type NativeTranscriptTurn } from "../native/transcript.js";
-import { chainBranch, extendTurn, readChainedLines, startTurn } from "./chained-transcript.js";
+import { chainBranch, chainedSessionHeader, extendTurn, readChainedLines, startTurn } from "./chained-transcript.js";
+import type { SessionHeader } from "./types.js";
 import { array, text, toolTiming } from "./process.js";
 import { streamContent, streamUsage } from "./stream-json.js";
 
@@ -11,8 +14,15 @@ const BASH_INPUT = /^<bash-input>([\s\S]*?)<\/bash-input>/;
 /** Output of a local command or `!` shell, recorded as a user message but never sent as a prompt. */
 const LOCAL_OUTPUT = /^<(?:local-command-(?:stdout|stderr|caveat)|bash-(?:stdout|stderr))>/;
 const INTERRUPTED = "[Request interrupted by user";
+const TASK_NOTIFICATION = "<task-notification>";
+const TASK_ID = /<task-id>([^<]+)<\/task-id>/;
+const SUBAGENT_FILE = /^agent-([\w-]+)\.jsonl$/;
 export const CLAUDE_REPLY_ENDED = ["end_turn", "stop_sequence", "max_tokens", "refusal", "aborted", "error"];
 
+const notified = (content: ContentBlock[]) => {
+  const first = content.find((block) => block.type === "text")?.text.trimStart() ?? "";
+  return first.startsWith(TASK_NOTIFICATION) ? TASK_ID.exec(first)?.[1] ?? "" : null;
+};
 const nonEmpty = (block: ContentBlock) => !(block.type === "text" && !block.text) && !(block.type === "thinking" && !block.thinking);
 
 /** A local `/command` or `!shell` is shown as typed; one that never reached the model is no Turn. */
@@ -28,6 +38,23 @@ function prompt(value: unknown): { content: ContentBlock[]; local: boolean } | n
   return visible.length ? { content: visible, local: false } : null;
 }
 
+export function claudeSubagent(path: string): { agentId: string; parentSessionId: string; parentPath: string } | null {
+  const agentId = SUBAGENT_FILE.exec(basename(path))?.[1];
+  const folder = dirname(path);
+  if (!agentId || basename(folder) !== "subagents") return null;
+  const session = dirname(folder);
+  return { agentId, parentSessionId: basename(session), parentPath: `${session}.jsonl` };
+}
+
+export async function claudeSessionHeader(path: string, signal?: AbortSignal): Promise<SessionHeader | null> {
+  const header = await chainedSessionHeader(path, "claude", signal);
+  const subagent = claudeSubagent(path);
+  if (!header || !subagent) return header;
+  const meta = await readFile(path.replace(/\.jsonl$/, ".meta.json"), { encoding: "utf8", signal }).then((raw) => record(JSON.parse(raw)), () => record(null));
+  const toolCallId = text(meta.toolUseId);
+  return { ...header, nativeSessionId: subagent.agentId, thread: "spawned", parent: { nativeSessionId: subagent.parentSessionId, path: subagent.parentPath, ...(toolCallId ? { toolCallId } : {}) } };
+}
+
 /**
  * Claude Code appends one record per content block, linked by `parentUuid` (`logicalParentUuid`
  * across a compaction). A Turn starts at a prompt; its tool results and an interruption share the
@@ -35,7 +62,8 @@ function prompt(value: unknown): { content: ContentBlock[]; local: boolean } | n
  */
 export async function readClaudeTranscript(path: string, nativeSessionId: string, signal?: AbortSignal): Promise<NativeTranscript> {
   const read = await readChainedLines(path, signal);
-  const branch = chainBranch(read.lines, (value) => value.isSidechain === true ? "" : text(value.uuid), (value) => text(value.parentUuid) || text(value.logicalParentUuid));
+  const sidechain = claudeSubagent(path) !== null;
+  const branch = chainBranch(read.lines, (value) => value.isSidechain === true && !sidechain ? "" : text(value.uuid), (value) => text(value.parentUuid) || text(value.logicalParentUuid));
   const turns: NativeTranscriptTurn[] = [];
   const owners = new Map<string, NativeTurnMessage>();
   const calls = new Map<string, unknown>();
@@ -43,6 +71,8 @@ export async function readClaudeTranscript(path: string, nativeSessionId: string
   let cwd = "", cloudSessionId = "";
   let current: NativeTranscriptTurn | null = null;
   let promptId = "", local = false, interrupted = false, completedAt = "";
+  const launched = new Set<string>();
+  const wait = (turn: NativeTranscriptTurn) => { if (launched.size) turn.waiting = true; else delete turn.waiting; };
   const finish = () => {
     if (!current) return;
     // A local command that never reached the model is not a conversation Turn.
@@ -60,6 +90,15 @@ export async function readClaudeTranscript(path: string, nativeSessionId: string
       const message = record(value.message);
       const results = array(message.content).map(record).filter((block) => block.type === "tool_result");
       const opened = value.isMeta === true || value.isCompactSummary === true || results.length ? null : prompt(message.content);
+      // `-p` records no Turn end, so a background task's completion wakes the Turn that launched it.
+      const task = opened && notified(opened.content);
+      if (task != null && current && !current.ended) {
+        launched.delete(task);
+        wait(current);
+        completedAt = iso(value.timestamp);
+        extendTurn(current, line, true);
+        continue;
+      }
       if (opened && !(current && text(value.promptId) && text(value.promptId) === promptId)) {
         finish();
         const cohub = record(value.cohub);
@@ -67,10 +106,15 @@ export async function readClaudeTranscript(path: string, nativeSessionId: string
         // Cohub sends its Turn id as the prompt's record id; a projected record names its Turn.
         current = startTurn(line, text(value.uuid), turns.at(-1)?.key ?? null, opened.content, text(cohub.turnId) || text(value.uuid));
         promptId = text(value.promptId); local = opened.local; interrupted = false; completedAt = current.startedAt;
+        launched.clear();
         owners.clear(); messageIds.clear(); calls.clear();
         continue;
       }
       if (!current) continue;
+      const outcome = record(value.toolUseResult), agentId = text(outcome.agentId);
+      if (agentId && results.length === 1) current.spawns = { ...current.spawns, [agentId]: text(results[0]?.tool_use_id) };
+      const background = outcome.status === "async_launched" ? agentId : text(outcome.backgroundTaskId);
+      if (background) { launched.add(background); wait(current); }
       for (const block of results) {
         const id = text(block.tool_use_id);
         const owner = owners.get(id);

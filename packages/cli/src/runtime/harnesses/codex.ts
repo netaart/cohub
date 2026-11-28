@@ -237,7 +237,9 @@ export const codexHarness: LocalHarnessAdapter = {
       const header = await readFirstRecord(codexRolloutBytes(path, null, signal));
       const payload = record(header.payload);
       if (header.type !== "session_meta" || !text(payload.id) || !text(payload.cwd)) return null;
-      return { harness: "codex", nativeSessionId: text(payload.id), cwd: text(payload.cwd), thread: codexThreadKind(payload) };
+      const thread = codexThreadKind(payload);
+      const parent = text(record(record(record(payload.source).subagent).thread_spawn).parent_thread_id) || text(payload.parent_thread_id);
+      return { harness: "codex", nativeSessionId: text(payload.id), cwd: text(payload.cwd), thread, ...(thread === "spawned" && parent ? { parent: { nativeSessionId: parent } } : {}) };
     },
     read: (path, signal) => readNativeTranscript(path, "codex", { signal }),
     boundaries: ['"UserMessage"', '"user_message"', '"turn_complete"', '"task_complete"', '"turn_aborted"'],

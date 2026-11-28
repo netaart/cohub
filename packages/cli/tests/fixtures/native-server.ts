@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import type { NativeRuntimeEvent } from "@neta-art/cohub";
+import type { NativeCaller, NativeRuntimeEvent } from "@neta-art/cohub";
 import type { IngestTransport } from "../../src/runtime/native/ingest.js";
 
 type Ingested = Extract<NativeRuntimeEvent, { type: "ingest" }>["input"];
@@ -10,7 +10,7 @@ type Ingested = Extract<NativeRuntimeEvent, { type: "ingest" }>["input"];
  * `stop` marks Turns a status request reports as stop-requested.
  */
 export function fakeNativeServer() {
-  const turns = new Map<string, { sessionId: string; settled: boolean; parentTurnId: string | null; origin?: string }>();
+  const turns = new Map<string, { sessionId: string; settled: boolean; parentTurnId: string | null; origin?: string; caller?: NativeCaller }>();
   const batches: Ingested[] = [];
   const progress: Array<{ turnId: string; from: number; messages: number }> = [];
   const statusRequests: string[] = [];
@@ -34,7 +34,7 @@ export function fakeNativeServer() {
         if (turn.parentTurnId && !parent) throw new Error("Parent Turn is not recorded");
         const existing = turns.get(turn.turnId);
         const sessionId = existing?.sessionId ?? parent?.sessionId ?? randomUUID();
-        turns.set(turn.turnId, { sessionId, settled: turn.result !== null || Boolean(existing?.settled), parentTurnId: turn.parentTurnId, origin: turn.origin });
+        turns.set(turn.turnId, { sessionId, settled: turn.result !== null || Boolean(existing?.settled), parentTurnId: turn.parentTurnId, origin: turn.origin, caller: existing ? existing.caller : turn.caller });
         return { turnId: turn.turnId, sessionId, forked: false, settled: turn.result !== null, created: !existing, changed: true };
       }) };
     },

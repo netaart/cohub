@@ -35,6 +35,8 @@ export type NativeTranscriptTurn = {
   path?: string;
   rolloutId?: string;
   sequence?: number;
+  spawns?: Record<string, string>;
+  waiting?: boolean;
 };
 export type NativeTranscript = {
   nativeSessionId: string;
@@ -414,6 +416,8 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
   let current: NativeTranscriptTurn | null = null;
   let messages: NativeTurnMessage[] = [];
   const calls = new Map<string, NativeTurnMessage>(); // tool call id → owning message
+  const spawnCalls = new Set<string>();
+  const spawned = (thread: unknown, call: unknown) => { if (current && text(thread) && text(call)) current.spawns = { ...current.spawns, [text(thread)]: text(call) }; };
   let model: string | null = null;
   let cloudSessionId = text(record(metadata.cohub).sessionId);
   let provider: string | null = text(metadata.model_provider) || null;
@@ -483,10 +487,12 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
           const owner = assistant();
           owner.content.push({ type: "tool_use", id: payload.call_id, name: payload.name, input });
           calls.set(payload.call_id, owner);
+          if (payload.name === "spawn_agent") spawnCalls.add(payload.call_id);
         }
       } else if (["function_call_output", "custom_tool_call_output"].includes(text(payload.type))) {
         const id = text(payload.call_id);
         calls.get(id)?.content.push({ type: "tool_result", tool_use_id: id, content: typeof payload.output === "string" ? payload.output : JSON.stringify(payload.output ?? null) });
+        if (spawnCalls.has(id)) { try { spawned(record(JSON.parse(text(payload.output))).agent_id, id); } catch { /* v2 names the thread in an event */ } }
       }
     }
     // Cohub tags a Turn it starts with its own cloud Turn id (`client_id`), so the file itself records
@@ -502,6 +508,10 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
         if (typed.length) { current.userContent = typed; userFromResponse = true; }
         current.userFinal = true;
       }
+    }
+    if (entry.type === "event_msg" && payload.type === "sub_agent_activity" && payload.kind === "started") spawned(payload.agent_thread_id, payload.event_id);
+    if (entry.type === "event_msg" && payload.type === "item_completed" && record(payload.item).type === "CollabAgentToolCall" && record(payload.item).tool === "spawn_agent") {
+      for (const thread of list(record(payload.item).receiver_thread_ids)) spawned(thread, record(payload.item).id);
     }
     if (entry.type === "event_msg" && payload.type === "user_message") {
       const clientId = text(payload.client_id);

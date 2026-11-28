@@ -14,7 +14,7 @@ export type {
   CanonicalProjectionMessage, CanonicalProjectionTurn, NativeProjection, ProjectionCursor, ProjectionInput, ProjectionRecord, ProjectionTarget, ProjectionWarning,
   RuntimeStatus, RuntimeSessionRecoveryStatus, RuntimeStopConfirmation, HarnessArchiveIndex, RuntimeArchiveSegment, RuntimeArchiveUpload, RuntimeArchivePage,
   RuntimeTraceContext, MessageToolCallsFile, SessionTurnRecord, StoredIntermediateMessage, StoredToolCall, TurnIntermediateMessagesFile,
-  NativeTurnMessage, NativeTurnComplete, NativeTurnMessagesResult, NativeTurnProgress, NativeRuntimeEvent, NativeIngest, NativeIngestTurn, NativeIngestResult, NativeKnownResult, RuntimeNativeStop, RuntimeApproval, RuntimeApprovalDecision, SessionApproval, ApprovalDecision,
+  NativeTurnMessage, NativeTurnComplete, NativeTurnMessagesResult, NativeTurnProgress, NativeRuntimeEvent, NativeIngest, NativeIngestTurn, NativeCaller, NativeIngestResult, NativeKnownResult, RuntimeNativeStop, RuntimeApproval, RuntimeApprovalDecision, SessionApproval, ApprovalDecision,
 } from "@cohub/protocol";
 export { buildViewportContentBlock } from "@cohub/protocol";
 export { isUserAppFilter, isUserCronJobFilter, USER_APP_FILTERS, USER_CRONJOB_FILTERS } from "@cohub/protocol";

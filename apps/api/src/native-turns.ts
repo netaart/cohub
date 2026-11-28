@@ -4,7 +4,9 @@ import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { hasPermission } from "./permissions.js";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
 import { NATIVE_SYNC_SOURCE, SETTLED_TURN_STATUSES, isNativeClientTurn, type NativeTurnStart, type NativeTurnBinding, type NativeTurnComplete, type NativeTurnMessage, type NativeTurnMessages, type NativeTurnMessagesResult, type NativeIngest, type NativeIngestResult, type NativeKnownResult } from "@cohub/protocol";
-import { addSessionParticipantMeta, deriveMessagePreviewText, deriveSessionFallbackTitle, runtimeResolutionOpen } from "@cohub/core/sessions";
+import { addSessionParticipantMeta, deriveMessagePreviewText, deriveSessionFallbackTitle, recordSentTurn, resolveSessionTurnOrigin, runtimeResolutionOpen } from "@cohub/core/sessions";
+import { turnTriggerReference } from "@cohub/core/references";
+import { enqueueReferences } from "./reference-index-queue.js";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { unarchiveSessionInTx } from "@cohub/core/labels";
 import { publishSessionArchiveChange } from "./session-archive.js";
@@ -83,9 +85,10 @@ function reparsedPrompt(existing: typeof sessionTurns.$inferSelect, input: Nativ
 
 /** Shares the Session row lock with createSessionTurn and the Agent's batch claim. */
 export async function startNativeTurn(spaceId: string, userId: string, input: NativeTurnStart) {
-  // Controllability can change while a Turn runs; it is state, not part of the Turn's identity.
-  const { controllable, ...identity } = input;
+  // Controllability and a subagent's caller are state, not part of the Turn's identity.
+  const { controllable, caller, ...identity } = input;
   const requestDigest = digest(identity);
+  const origin = caller ? await resolveSessionTurnOrigin(db, caller, "prompt", (scope) => hasPermission({ uuid: userId }, "session.view", scope)) : null;
   const committed = await db.transaction(async (tx) => {
     // Retries may name the original parent even after the first request forked. Serialize by receipt ID first.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.turnId}, 0))`);
@@ -103,7 +106,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
       const [session] = await tx.select().from(spaceSessions).where(eq(spaceSessions.id, existing.sessionId));
       if (!session) throw new NativeTurnError(404, "Session not found");
       const userContent = existing.userContent;
-      return { binding: { sessionId: session.id, turnId: existing.id, forked: input.sessionId !== null && session.id !== input.sessionId }, session, created: false, sessionCreated: false, fork: null,
+      return { binding: { sessionId: session.id, turnId: existing.id, forked: input.sessionId !== null && session.id !== input.sessionId }, session, created: false, sessionCreated: false, fork: null, callerTurn: null,
         projection: { userText: deriveMessagePreviewText({ content: userContent }) || null, userMessageId: messageId(input.turnId, -1), startedAt: new Date(input.startedAt), title: deriveSessionFallbackTitle({ content: userContent }) } };
     }
 
@@ -153,9 +156,10 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
       sessionCreated = true;
       const [collision] = await tx.select({ id: spaceSessions.id }).from(spaceSessions).where(eq(spaceSessions.id, sessionId));
       if (collision) conflict("Session identity already exists");
-      const sessionMeta = input.origin ? {
-        nativeSync: { version: 1, origin: input.origin, harness: input.harness, nativeSessionId: input.nativeSessionId, originalStartedAt: input.sessionStartedAt ?? input.startedAt },
-      } : {};
+      const sessionMeta = {
+        ...(input.origin ? { nativeSync: { version: 1, origin: input.origin, harness: input.harness, nativeSessionId: input.nativeSessionId, originalStartedAt: input.sessionStartedAt ?? input.startedAt } } : {}),
+        ...(origin ? { origin } : {}),
+      };
       const sessionStartedAt = new Date(input.sessionStartedAt ?? input.startedAt);
       await tx.insert(spaceSessions).values({ id: sessionId, spaceId, userUuid: userId, source: NATIVE_SYNC_SOURCE,
         meta: addSessionParticipantMeta(sessionMeta, userId), createdAt: sessionStartedAt });
@@ -167,7 +171,8 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     const userMessageId = messageId(input.turnId, -1);
     const meta = {
       source: NATIVE_SYNC_SOURCE, harness: input.harness, runtime: "local", actorUserId: userId, userMessageId,
-      ...(input.origin === undefined ? { initiator: "human" } : {}),
+      ...(caller ? { initiator: "agent" } : input.origin === undefined ? { initiator: "human" } : {}),
+      ...(origin ? { origin } : {}),
       runtimeRecovery: { state: "executing", ownerUserId: userId },
       nativeSync: { version: 1, spaceId, requestDigest, nativeSessionId: input.nativeSessionId, parentTurnId: input.parentTurnId, observedAt: new Date().toISOString(),
         ...(input.origin ? { origin: input.origin, originalStartedAt: input.startedAt } : {}),
@@ -176,13 +181,19 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     await tx.insert(sessionTurns).values({ id: input.turnId, sessionId, spaceId, userUuid: userId, sequence, status: "running", intent: "followup", userContent, userText, meta, startedAt, createdAt: startedAt });
     const [last] = await tx.select({ sequence: sessionMessages.sequence }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId)).orderBy(desc(sessionMessages.sequence)).limit(1);
     await tx.insert(sessionMessages).values({ id: userMessageId, sessionId, turnId: input.turnId, role: "user", content: userContent, text: userText, sequence: (last?.sequence ?? 0) + 1, idempotencyKey: `native:${input.turnId}:user`, meta: { ...meta, turnId: input.turnId, messageKind: "user" }, startedAt, completedAt: startedAt, createdAt: startedAt });
+    const linked = origin ? await recordSentTurn(tx, { spaceId, sessionId, turnId: input.turnId, meta }) : null;
+    const callerTurn = linked && { spaceId: linked.spaceId, sessionId: linked.turn.sessionId, turnId: linked.turn.id };
     const [session] = await tx.select().from(spaceSessions).where(eq(spaceSessions.id, sessionId)).limit(1);
     if (!session) throw new Error("Native Session disappeared before commit");
     const binding: NativeTurnBinding = { sessionId, turnId: input.turnId, forked: input.sessionId !== null && sessionId !== input.sessionId };
-    return { binding, session, created: true, sessionCreated, fork, unarchivedLabelId, projection: { userText, userMessageId, startedAt, title: deriveSessionFallbackTitle({ content: userContent }) } };
+    return { binding, session, created: true, sessionCreated, fork, unarchivedLabelId, callerTurn, projection: { userText, userMessageId, startedAt, title: deriveSessionFallbackTitle({ content: userContent }) } };
   });
   if ("unarchivedLabelId" in committed && committed.unarchivedLabelId) {
     await publishSessionArchiveChange({ spaceId, sessionId: committed.binding.sessionId, labelId: committed.unarchivedLabelId, archived: false });
+  }
+  if (committed.created && origin) {
+    const trigger = turnTriggerReference({ id: committed.binding.turnId, spaceId, sessionId: committed.binding.sessionId, meta: { origin } });
+    if (trigger) enqueueReferences([trigger]);
   }
   if (!committed.projection) return committed;
   const projection = committed.projection;
@@ -195,6 +206,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
 export type NativeIngestEffects = {
   createdSessions: Array<{ sessionId: string; fork?: RealtimeSessionFork }>;
   turns: Array<{ sessionId: string; turnId: string; created: boolean; changed: boolean; imported: boolean }>;
+  callers: Array<{ spaceId: string; sessionId: string; turnId: string }>;
 };
 
 /**
@@ -203,7 +215,7 @@ export type NativeIngestEffects = {
  */
 export async function ingestNativeTurns(spaceId: string, userId: string, input: NativeIngest): Promise<NativeIngestResult & { effects: NativeIngestEffects }> {
   const turns: NativeIngestResult["turns"] = [];
-  const effects: NativeIngestEffects = { createdSessions: [], turns: [] };
+  const effects: NativeIngestEffects = { createdSessions: [], turns: [], callers: [] };
   const sessions = new Map<string, string>();
   const drain = new Set<string>();
   for (const turn of input.turns) {
@@ -223,9 +235,11 @@ export async function ingestNativeTurns(spaceId: string, userId: string, input: 
       turnId: turn.turnId, sessionId, parentTurnId: turn.parentTurnId, branchSessionId: stableUuid([turn.turnId, "branch"]),
       harness: input.harness, nativeSessionId: input.nativeSessionId, userContent: turn.userContent, startedAt: turn.startedAt,
       ...(turn.origin ? { origin: turn.origin } : {}),
+      ...(turn.caller ? { caller: turn.caller } : {}),
       ...(turn.controllable === undefined ? {} : { controllable: turn.controllable }),
     };
-    const { binding, created, sessionCreated, fork } = await startNativeTurn(spaceId, userId, start);
+    const { binding, created, sessionCreated, fork, callerTurn } = await startNativeTurn(spaceId, userId, start);
+    if (callerTurn) effects.callers.push(callerTurn);
     let changed = false;
     if (turn.result) {
       changed = await completeNativeTurn(spaceId, userId, binding.sessionId, binding.turnId, turn.result).then((outcome) => outcome.changed, (error: unknown) => {
@@ -402,7 +416,7 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
       summary: { text: final?.text ?? null, finishReason: input.status },
       completedAt, durationMs: Math.min(2_147_483_647, Math.max(0, completedAt.getTime() - (turn.startedAt?.getTime() ?? completedAt.getTime()))), updatedAt: new Date(),
       meta: { ...meta, ...(meta.harness === "codex" && final?.model && final.provider ? { model: final.model, provider: final.provider } : {}),
-        ...(input.thinkingLevel ? { requestedThinkingLevel: input.thinkingLevel } : {}), metrics: { ...record(meta.metrics), version: 1, tools: collectToolMetrics(messages.map((message) => message.content)) }, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
+        ...(input.thinkingLevel ? { requestedThinkingLevel: input.thinkingLevel } : {}), metrics: { ...record(meta.metrics), version: 1, tools: collectToolMetrics(messages.map((message) => message.content)) }, ...(meta.initiator === "agent" ? {} : { runtimeArchiveStatus: "pending" }), nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
     }).where(and(eq(sessionTurns.id, turnId), runtimeResolutionOpen, inArray(sessionTurns.status, ["running", "abort_requested"]))).returning();
     if (!next) conflict("Execution was resolved");
     return { changed: true, turn: next, messages, projection: { latestMessageText: final?.text ?? turn.userText, lastMessageId: final?.id, completedAt } };

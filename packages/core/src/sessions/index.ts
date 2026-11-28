@@ -23,3 +23,4 @@ export * from "./turn-abort.js";
 export * from "./runtime-recovery.js";
 export * from "./turn-speech.js";
 export * from "./reply.js";
+export { recordSentTurn } from "./sent-turns.js";

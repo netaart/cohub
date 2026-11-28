@@ -1,7 +1,7 @@
 import { appendFile, mkdir, open, readFile, readdir, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, type NativeIngestResult, type NativeIngestTurn, type NativeRuntimeEvent, type NativeTurnComplete, type NativeTurnMessage, type NativeTurnMessagesResult } from "@neta-art/cohub";
-import { acceptsDirectory, acceptsTranscript, readSessionHeader, readTranscript, transcriptRoots, type Harness, type NativeTranscriptTurn } from "./adapters.js";
+import { NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, type NativeCaller, type NativeIngestResult, type NativeIngestTurn, type NativeRuntimeEvent, type NativeTurnComplete, type NativeTurnMessage, type NativeTurnMessagesResult } from "@neta-art/cohub";
+import { acceptsDirectory, acceptsTranscript, readSessionHeader, readTranscript, transcriptRoots, type Harness, type NativeTranscript, type NativeTranscriptTurn, type SessionHeader, type ThreadKind, type ThreadParent } from "./adapters.js";
 import { SizeLimitError } from "./transcript.js";
 import { nativeTurnId } from "./identity.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
@@ -9,6 +9,10 @@ import { harnessAdapter, transcriptFormat } from "../harnesses/index.js";
 import { containsNativePath } from "./paths.js";
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
+
+class ParentPendingError extends Error {
+  override name = "ParentPendingError";
+}
 
 /** Transcripts read in parallel per lane. The live lane never waits behind a backfill. */
 const LIVE_CONCURRENCY = 2;
@@ -18,6 +22,7 @@ export const MAX_IMPORT_CONCURRENCY = 8;
 const WATCH_DEBOUNCE_MS = 150;
 /** A quiet transcript whose last reply ended is settled after this long, unless the file records Turn ends. */
 const QUIET_SETTLE_MS = 10_000;
+const WAITING_SETTLE_MS = 30 * 60_000;
 const SETTLED_STATUSES = new Set<string>(SETTLED_TURN_STATUSES);
 /** A running Turn that shows signs of life tells the server at most this often. */
 const ALIVE_INTERVAL_MS = 5 * 60_000;
@@ -49,6 +54,7 @@ export type TranscriptState = {
   runningTurnKey: string | null;
   headTurnId: string | null;
   origin: "cohub" | "native";
+  parent?: ThreadParent | null;
   controllable?: boolean;
   /** The Turn Cohub is running in this file, for formats that cannot mark it; kept across a crash. */
   executingTurnId?: string | null;
@@ -97,17 +103,22 @@ export type IngestHooks = {
 
 /** A transcript on disk that may belong to the bound directory. */
 export type NativeCandidate = { harness: Harness; path: string; size: number; mtimeMs: number; ino: number };
+export type PlannedCandidate = NativeCandidate & { nativeSessionId?: string; parentNativeSessionId?: string };
 
 const fileVersion = (info: { ino: number; size: number; mtimeMs: number }) => `${info.ino}:${info.size}:${info.mtimeMs}`;
 
 /** Headers are read this many at a time; each costs one small read. */
 const HEADER_CONCURRENCY = 16;
 
+const MAX_THREAD_DEPTH = 16;
+
+const syncedThread = (thread: ThreadKind, parent: ThreadParent | null | undefined) => thread === "user" || (thread === "spawned" && Boolean(parent));
+
 /** Whether a session in `cwd` belongs to the directory bound at `root`. */
 export const owns = (root: string, cwd: string, nested: readonly string[] = []) => Boolean(cwd) && containsNativePath(root, cwd) && !nested.some((inner) => containsNativePath(inner, cwd));
 
 /** Every transcript of the bound directory and its subdirectories, newest first. */
-export async function discoverTranscripts(cwd: string, harnesses: Harness[], options: { headers?: boolean; nested?: readonly string[]; signal?: AbortSignal } = {}): Promise<Array<NativeCandidate & { nativeSessionId?: string }>> {
+export async function discoverTranscripts(cwd: string, harnesses: Harness[], options: { headers?: boolean; nested?: readonly string[]; signal?: AbortSignal } = {}): Promise<PlannedCandidate[]> {
   const found: Array<NativeCandidate & { nativeSessionId?: string }> = [];
   for (const harness of harnesses) {
     for (const root of transcriptRoots(harness)) {
@@ -129,18 +140,18 @@ export async function discoverTranscripts(cwd: string, harnesses: Harness[], opt
   }
   found.sort((left, right) => right.mtimeMs - left.mtimeMs);
   if (!options.headers) return found;
-  // Only user conversations of this directory remain; Codex's own work threads are not listed.
-  const kept: Array<NativeCandidate & { nativeSessionId?: string } | null> = new Array(found.length).fill(null);
+  // User conversations of this directory remain, then their subagents; Codex's own work threads are not listed.
+  const kept: Array<PlannedCandidate | null> = new Array(found.length).fill(null);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(HEADER_CONCURRENCY, found.length) }, async () => {
     while (next < found.length) {
       const index = next++;
       const candidate = found[index] as NativeCandidate;
       const header = await readSessionHeader(candidate.path, candidate.harness, options.signal).catch(() => null);
-      if (header?.thread === "user" && owns(cwd, header.cwd, options.nested)) kept[index] = { ...candidate, nativeSessionId: header.nativeSessionId };
+      if (header && syncedThread(header.thread, header.parent) && owns(cwd, header.cwd, options.nested)) kept[index] = { ...candidate, nativeSessionId: header.nativeSessionId, ...(header.parent ? { parentNativeSessionId: header.parent.nativeSessionId } : {}) };
     }
   }));
-  return kept.filter((candidate) => candidate !== null);
+  return kept.filter((candidate) => candidate !== null).sort((left, right) => Number(Boolean(left.parentNativeSessionId)) - Number(Boolean(right.parentNativeSessionId)));
 }
 
 /** Ingest batches stay well under the Runtime frame limit. */
@@ -184,7 +195,8 @@ export class NativeIngest {
   private readonly executing = new Set<string>();
   private writing: Promise<void> = Promise.resolve();
   private readonly foreign = new Set<string>();
-  private importQueue: NativeCandidate[] = [];
+  private importQueue: PlannedCandidate[] = [];
+  private readonly importing = new Set<string>();
   private runningLive = 0;
   private runningImport = 0;
   private job: ImportJob = { state: "idle", filter: {}, concurrency: DEFAULT_IMPORT_CONCURRENCY, files: 0, done: 0, turns: 0, bytes: 0, totalBytes: 0, startedAt: null, failed: [] };
@@ -215,6 +227,23 @@ export class NativeIngest {
 
   owns(cwd: string): boolean {
     return owns(this.options.cwd, cwd, this.nested);
+  }
+
+  /** A subagent's thread belongs where its root conversation does, wherever it worked. */
+  private ownsThread(state: TranscriptState, depth = 0): boolean {
+    return state.parent ? this.parentOwned(state.harness, state.parent, depth) === true : this.owns(state.cwd);
+  }
+
+  private parentOwned(harness: Harness, parent: ThreadParent, depth = 0): boolean | null {
+    const host = this.parentState(harness, parent);
+    if (host) return depth < MAX_THREAD_DEPTH && this.ownsThread(host, depth + 1);
+    return parent.path && this.foreign.has(parent.path) ? false : null;
+  }
+
+  private parentState(harness: Harness, parent: ThreadParent): TranscriptState | undefined {
+    if (parent.path) return this.states.get(parent.path);
+    for (const state of this.states.values()) if (state.harness === harness && state.nativeSessionId === parent.nativeSessionId && syncedThread(state.threadKind, state.parent)) return state;
+    return undefined;
   }
 
   exclude(nested: string[]): void {
@@ -252,7 +281,8 @@ export class NativeIngest {
       // A torn last line from a crash is dropped; the cache is rebuilt from transcripts and server.
       try { entry = JSON.parse(line) as LedgerEntry; } catch { continue; }
       if ("import" in entry) this.job = { ...this.job, ...entry.import };
-      else if (entry.path && entry.state) this.states.set(entry.path, entry.state);
+      else if (entry.path && entry.state && !(entry.state.threadKind === "spawned" && entry.state.parent === undefined)) this.states.set(entry.path, entry.state);
+      else if (entry.path) this.states.delete(entry.path);
     }
     for (const [path, state] of this.states) if (state.runningTurnId) this.runningPaths.add(path);
     this.journalLines = lines.length;
@@ -389,13 +419,13 @@ export class NativeIngest {
   }
 
   /** `resume` is automatic resumption: it skips file versions that already hit a size limit, which only an explicit import retries. */
-  async plan(filter: ImportFilter = {}, signal?: AbortSignal, options: { resume?: boolean } = {}): Promise<Array<NativeCandidate & { nativeSessionId?: string }>> {
+  async plan(filter: ImportFilter = {}, signal?: AbortSignal, options: { resume?: boolean } = {}): Promise<PlannedCandidate[]> {
     const harnesses = this.harnesses.filter((harness) => !filter.harnesses?.length || filter.harnesses.includes(harness));
     const candidates = await discoverTranscripts(this.options.cwd, harnesses, { headers: true, nested: this.nested, signal });
     // A transcript whose first read failed is still untracked (size -1), so a later import retries it.
     return candidates.filter((candidate) => (this.states.get(candidate.path)?.size ?? -1) < 0 && !this.live.has(candidate.path)
       && !(options.resume && this.oversized.get(candidate.path) === fileVersion(candidate))
-      && (!filter.nativeSessionId || candidate.nativeSessionId === filter.nativeSessionId));
+      && (!filter.nativeSessionId || candidate.nativeSessionId === filter.nativeSessionId || candidate.parentNativeSessionId === filter.nativeSessionId));
   }
 
   /**
@@ -523,14 +553,22 @@ export class NativeIngest {
   }
 
   private drainImport(): void {
+    const key = (harness: Harness, nativeSessionId?: string) => `${harness}:${nativeSessionId}`;
     while (!this.stopped && this.transport && this.job.state === "running" && this.runningImport < this.job.concurrency && this.importQueue.length) {
-      const candidate = this.importQueue.shift() as NativeCandidate;
+      // A subagent is imported after its parent, so its Turns can link to the parent's.
+      const index = this.importQueue.findIndex(({ harness, parentNativeSessionId: parent }) => !parent
+        || (!this.importing.has(key(harness, parent)) && !this.importQueue.some((other) => other.harness === harness && other.nativeSessionId === parent)));
+      if (index < 0 && this.runningImport) return;
+      const [candidate] = this.importQueue.splice(Math.max(index, 0), 1) as [PlannedCandidate];
+      const conversation = key(candidate.harness, candidate.nativeSessionId);
+      this.importing.add(conversation);
       this.runningImport += 1;
       // A failed conversation is retried by the next `runtime import`.
       void this.sync(candidate.path, "import", true).catch((error) => {
         this.report(candidate.path, error);
         if (this.job.failed.length < IMPORT_FAILURES_KEPT) this.job.failed.push({ path: candidate.path, message: error instanceof Error ? error.message : String(error) });
       }).finally(() => {
+        this.importing.delete(conversation);
         this.runningImport -= 1;
         this.job.done += 1;
         this.job.bytes += candidate.size;
@@ -579,17 +617,20 @@ export class NativeIngest {
     const harness = previous?.harness ?? this.harnessFor(path);
     // A paused harness uploads nothing, not even for transcripts it already tracks.
     if (!harness || !this.harnesses.includes(harness)) return;
-    const owned = !previous || this.owns(previous.cwd);
+    const owned = !previous || this.ownsThread(previous);
     // A Turn already running when its directory stopped being bound is still followed to its end.
-    if (previous && (previous.threadKind !== "user" || (!owned && !previous.runningTurnId))) return;
+    if (previous && (!syncedThread(previous.threadKind, previous.parent) || (!owned && !previous.runningTurnId))) return;
+    let header: SessionHeader | null = null;
     if (!previous) {
       // A header is read once per file: it names the project and the thread's purpose.
-      const header = await readSessionHeader(path, harness);
+      header = await readSessionHeader(path, harness);
       if (!header) return;
-      if (!this.owns(header.cwd)) { this.foreign.add(path); return; }
-      if (header.thread !== "user") {
-        // Codex's own reviews, compaction runs and spawned agents are not chats; remember and skip them.
-        this.states.set(path, this.blank(path, header.nativeSessionId, header.cwd, harness, header.thread, info));
+      const belongs = header.parent ? this.parentOwned(harness, header.parent) : this.owns(header.cwd);
+      if (belongs === null && (header.parent?.path || this.owns(header.cwd))) throw new ParentPendingError("A subagent's parent conversation is not synced yet");
+      if (!belongs) { this.foreign.add(path); return; }
+      if (!syncedThread(header.thread, header.parent)) {
+        // Codex's own work threads and agents with no recorded parent are not chats; remember and skip them.
+        this.states.set(path, { ...this.blank(path, header.nativeSessionId, header.cwd, harness, header.thread, info), ...(header.thread === "spawned" ? { parent: null } : {}) });
         this.markDirty(path);
         return;
       }
@@ -604,7 +645,7 @@ export class NativeIngest {
       }
     }
     const transcript = await readTranscript(path, harness);
-    const state = previous ?? this.blank(path, transcript.nativeSessionId, transcript.cwd, harness, "user", { size: -1, mtimeMs: 0, ino: 0 });
+    const state = previous ?? { ...this.blank(path, transcript.nativeSessionId, transcript.cwd, harness, header?.thread ?? "user", { size: -1, mtimeMs: 0, ino: 0 }), ...(header?.parent ? { parent: header.parent } : {}) };
     // Outside the bound directory nothing after the running Turn is synced.
     const through = owned ? transcript.turns.length : transcript.turns.findIndex((turn) => turn.key === state.runningTurnKey) + 1;
     if (!through && !owned) { this.endRunning(state); this.markDirty(path); return; }
@@ -656,9 +697,9 @@ export class NativeIngest {
     if (certain != null) return certain;
     if (tail.ended) return true;
     if (!format.replyEnded?.(tail)) return false;
-    const idleMs = Date.now() - mtimeMs;
-    if (idleMs >= QUIET_SETTLE_MS) return true;
-    this.recheck(state.path, QUIET_SETTLE_MS - idleMs);
+    const idleMs = Date.now() - mtimeMs, quietMs = tail.waiting ? WAITING_SETTLE_MS : QUIET_SETTLE_MS;
+    if (idleMs >= quietMs) return true;
+    this.recheck(state.path, quietMs - idleMs);
     return false;
   }
 
@@ -682,6 +723,14 @@ export class NativeIngest {
     const transport = this.transport;
     if (!transport) throw new Error("Runtime is offline");
     const derived = (turn: NativeTranscriptTurn) => nativeTurnId(this.options.spaceId, state.harness, state.nativeSessionId, turn.key);
+    let parent: Promise<NativeTranscript> | null = null;
+    const parentTranscript = () => parent ??= this.parentTranscript(state);
+    if (state.parent && !state.sessionId && !state.throughTurnKey && turns.length) {
+      const inherited = new Set((await parentTranscript()).turns.map((turn) => turn.key));
+      const own = turns.findIndex((turn) => !inherited.has(turn.key));
+      const last = turns[(own < 0 ? turns.length : own) - 1];
+      if (last) Object.assign(state, { throughTurnKey: last.key, throughTurnId: null });
+    }
     const from = state.throughTurnKey ? turns.findIndex((turn) => turn.key === state.throughTurnKey) + 1 : 0;
     const pending = turns.slice(from, through);
     // One question to the server replaces every local receipt: which of these do you have?
@@ -740,6 +789,7 @@ export class NativeIngest {
     });
     let lastSettled: Candidate | null = null;
     const controllable = this.options.hooks?.controllable?.(state);
+    const callers = state.parent ? await this.callers(state, todo.filter((item) => !known.has(item.turnId)), transport, parentTranscript) : null;
     const payloads = todo.map((item) => ({
       item,
       turn: {
@@ -748,6 +798,7 @@ export class NativeIngest {
         userContent: item.turn.userContent,
         startedAt: item.turn.startedAt,
         ...(this.imported(item.turn) ? { origin: "local_import" as const } : {}),
+        ...(callers?.has(item.turnId) ? { caller: callers.get(item.turnId) } : {}),
         ...(!item.settled && controllable !== undefined ? { controllable } : {}),
         result: item.settled ? this.complete(item.turn.result ?? this.cutOff(item, turns)) : null,
       },
@@ -779,6 +830,41 @@ export class NativeIngest {
     // Only the newest settled state needs raw bytes: every older version is a prefix of it.
     state.headTurnId = head;
     if (lastSettled) await this.archive(state, lastSettled.turn, lastSettled.turnId);
+  }
+
+  private async parentTranscript(state: TranscriptState): Promise<NativeTranscript> {
+    const path = state.parent && (state.parent.path ?? this.parentState(state.harness, state.parent)?.path);
+    if (!path) throw new ParentPendingError("A subagent's parent conversation is not synced yet");
+    return await readTranscript(path, state.harness);
+  }
+
+  /** Each new Turn's caller: the parent Turn holding the spawning call, else the one running when it began. */
+  private async callers(state: TranscriptState, items: Candidate[], transport: IngestTransport, parentTranscript: () => Promise<NativeTranscript>): Promise<Map<string, NativeCaller>> {
+    const callers = new Map<string, NativeCaller>();
+    if (!items.length) return callers;
+    let link = state.parent as ThreadParent;
+    if (!link.toolCallId && items.some((item) => item.parentTurnId === null)) link = state.parent = { ...link, ...(await readSessionHeader(state.path, state.harness).catch(() => null))?.parent };
+    const parent = await parentTranscript();
+    const spawn = link.toolCallId ?? parent.turns.map((turn) => turn.spawns?.[state.nativeSessionId]).find(Boolean);
+    const spawning = spawn ? parent.turns.find((turn) => turn.messages.some((message) => message.content.some((block) => block.type === "tool_use" && block.id === spawn))) : undefined;
+    const host = this.parentState(state.harness, link);
+    const cohub = host?.origin === "cohub" && !transcriptFormat(state.harness).marksCohubTurns ? host.executingTurnId ?? host.headTurnId : null;
+    const ids = (turn: NativeTranscriptTurn) => [turn.cloudTurnId, nativeTurnId(this.options.spaceId, state.harness, link.nativeSessionId, turn.key), turn === parent.turns.at(-1) ? cohub : null]
+      .filter((id): id is string => Boolean(id));
+    const owners = items.map((item) => {
+      const first = item.parentTurnId === null && Boolean(spawning);
+      return { item, toolCallId: first ? spawn : undefined, owner: first ? spawning : parent.turns.filter((turn) => turn.startedAt <= item.turn.startedAt).at(-1) };
+    });
+    const known = await this.known(transport, owners.flatMap(({ owner }) => owner ? ids(owner) : []));
+    const synced = host?.throughTurnKey ? parent.turns.findIndex((turn) => turn.key === host.throughTurnKey) : -1;
+    for (const { item, toolCallId, owner } of owners) {
+      const turnId = owner && ids(owner).find((id) => known.has(id));
+      const recorded = turnId && known.get(turnId);
+      if (turnId && recorded) callers.set(item.turnId, { sessionId: recorded.sessionId, turnId, ...(toolCallId ? { toolCallId } : {}) });
+      // A Turn its parent cannot link goes unlinked; any other waits for the parent Turn.
+      else if (owner && parent.turns.indexOf(owner) > synced) throw new ParentPendingError("A subagent's parent Turn is not synced yet");
+    }
+    return callers;
   }
 
   /**
@@ -835,7 +921,7 @@ export class NativeIngest {
   }
 
   private async archive(state: TranscriptState, turn: NativeTranscriptTurn, turnId: string): Promise<void> {
-    if (!state.sessionId || !harnessAdapter(state.harness).session.archive) return;
+    if (!state.sessionId || state.threadKind !== "user" || !harnessAdapter(state.harness).session.archive) return;
     try {
       const source = turn.path ?? state.path;
       const archiveSource = transcriptFormat(state.harness).archiveSource;

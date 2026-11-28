@@ -365,5 +365,29 @@ test("ingest reports what it created and settled, so live Turns are announced an
   assert(!published.some(([kind, id]) => kind !== "postprocess" && id === imported.turnId), "imported history is not announced Turn by Turn");
   assert.equal(published.filter(([kind]) => kind === "postprocess").length, 2, "every settled message is post-processed, imported ones included");
   const replay = await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "e", turns: [live, imported] });
-  assert.deepEqual(replay.effects, { createdSessions: [], turns: [] }, "a replay announces nothing");
+  assert.deepEqual(replay.effects, { createdSessions: [], turns: [], callers: [] }, "a replay announces nothing");
+});
+
+test("a subagent's thread starts an agent Session that its caller Turn links to", async () => {
+  const { spaceId, binding } = await root();
+  const caller = { sessionId: binding.sessionId, turnId: binding.turnId };
+  const child = start({ harness: "claude", nativeSessionId: "agent-x", caller: { ...caller, toolCallId: "toolu_agent" } });
+  const started = await startNativeTurn(spaceId, "owner", child);
+  const origin = { kind: "prompt", spaceId, ...caller, toolCallId: "toolu_agent", depth: 1 };
+  const [session] = await database.select().from(spaceSessions).where(eq(spaceSessions.id, started.binding.sessionId));
+  assert.notEqual(session.id, binding.sessionId);
+  assert.deepEqual(session.meta.origin, origin);
+  const turn = await getOwnedNativeTurn(spaceId, "owner", started.binding.sessionId, child.turnId);
+  assert.equal(turn.meta.initiator, "agent");
+  assert.deepEqual(turn.meta.origin, origin);
+  const sent = await getOwnedNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId);
+  assert.deepEqual(sent.meta.messagesSent, [{ spaceId, sessionId: started.binding.sessionId, turnId: child.turnId, kind: "prompt", toolCallId: "toolu_agent" }]);
+  assert.deepEqual(started.callerTurn, { spaceId, ...caller });
+  const replay = await startNativeTurn(spaceId, "owner", { ...child, caller });
+  assert.deepEqual([replay.created, replay.callerTurn], [false, null]);
+  const otherSpace = crypto.randomUUID(), across = await startNativeTurn(otherSpace, "owner", start({ caller }));
+  assert.deepEqual(across.callerTurn, { spaceId, ...caller });
+  const hidden = await startNativeTurn(spaceId, "no-session-access", start({ caller }));
+  const unlinked = await getOwnedNativeTurn(spaceId, "no-session-access", hidden.binding.sessionId, hidden.binding.turnId);
+  assert.deepEqual([unlinked.meta.initiator, unlinked.meta.origin, hidden.callerTurn], ["agent", undefined, null]);
 });

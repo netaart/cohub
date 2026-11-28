@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { baseUrlHost, type ApprovalMode, type CanonicalProjectionMessage, type ContentBlock, type NativeProjection } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { copyNativeArchive } from "../native/archive.js";
 import { projectChainedSession, projectionMeta, projectionToolId, rebindSessionId } from "./chained-projection.js";
-import { chainedSessionHeader, projectDirectory, projectTranscript } from "./chained-transcript.js";
+import { projectDirectory, projectTranscript } from "./chained-transcript.js";
 import { answerClaudeApproval, claudeApprovalMode, claudeApprovalModes, claudePermissionMode, SessionGrants } from "./claude-approval.js";
-import { CLAUDE_REPLY_ENDED, readClaudeTranscript } from "./claude-transcript.js";
+import { CLAUDE_REPLY_ENDED, claudeSessionHeader, claudeSubagent, readClaudeTranscript } from "./claude-transcript.js";
 import { array, harnessCommand, text } from "./process.js";
 import { DEFAULT_MODEL, READ_ONLY_ARGS, runStreamJson, streamJsonHelp, streamJsonModel, type StreamJsonProfile } from "./stream-json.js";
 import type { HarnessModel, LocalHarnessAdapter } from "./types.js";
@@ -29,6 +29,7 @@ export function claudeProjectName(cwd: string) {
 }
 export const claudeProjectDirectory = (cwd: string) => join(dataRoot(), "projects", claudeProjectName(cwd));
 const projectsRoot = () => join(dataRoot(), "projects");
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Every subdirectory's project name starts with this; a hashed long name keeps its first 200 units. */
 const projectPrefix = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-").slice(0, MAX_PROJECT_NAME);
 
@@ -215,10 +216,12 @@ export const claudeHarness: LocalHarnessAdapter = {
   },
   transcript: {
     roots: () => [projectsRoot()],
-    acceptsDirectory: (path, root, cwd) => projectDirectory(path, root, projectPrefix(cwd)),
-    acceptsTranscript: (path, cwd) => projectTranscript(path, projectsRoot(), projectPrefix(cwd)),
-    header: (path, signal) => chainedSessionHeader(path, "claude", signal),
-    read: (path, signal) => readClaudeTranscript(path, basename(path, ".jsonl"), signal),
+    acceptsDirectory: (path, root, cwd) => projectDirectory(path, root, projectPrefix(cwd))
+      || (SESSION_ID.test(basename(path)) && projectDirectory(dirname(path), root, projectPrefix(cwd)))
+      || (basename(path) === "subagents" && projectDirectory(dirname(dirname(path)), root, projectPrefix(cwd))),
+    acceptsTranscript: (path, cwd) => projectTranscript(claudeSubagent(path)?.parentPath ?? path, projectsRoot(), projectPrefix(cwd)),
+    header: (path, signal) => claudeSessionHeader(path, signal),
+    read: (path, signal) => readClaudeTranscript(path, claudeSubagent(path)?.agentId ?? basename(path, ".jsonl"), signal),
     boundaries: ['"promptSource"', '"subtype":"turn_duration"', '"interruptedMessageId"', '"isApiErrorMessage":true', ...CLAUDE_REPLY_ENDED.map((reason) => `"stop_reason":"${reason}"`)],
     turnEndRecorded: false,
     replyEnded: (turn) => CLAUDE_REPLY_ENDED.includes(turn.messages.at(-1)?.stopReason ?? ""),
