@@ -21,6 +21,7 @@ import {
   downloadFromSpace,
   localNodeType,
   mergeCopyResults,
+  relayToSpace,
   spaceNodeType,
   uploadToSpace,
   type CopyOptions,
@@ -114,13 +115,22 @@ async function copyFiles(spacesCmd: Command, raw: string[], opts: CopyCliOptions
         stat: (path) => spaceNodeType(files, path),
       });
       if (spaceSources.length > 0) {
-        const started = await files.copy({
-          sources: await Promise.all(spaceSources.map(async (source) => ({ spaceId: await resolveSpaceId(source.space), path: source.path }))),
-          destination: destination.path,
-          ...options,
-          mutationId: randomUUID(),
-        });
-        results.push(await files.waitForCopy(started, { pollMs: process.stderr.isTTY ? 2_000 : 10_000, onProgress: progress.update }));
+        const sources = await Promise.all(spaceSources.map(async (source) => ({ spaceId: await resolveSpaceId(source.space), path: source.path })));
+        const started = await files.copy({ sources, destination: destination.path, ...options, mutationId: randomUUID() })
+          .catch((e: unknown) => {
+            if ((e as { code?: string }).code === "copy_unsupported") return null;
+            throw e;
+          });
+        results.push(started
+          ? await files.waitForCopy(started, { pollMs: process.stderr.isTTY ? 2_000 : 10_000, onProgress: progress.update })
+          : await relayToSpace({
+            files,
+            sources: sources.map(({ spaceId, path }) => ({ files: client.space(spaceId).files, path })),
+            destination: destination.path,
+            intoDirectory,
+            options,
+            onProgress: progress.update,
+          }));
       }
       if (localSources.length > 0) {
         results.push(await uploadToSpace({ files, sources: localSources, destination: destination.path, intoDirectory, options, onProgress: progress.update }));
@@ -232,7 +242,8 @@ overwritten and directories merged. <space>:<path> addresses a Space, where
 Bare paths address the current Space when one is declared with -s or
 COHUB_SPACE_ID, as inside a Cohub sandbox; otherwise they are local files.
 Absolute paths outside /workspace are always local. Copies between Spaces
-run server-side; local files are uploaded or downloaded.
+run server-side, or through this machine when one is on a local Runtime;
+local files are uploaded or downloaded.
 
 Examples:
   cohub spaces files cp -r alice/templates:starter ./starter

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream, type Stats } from "node:fs";
-import { cp, lstat, mkdir, readdir, rename, rm, stat, utimes } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readdir, rename, rm, stat, utimes } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -96,6 +97,7 @@ export async function uploadToSpace(input: {
     result.errors.push({ path, code, message });
   };
   const entries: LocalUploadEntry[] = [];
+  const emptyDirs: string[] = [];
 
   const walk = async (localPath: string, target: string, stats: Stats): Promise<void> => {
     if (stats.isFile()) {
@@ -107,6 +109,7 @@ export async function uploadToSpace(input: {
       return;
     }
     const names = await readdir(localPath);
+    if (names.length === 0 && target) emptyDirs.push(target);
     await Promise.all(names.map(async (name) => {
       const child = join(localPath, name);
       const childStats = await stat(child).catch(() => null);
@@ -168,6 +171,13 @@ export async function uploadToSpace(input: {
       input.onProgress(progress);
     },
   });
+  await Promise.all(emptyDirs.map((dir) => limit(async () => {
+    try {
+      if ((await files.createDir(dir, randomUUID())).created) progress.dirs += 1;
+    } catch (error) {
+      fail(dir, "mkdir_failed", `cannot create directory '${dir}': ${(error as Error).message}`);
+    }
+  })));
   return { ...result, ...progress };
 }
 
@@ -264,6 +274,57 @@ export async function downloadFromSpace(input: {
     result.paths.push(target);
   }
   return result;
+}
+
+export async function relayToSpace(input: {
+  files: SpaceFiles;
+  sources: Array<{ files: SpaceFiles; path: string }>;
+  destination: string;
+  intoDirectory: boolean;
+  options: CopyOptions;
+  onProgress: (stats: SpaceFsCopyStats) => void;
+}): Promise<SpaceFsCopyResult> {
+  const staging = await mkdtemp(join(tmpdir(), "cohub-cp-"));
+  const results: SpaceFsCopyResult[] = [];
+  const done = { files: 0, bytes: 0 };
+  try {
+    for (const [index, source] of input.sources.entries()) {
+      const local = join(staging, String(index));
+      const target = targetOf(source.path, input.destination, input.intoDirectory, joinSpacePath);
+      const unstage = (failure: SpaceFsCopyResult["errors"][number]) => ({
+        ...failure,
+        path: failure.path.replace(local, target),
+        message: failure.message.replaceAll(local, target),
+      });
+      try {
+        const downloaded = await downloadFromSpace({
+          sources: [source],
+          destination: local,
+          intoDirectory: false,
+          options: { ...input.options, noClobber: false },
+          onProgress: (stats) => input.onProgress({ ...stats, files: done.files + stats.files, bytes: done.bytes + stats.bytes }),
+        });
+        done.files += downloaded.files;
+        done.bytes += downloaded.bytes;
+        results.push({ ...emptyCopyResult(), skipped: downloaded.skipped, errors: downloaded.errors.map(unstage) });
+        if (!(await lstatOrNull(local))) continue;
+        const uploaded = await uploadToSpace({
+          files: input.files,
+          sources: [local],
+          destination: target,
+          intoDirectory: false,
+          options: input.options,
+          onProgress: () => undefined,
+        });
+        results.push({ ...uploaded, errors: uploaded.errors.map(unstage) });
+      } finally {
+        await rm(local, { recursive: true, force: true });
+      }
+    }
+    return mergeCopyResults(results);
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
 }
 
 export async function copyLocal(input: {
