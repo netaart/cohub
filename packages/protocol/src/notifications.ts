@@ -121,7 +121,7 @@ export const notificationPath = (record: Pick<NotificationRecord, "spaceId" | "s
     ? `/spaces/${record.spaceId}/sessions/${record.sessionId}`
     : record.spaceId
       ? `/spaces/${record.spaceId}`
-      : "/inbox";
+      : "/spaces/inbox";
 
 export const notificationTag = (id: string) => `notification:${id}`;
 

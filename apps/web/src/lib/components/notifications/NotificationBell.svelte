@@ -79,6 +79,6 @@ $effect(() => {
 		use:floatNear={{ getAnchor: () => button, placement: variant === "rail" ? "right-start" : "bottom-start", gap: 8, width: 400, zIndex: 130 }}
 	>
 		<NotificationList variant="panel" onnavigate={close} />
-		<a href="/inbox" class="flex h-9 shrink-0 items-center justify-center border-t border-border-subtle text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary" onclick={close}>{m.inbox_view_all({}, { locale })}</a>
+		<a href="/spaces/inbox" class="flex h-9 shrink-0 items-center justify-center border-t border-border-subtle text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary" onclick={close}>{m.inbox_view_all({}, { locale })}</a>
 	</div>
 {/if}

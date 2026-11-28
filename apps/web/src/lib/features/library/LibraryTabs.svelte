@@ -31,7 +31,7 @@ function open(event: MouseEvent, entity: LibraryEntity) {
 	class={variant === "rail"
 		? "mt-2 flex flex-col items-center gap-1"
 		: variant === "sidebar"
-			? "mx-1.5 mt-1 grid shrink-0 grid-cols-3 gap-0.5 rounded-[7px] bg-bg-surface p-0.5"
+			? "mx-1.5 mt-1 grid shrink-0 grid-cols-4 gap-0.5 rounded-[7px] bg-bg-surface p-0.5"
 			: "flex min-w-0 items-center gap-4"}
 	aria-label={m.nav_tab_library({}, { locale })}
 >

@@ -3249,8 +3249,6 @@
 	"notif_device_unavailable": "Push isn't available on this device; the inbox still updates live.",
 	"notif_device_enable": "Turn on",
 	"notif_device_disable": "Turn off",
-	"notif_email_unavailable": "Email notifications aren't set up on this server.",
-	"notif_email_missing": "Your account has no email address, so email stays off.",
 	"notif_unsubscribed": "Email notifications are off. Turn them back on below anytime.",
 	"notif_unsubscribe_failed": "This unsubscribe link is no longer valid.",
 	"notif_save_failed": "Couldn't save. Try again.",

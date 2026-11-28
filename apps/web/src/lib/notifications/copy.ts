@@ -36,5 +36,5 @@ export function notificationCopy(record: NotificationRecord, locale: Locale) {
 export function notificationHref(record: NotificationRecord) {
 	if (record.spaceId && record.sessionId)
 		return buildSpaceSessionRoute(record.spaceId, record.sessionId);
-	return record.spaceId ? buildSpaceRootRoute(record.spaceId) : "/inbox";
+	return record.spaceId ? buildSpaceRootRoute(record.spaceId) : "/spaces/inbox";
 }

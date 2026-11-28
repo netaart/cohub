@@ -9,12 +9,12 @@ export type SettingsSection =
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 	"general",
-	"notifications",
 	"billing",
 	"activity",
 	"referrals",
 	"rules",
 	"channels",
+	"notifications",
 ];
 
 export function visibleSettingsSections(

@@ -19,10 +19,6 @@ export function isSessionsPath(pathname: string): boolean {
 	return pathname === "/sessions" || pathname.startsWith("/sessions/");
 }
 
-export function isInboxPath(pathname: string): boolean {
-	return pathname === "/inbox";
-}
-
 export function isAccountPath(pathname: string): boolean {
 	return pathname === "/settings" || pathname.startsWith("/settings/");
 }

@@ -19,37 +19,42 @@ import { replaceState } from "$app/navigation";
 import { page } from "$app/state";
 
 const PREFS_KEY = "cohub:notification-preferences";
+const CONFIG_KEY = "cohub:notification-config";
 
 const locale = $derived(getLocale());
+const cachedPreferences = readCached<NotificationPreferences>(PREFS_KEY);
 let preferences = $state<NotificationPreferences | null>(
-	readCachedPreferences(),
+	cachedPreferences?.categories ? cachedPreferences : null,
 );
-let config = $state<NotificationConfig | null>(null);
+let config = $state<NotificationConfig | null>(readCached(CONFIG_KEY));
 let notice = $state<{ tone: "ok" | "error"; text: string } | null>(null);
 let deviceBusy = $state(false);
 
-const email = $derived(authStore.email);
-const emailEnabled = $derived(Boolean(config?.email && email));
+const channels = $derived(
+	config?.email && authStore.email
+		? NOTIFICATION_CHANNELS
+		: NOTIFICATION_CHANNELS.filter((channel) => channel !== "email"),
+);
 
-function readCachedPreferences(): NotificationPreferences | null {
+function readCached<T>(key: string): T | null {
 	try {
-		const cached = JSON.parse(
-			localStorage.getItem(`${PREFS_KEY}:${authStore.userUuid}`) ?? "null",
+		return JSON.parse(
+			localStorage.getItem(`${key}:${authStore.userUuid}`) ?? "null",
 		);
-		return cached?.categories ? cached : null;
 	} catch {
 		return null;
 	}
 }
 
+function writeCached(key: string, value: unknown) {
+	try {
+		localStorage.setItem(`${key}:${authStore.userUuid}`, JSON.stringify(value));
+	} catch {}
+}
+
 function cachePreferences(value: NotificationPreferences) {
 	preferences = value;
-	try {
-		localStorage.setItem(
-			`${PREFS_KEY}:${authStore.userUuid}`,
-			JSON.stringify(value),
-		);
-	} catch {}
+	writeCached(PREFS_KEY, value);
 }
 
 async function load() {
@@ -59,7 +64,10 @@ async function load() {
 		devicePush.start(),
 	]);
 	if (loaded) cachePreferences(loaded);
-	config = deployment;
+	if (deployment) {
+		config = deployment;
+		writeCached(CONFIG_KEY, deployment);
+	}
 }
 
 async function unsubscribeFromLink(token: string) {
@@ -188,9 +196,9 @@ const deviceText = $derived.by(() => {
 		</section>
 
 		<section class="py-6">
-			<div class="grid grid-cols-[1fr_auto_auto] items-center gap-x-4">
+			<div class="grid items-center gap-x-4" style:grid-template-columns={`1fr repeat(${channels.length}, auto)`}>
 				<span></span>
-				{#each NOTIFICATION_CHANNELS as channel (channel)}
+				{#each channels as channel (channel)}
 					<span class="w-12 text-center text-[11px] text-text-tertiary">{channelLabel(channel)}</span>
 				{/each}
 				{#each NOTIFICATION_CATEGORIES as category (category)}
@@ -199,24 +207,18 @@ const deviceText = $derived.by(() => {
 						<span class="block text-[13px] text-text-primary">{title}</span>
 						<span class="block text-[12px] leading-5 text-text-tertiary">{hint}</span>
 					</span>
-					{#each NOTIFICATION_CHANNELS as channel (channel)}
-						{@const unavailable = channel === "email" && !emailEnabled}
+					{#each channels as channel (channel)}
 						<span class="flex w-12 justify-center">
 							<ToggleSwitch
-								checked={Boolean(preferences?.categories[category][channel]) && !unavailable}
+								checked={Boolean(preferences?.categories[category][channel])}
 								label={`${title} · ${channelLabel(channel)}`}
-								disabled={!preferences || unavailable}
+								disabled={!preferences}
 								onchange={(enabled) => void change(category, channel, enabled)}
 							/>
 						</span>
 					{/each}
 				{/each}
 			</div>
-			{#if config && !config.email}
-				<p class="mt-4 text-[12px] text-text-tertiary">{m.notif_email_unavailable({}, { locale })}</p>
-			{:else if config && !email}
-				<p class="mt-4 text-[12px] text-text-tertiary">{m.notif_email_missing({}, { locale })}</p>
-			{/if}
 		</section>
 	</section>
 </div>

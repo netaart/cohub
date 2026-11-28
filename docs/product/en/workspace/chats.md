@@ -73,7 +73,7 @@ Mentions are for deliberate context references, not every message.
 
 ### Notifications
 
-The inbox collects mentions and the tasks you started that finished or failed; repeated updates in one Chat fold into one entry. Opening a Chat marks its notifications read on every device. Choose push and email per kind in **Settings › Notifications**.
+The inbox, in **Library › Inbox**, collects mentions and the tasks you started that finished or failed; repeated updates in one Chat fold into one entry. Opening a Chat marks its notifications read on every device. Choose push and email per kind in **Settings › Notifications**.
 
 ### Replies from other Spaces
 

@@ -3507,6 +3507,8 @@ $effect(() => {
     <LibraryTabs variant="sidebar" />
     {#if libraryEntity === "spaces"}
       <SpacesViewsNav variant="list" />
+    {:else if libraryEntity === "inbox"}
+      <div class="flex-1"></div>
     {:else}
       <div class="mt-1 min-h-0 flex-1">
         <LibraryList entity={libraryEntity} variant="sidebar" />

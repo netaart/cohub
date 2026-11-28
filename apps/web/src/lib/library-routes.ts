@@ -6,11 +6,16 @@ import {
 } from "@cohub/protocol";
 import type { ReadonlyURL } from "$app/state";
 
-export const LIBRARY_ENTITIES = ["spaces", "apps", "scheduled"] as const;
+export const LIBRARY_ENTITIES = [
+	"spaces",
+	"apps",
+	"scheduled",
+	"inbox",
+] as const;
 export type LibraryEntity = (typeof LIBRARY_ENTITIES)[number];
-export type LibraryItemEntity = Exclude<LibraryEntity, "spaces">;
+export type LibraryItemEntity = Exclude<LibraryEntity, "spaces" | "inbox">;
 
-const RESERVED_SPACE_SEGMENTS = new Set(["new", "apps", "scheduled"]);
+const RESERVED_SPACE_SEGMENTS = new Set(["new", "apps", "scheduled", "inbox"]);
 
 export function isSpaceIdSegment(segment: string | null | undefined) {
 	return Boolean(segment) && !RESERVED_SPACE_SEGMENTS.has(segment as string);
@@ -26,9 +31,9 @@ export function libraryHref(entity: LibraryEntity) {
 }
 
 export function libraryEntityAt(pathname: string): LibraryEntity | null {
-	const match = /^\/spaces(?:\/(apps|scheduled))?\/?$/.exec(pathname);
+	const match = /^\/spaces(?:\/(apps|scheduled|inbox))?\/?$/.exec(pathname);
 	if (!match) return null;
-	return (match[1] as LibraryItemEntity | undefined) ?? "spaces";
+	return (match[1] as LibraryEntity | undefined) ?? "spaces";
 }
 
 export type LibrarySelection = {
@@ -48,7 +53,7 @@ export function libraryItemHref(
 
 export function librarySelectionAt(url: ReadonlyURL): LibrarySelection | null {
 	const entity = libraryEntityAt(url.pathname);
-	if (!entity || entity === "spaces") return null;
+	if (!entity || entity === "spaces" || entity === "inbox") return null;
 	const spaceId = url.searchParams.get("space");
 	const target = readResourceAppTarget(url.searchParams);
 	if (!spaceId || !isUuid(spaceId) || target?.kind !== ITEM_RESOURCE[entity])
@@ -58,7 +63,7 @@ export function librarySelectionAt(url: ReadonlyURL): LibrarySelection | null {
 
 export function librarySpaceAt(url: ReadonlyURL) {
 	const entity = libraryEntityAt(url.pathname);
-	if (!entity || entity === "spaces") return null;
+	if (!entity || entity === "spaces" || entity === "inbox") return null;
 	const spaceId = url.searchParams.get("space");
 	return spaceId && isUuid(spaceId) ? spaceId : null;
 }

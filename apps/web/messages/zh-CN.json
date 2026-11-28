@@ -3129,8 +3129,6 @@
 	"notif_device_unavailable": "此设备不支持推送，收件箱仍会实时更新。",
 	"notif_device_enable": "开启",
 	"notif_device_disable": "关闭",
-	"notif_email_unavailable": "当前服务器未配置邮件通知。",
-	"notif_email_missing": "你的账号没有邮箱，邮件通知不会发送。",
 	"notif_unsubscribed": "已关闭邮件通知，可随时在下方重新开启。",
 	"notif_unsubscribe_failed": "退订链接已失效。",
 	"notif_save_failed": "保存失败，请重试。",

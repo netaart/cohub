@@ -544,7 +544,7 @@
 		}
 	}
 
-	& .entity-icon-line {
+	& .entity-icon:has(> .entity-icon-pixel) > .entity-icon-line {
 		display: none;
 	}
 

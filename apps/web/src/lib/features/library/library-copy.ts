@@ -11,6 +11,8 @@ export function libraryEntityLabel(entity: LibraryEntity, locale: Locale) {
 			return m.library_apps({}, { locale });
 		case "scheduled":
 			return m.library_scheduled({}, { locale });
+		case "inbox":
+			return m.inbox_title({}, { locale });
 	}
 }
 

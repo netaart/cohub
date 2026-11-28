@@ -19,7 +19,7 @@ class PushService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
         val title = data["title"]?.takeIf { it.isNotBlank() } ?: return
-        val path = data["path"]?.takeIf { it.startsWith("/") && !it.startsWith("//") } ?: "/inbox"
+        val path = data["path"]?.takeIf { it.startsWith("/") && !it.startsWith("//") } ?: "/spaces/inbox"
         val tag = data["tag"] ?: data["id"] ?: path
         val manager = NotificationManagerCompat.from(this)
         if (!manager.areNotificationsEnabled()) return
