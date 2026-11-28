@@ -1,5 +1,27 @@
 # @neta-art/cohub-cli
 
+## 10.40.0
+
+### Minor Changes
+
+- b4bfd8f: Scripts without setup, `shader` or `bend` can only draw their own box, so they start once it shows: exports and profiles skip them outside the exported view, and an opening Board starts them after the view in sight has drawn. Exports draw scripts at the output's resolution rather than up to twice it, sharper at 1:1 and cheaper when scaled down.
+
+### Patch Changes
+
+- 97be2fb: `cohub boards export` no longer draws a frame with WebGL for a simulated shader outside it, so such frames draw several times faster without a GPU, and video frames are read without an extra canvas copy.
+- b48d152: `cohub boards export` draws a frame with WebGL only when it shows 3D, a tilted camera or a shader that draws, and with Canvas 2D otherwise, so on machines without a GPU those frames draw several times faster. `--timeout` now also bounds the browser's work on a frame, which used to give up after two minutes.
+- c8180ae: Exported frames lay out script screen layers for the exported view: the first frame of a Board whose timeline animates script params no longer falls back to a 1600×900 view, and screen layers no longer trail a moving camera by a frame.
+- b4bfd8f: `cohub boards export` encodes MP4 with x264 `superfast` and WebM with VP9 at realtime speed, spending about 60% and 90% less CPU on encoding for somewhat larger files.
+- 43b363b: `cohub spaces sessions turns stop <sessionId> <turnId>` stops a running turn. A terminal run Cohub cannot reach is settled with `--confirm-stopped` once it has stopped there.
+- cb03b6e: Activity LLM model rankings carry the `harness` that ran them. Local Harness usage reports provider `local` instead of the local endpoint, and `cohub spaces activity` shows a Harness column.
+- Updated dependencies [97be2fb]
+- Updated dependencies [b48d152]
+- Updated dependencies [c8180ae]
+- Updated dependencies [b4bfd8f]
+- Updated dependencies [43b363b]
+- Updated dependencies [cb03b6e]
+  - @neta-art/cohub@13.33.0
+
 ## 10.39.0
 
 ### Minor Changes
