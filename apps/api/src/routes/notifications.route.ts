@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { NOTIFICATION_CATEGORIES } from "@cohub/protocol";
+import { NOTIFICATION_KINDS } from "@cohub/protocol";
 import { updateNotificationPreferences, verifyUnsubscribeToken } from "@cohub/core/notifications";
 import { readNotificationConfig } from "@cohub/infra/notifications";
 import { config } from "../config.js";
@@ -19,7 +19,7 @@ router.post("/unsubscribe", async (c) => {
   const userId = token && config.appEncryptionKey ? verifyUnsubscribeToken(config.appEncryptionKey, token) : null;
   if (!userId) return c.json({ message: "invalid unsubscribe link" }, 400);
   await updateNotificationPreferences(db, userId, {
-    categories: Object.fromEntries(NOTIFICATION_CATEGORIES.map((category) => [category, { email: false }])),
+    kinds: Object.fromEntries(NOTIFICATION_KINDS.map((kind) => [kind, { email: false }])),
   });
   return c.json({ ok: true });
 });

@@ -10,6 +10,7 @@ import { PublicAssetsApi } from "./apis/public-assets.js";
 import { SessionAccessApi } from "./apis/session-access.js";
 import { SearchApi } from "./apis/search.js";
 import { ReferencesApi } from "./apis/references.js";
+import { InboxApi } from "./apis/inbox.js";
 import { NotificationsApi } from "./apis/notifications.js";
 import { SpaceClient, SpacesApi, type WebSocketConnectionState } from "./apis/spaces.js";
 import { createSpaceFileServices, type SpaceFileServices } from "./apis/space-file-urls.js";
@@ -69,6 +70,7 @@ export class CohubClient {
   readonly sessionAccess: SessionAccessApi;
   readonly search: SearchApi;
   readonly references: ReferencesApi;
+  readonly inbox: InboxApi;
   readonly notifications: NotificationsApi;
   readonly tasks: TasksApi;
   readonly boards: BoardsApi;
@@ -185,6 +187,7 @@ export class CohubClient {
     this.sessionAccess = new SessionAccessApi(this.transport);
     this.search = new SearchApi(this.transport);
     this.references = new ReferencesApi(this.transport);
+    this.inbox = new InboxApi(this.transport);
     this.notifications = new NotificationsApi(this.transport);
     this.tasks = new TasksApi(this.transport, this.websocketClient);
     this.boards = new BoardsApi(this.transport, this.websocketClient);

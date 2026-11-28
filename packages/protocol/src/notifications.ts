@@ -1,20 +1,11 @@
 import type { SessionTurnRecord } from "./model/session.js";
 
-export const NOTIFICATION_CATEGORIES = ["mention", "activity", "system"] as const;
-export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
-
-export const NOTIFICATION_CHANNELS = ["push", "email"] as const;
+export const NOTIFICATION_CHANNELS = ["inbox", "push", "email"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export type NotificationChannelSettings = Record<NotificationChannel, boolean>;
 
-export const NOTIFICATION_CATEGORY_DEFAULTS: Record<NotificationCategory, NotificationChannelSettings> = {
-  mention: { push: true, email: true },
-  activity: { push: true, email: false },
-  system: { push: false, email: false },
-};
-
 export type NotificationPayloads = {
-  "mention.user": { spaceTitle: string | null; sessionTitle: string | null; preview: string | null };
+  mention: { spaceTitle: string | null; sessionTitle: string | null; preview: string | null };
   "turn.finished": {
     spaceTitle: string | null;
     sessionTitle: string | null;
@@ -24,19 +15,18 @@ export type NotificationPayloads = {
     stepCount: number | null;
   };
 };
-
-export const NOTIFICATION_KINDS = {
-  "mention.user": { category: "mention" },
-  "turn.finished": { category: "activity" },
-} as const satisfies { [K in keyof NotificationPayloads]: { category: NotificationCategory } };
 export type NotificationKind = keyof NotificationPayloads;
 
+export const NOTIFICATION_DEFAULTS: Record<NotificationKind, NotificationChannelSettings> = {
+  mention: { inbox: true, push: true, email: true },
+  "turn.finished": { inbox: false, push: true, email: false },
+};
+export const NOTIFICATION_KINDS = Object.keys(NOTIFICATION_DEFAULTS) as NotificationKind[];
+
 export const isNotificationKind = (value: unknown): value is NotificationKind =>
-  typeof value === "string" && Object.hasOwn(NOTIFICATION_KINDS, value);
-export const isNotificationCategory = (value: unknown): value is NotificationCategory =>
-  typeof value === "string" && (NOTIFICATION_CATEGORIES as readonly string[]).includes(value);
-export const notificationCategoryOf = (kind: NotificationKind): NotificationCategory =>
-  NOTIFICATION_KINDS[kind].category;
+  typeof value === "string" && Object.hasOwn(NOTIFICATION_DEFAULTS, value);
+export const isNotificationChannel = (value: unknown): value is NotificationChannel =>
+  typeof value === "string" && (NOTIFICATION_CHANNELS as readonly string[]).includes(value);
 
 export type NotificationActor = {
   userUuid: string;
@@ -45,47 +35,46 @@ export type NotificationActor = {
   avatarUrl: string | null;
 };
 
-type NotificationRecordOf<K extends NotificationKind> = {
+type NoticeOf<K extends NotificationKind> = {
   id: string;
   kind: K;
-  category: NotificationCategory;
+  groupKey: string;
   spaceId: string | null;
   sessionId: string | null;
   turnId: string | null;
   actors: NotificationActor[];
   payload: NotificationPayloads[K];
+  createdAt: string;
+};
+export type Notice = { [K in NotificationKind]: NoticeOf<K> }[NotificationKind];
+
+export type InboxItem = Notice & {
   count: number;
   revision: number;
   readAt: string | null;
-  createdAt: string;
   updatedAt: string;
 };
-export type NotificationRecord = { [K in NotificationKind]: NotificationRecordOf<K> }[NotificationKind];
 
-export const NOTIFICATION_UNREAD_CAP = 99;
+export const INBOX_UNREAD_CAP = 99;
 
-export type NotificationSummary = {
-  unread: number;
-  byCategory: Record<NotificationCategory, number>;
-};
+export type InboxSummary = { unread: number };
 
-export type NotificationReadTarget =
+export type InboxReadTarget =
   | { ids: string[] }
-  | { category: NotificationCategory }
   | { sessionId: string }
   | { all: true };
 
-export type NotificationListResponse = {
-  items: NotificationRecord[];
+export type InboxListResponse = {
+  items: InboxItem[];
   pageInfo: { hasMore: boolean; nextCursor: string | null };
 };
 
 export type NotificationPreferences = {
-  categories: Record<NotificationCategory, NotificationChannelSettings>;
+  kinds: Record<NotificationKind, NotificationChannelSettings>;
 };
 
 export type NotificationPreferencesPatch = {
-  categories: Partial<Record<NotificationCategory, Partial<NotificationChannelSettings>>>;
+  kinds: Partial<Record<NotificationKind, Partial<NotificationChannelSettings>>>;
 };
 
 export const PUSH_TRANSPORTS = ["webpush", "fcm", "apns"] as const;
@@ -116,14 +105,14 @@ export type NotificationPushMessage = {
   unread: number;
 };
 
-export const notificationPath = (record: Pick<NotificationRecord, "spaceId" | "sessionId">) =>
-  record.spaceId && record.sessionId
-    ? `/spaces/${record.spaceId}/sessions/${record.sessionId}`
-    : record.spaceId
-      ? `/spaces/${record.spaceId}`
+export const notificationPath = (notice: Pick<Notice, "spaceId" | "sessionId">) =>
+  notice.spaceId && notice.sessionId
+    ? `/spaces/${notice.spaceId}/sessions/${notice.sessionId}`
+    : notice.spaceId
+      ? `/spaces/${notice.spaceId}`
       : "/spaces/inbox";
 
-export const notificationTag = (id: string) => `notification:${id}`;
+export const notificationTag = (notice: Pick<Notice, "groupKey">) => `notification:${notice.groupKey}`;
 
 export const USER_MENTION_URI_PREFIX = "cohub://users/";
 export const buildUserMentionMarkdown = (input: { userUuid: string; label: string }) =>
@@ -135,15 +124,17 @@ export type NotificationTurnJobData = {
   event: "written" | "settled";
   trace?: Record<string, unknown>;
 };
-export const NOTIFICATION_DELIVER_JOB = "notifications.deliver";
-export type NotificationDeliverJobData = {
-  notificationId: string;
-  revision: number;
+export const NOTIFICATION_PUSH_JOB = "notifications.push";
+export type NotificationPushJobData = {
+  recipientId: string;
+  notice: Notice;
+  revision: number | null;
   targetIds?: string[];
   attempt?: number;
 };
 export const NOTIFICATION_EMAIL_JOB = "notifications.email";
 export type NotificationEmailJobData = { userId: string };
+export type NotificationEmailEntry = { id: string; notice: Notice; inbox: boolean };
 
 export const visibleDevicesKey = (userId: string) => `notifications:visible-devices:${userId}`;
 export const VISIBLE_DEVICE_TTL_MS = 60_000;

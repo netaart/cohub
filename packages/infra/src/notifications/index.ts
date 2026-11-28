@@ -2,6 +2,7 @@ import type { NotificationConfig } from "@cohub/protocol";
 import { readPushConfig } from "./push.js";
 
 export * from "./email.js";
+export * from "./outbox.js";
 export * from "./push.js";
 
 export function readNotificationConfig(env: NodeJS.ProcessEnv = process.env): NotificationConfig {

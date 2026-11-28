@@ -21,32 +21,35 @@ export { isUserAppFilter, isUserCronJobFilter, USER_APP_FILTERS, USER_CRONJOB_FI
 export type { UserAppFilter, UserCronJobFilter } from "@cohub/protocol";
 export {
   buildUserMentionMarkdown,
-  isNotificationCategory,
-  NOTIFICATION_CATEGORIES,
+  INBOX_UNREAD_CAP,
+  isNotificationChannel,
+  isNotificationKind,
   NOTIFICATION_CHANNELS,
-  NOTIFICATION_UNREAD_CAP,
+  NOTIFICATION_DEFAULTS,
+  NOTIFICATION_KINDS,
   notificationPath,
   notificationTag,
   USER_MENTION_URI_PREFIX,
 } from "@cohub/protocol";
 export type {
+  InboxItem,
+  InboxListResponse,
+  InboxReadTarget,
+  InboxSummary,
+  Notice,
   NotificationActor,
-  NotificationCategory,
   NotificationChannel,
+  NotificationChannelSettings,
   NotificationConfig,
   NotificationKind,
-  NotificationListResponse,
   NotificationPayloads,
   NotificationPreferences,
   NotificationPreferencesPatch,
   NotificationPushMessage,
-  NotificationReadTarget,
-  NotificationRecord,
-  NotificationSummary,
   PushTargetInput,
   PushTransport,
 } from "@cohub/protocol";
-export type { NotificationChangedEvent } from "@cohub/protocol/realtime";
+export type { InboxChangedEvent, NotificationSentEvent } from "@cohub/protocol/realtime";
 export type {
   ViewportAppContext, ViewportBoardContext, ViewportContext, ViewportFileContext, ViewportMediaContext, ViewportMediaMark, ViewportPortContext, ViewportSelectedNode, ViewportVisibleRect,
 } from "@cohub/protocol";
@@ -166,6 +169,7 @@ export { APP_DEVICES } from "@cohub/protocol/app-devices";
 export type { AppDevice, AppDevicesStatus } from "@cohub/protocol/app-devices";
 export type { RtcTransportStats } from "./rtc/index.js";
 export { ReferencesApi } from "./apis/references.js";
+export { InboxApi } from "./apis/inbox.js";
 export { NotificationsApi } from "./apis/notifications.js";
 export { ReferralsApi } from "./apis/referrals.js";
 export { buildSpaceInvitePath, buildSpacePath } from "./apis/invitations.js";

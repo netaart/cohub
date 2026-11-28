@@ -5,7 +5,8 @@ import type { ContentBlock } from "@cohub/protocol/core";
 import { readRecordedTurnInitiator } from "@cohub/protocol/model";
 import { createDrizzlePermissionStore, hasPermission } from "../permissions/index.js";
 import { formatMentionsForDisplay, parseMentions } from "../references/mentions.js";
-import type { NotificationDb, NotifyItem } from "./store.js";
+import type { NotifyItem } from "./inbox.js";
+import type { NotificationDb } from "./store.js";
 
 const PREVIEW_LENGTH = 180;
 const MAX_MENTIONS = 20;
@@ -87,7 +88,7 @@ async function userMentions(db: NotificationDb, turn: LoadedTurn): Promise<Notif
   return allowed.flatMap((recipientId) => recipientId
     ? [{
       recipientId,
-      kind: "mention.user" as const,
+      kind: "mention" as const,
       groupKey: `mention:${turn.id}`,
       spaceId: turn.spaceId,
       sessionId: turn.sessionId,

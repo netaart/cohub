@@ -39,6 +39,7 @@ self.addEventListener("push", (event) => {
 			await self.registration.showNotification(message.title, {
 				body: message.body || undefined,
 				tag: message.tag,
+				renotify: Boolean(message.tag),
 				icon: "/pwa/icon-192x192.png",
 				badge: "/pwa/icon-192x192.png",
 				data: { url: message.path },

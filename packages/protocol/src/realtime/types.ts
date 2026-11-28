@@ -17,7 +17,7 @@ import type { AppArtifactDescriptor, AppContentKind, AppVersionSource } from "..
 import type { AppDomainRecord, AppDomainRemovedReason } from "../app-domains.js";
 import type { AppRtcPublication } from "../rtc/index.js";
 import type { Actor, ActorKind, ActorModel } from "../provenance.js";
-import type { NotificationReadTarget, NotificationRecord, NotificationSummary } from "../notifications.js";
+import type { InboxItem, InboxReadTarget, InboxSummary, Notice } from "../notifications.js";
 import type {
   BoardAwarenessClientPayload,
   BoardAwarenessUpdate,
@@ -1016,21 +1016,28 @@ export type DesktopCommandDispatchedEvent = {
   payload: DesktopCommandDispatchedPayload;
 };
 
-export type NotificationChangedEvent = {
+type NotificationDomainEvent<Type extends string, Payload> = {
   id: string;
   timestamp: number;
   domain: "notification";
-  type: "notification.changed";
+  type: Type;
   requestId?: string | null;
   spaceId?: null;
   sessionId?: null;
   rooms?: RealtimeRoom[];
-  payload: {
-    upserted?: NotificationRecord[];
-    read?: NotificationReadTarget & { readAt: string };
-    summary: NotificationSummary;
-  };
+  payload: Payload;
 };
+
+export type InboxChangedEvent = NotificationDomainEvent<"inbox.changed", {
+  upserted?: InboxItem[];
+  read?: InboxReadTarget & { readAt: string };
+  summary: InboxSummary;
+}>;
+
+export type NotificationSentEvent = NotificationDomainEvent<"notification.sent", {
+  notice: Notice;
+  inbox: boolean;
+}>;
 
 export type RealtimeServerEvent =
   | SystemReadyEvent
@@ -1068,7 +1075,8 @@ export type RealtimeServerEvent =
   | TaskUpdatedEvent
   | LabelAssignmentsUpdatedEvent
   | DesktopCommandDispatchedEvent
-  | NotificationChangedEvent
+  | InboxChangedEvent
+  | NotificationSentEvent
   | RealtimeRoomEvent
   | RealtimeRoomJoinedEvent
   | RealtimeRoomHistoryResultEvent

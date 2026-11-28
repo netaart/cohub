@@ -1,4 +1,9 @@
-import { type NotificationRecord, notificationTag } from "@neta-art/cohub";
+import {
+	type ChannelEnvelope,
+	isNotificationKind,
+	type NotificationSentEvent,
+	notificationTag,
+} from "@neta-art/cohub";
 import { callHost, supportsHostCapability } from "#lib/host-bridge.ts";
 import { flagHostTabAttention } from "#lib/host-tabs.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -24,8 +29,9 @@ const SYSTEM_ALERT_DELAY_MS = 1_500;
 const PROMPT_COOLDOWN_MS = 7 * 86_400_000;
 const PROMPT_MAX_DISMISSALS = 2;
 
-export type NotificationToast = {
-	record: NotificationRecord;
+type Sent = NotificationSentEvent["payload"];
+
+export type NotificationToast = Sent & {
 	remainingMs: number;
 	dismissAt: number | null;
 	paused: boolean;
@@ -63,6 +69,12 @@ function writePrompt(state: PromptState) {
 	} catch {}
 }
 
+const isSent = (
+	event: ChannelEnvelope,
+): event is ChannelEnvelope & { payload: Sent } =>
+	event.type === "notification.sent" &&
+	isNotificationKind((event.payload as Partial<Sent>).notice?.kind);
+
 export function viewedSession() {
 	const ctx = resolveWorkspaceRouteContext({
 		pathname: page.url.pathname,
@@ -77,7 +89,6 @@ class NotificationAlerts {
 	toasts = $state<NotificationToast[]>([]);
 	showPrompt = $state(false);
 	attended = $state(true);
-	#seen = new Map<string, number>();
 	#tick: number | null = null;
 	#stop: (() => void) | null = null;
 
@@ -92,7 +103,9 @@ class NotificationAlerts {
 			inbox.start(),
 			inbox.list.watch("all"),
 			trackDeviceAttention(),
-			inbox.onUpserted((records) => this.#receive(records)),
+			sdk.onUserEvent((event) => {
+				if (isSent(event)) this.#receive(event.payload);
+			}),
 		];
 		document.addEventListener("visibilitychange", syncAttention);
 		window.addEventListener("focus", syncAttention);
@@ -117,21 +130,21 @@ class NotificationAlerts {
 	}
 
 	open(toast: NotificationToast, options: { newTab?: boolean } = {}) {
-		this.dismiss(toast.record.id);
-		void inbox.markRead({ ids: [toast.record.id] });
-		const href = notificationHref(toast.record);
+		this.dismiss(toast.notice.id);
+		if (toast.inbox) void inbox.markRead({ ids: [toast.notice.id] });
+		const href = notificationHref(toast.notice);
 		if (options.newTab) window.open(href, "_blank", "noreferrer");
 		else void goto(href);
 	}
 
 	dismiss(id: string) {
-		this.toasts = this.toasts.filter((toast) => toast.record.id !== id);
+		this.toasts = this.toasts.filter((toast) => toast.notice.id !== id);
 		this.#syncTick();
 	}
 
 	pause(id: string, paused: boolean) {
 		this.toasts = this.toasts.map((toast) =>
-			toast.record.id === id ? { ...toast, paused } : toast,
+			toast.notice.id === id ? { ...toast, paused } : toast,
 		);
 		this.#syncCountdowns();
 	}
@@ -151,39 +164,40 @@ class NotificationAlerts {
 		this.showPrompt = false;
 	}
 
-	#receive(records: NotificationRecord[]) {
+	#receive(sent: Sent) {
+		const { notice } = sent;
 		const viewing = viewedSession();
-		for (const record of records) {
-			if (record.readAt || (this.#seen.get(record.id) ?? 0) >= record.revision)
-				continue;
-			this.#seen.set(record.id, record.revision);
-			const shown = viewing !== null && record.sessionId === viewing;
-			if (shown && this.attended) {
-				void inbox.markRead({ ids: [record.id] });
-				continue;
-			}
-			if (shown) flagHostTabAttention();
-			if (document.visibilityState === "visible") this.#toast(record);
-			if (!this.attended) this.#alertSystemLater(record);
-			this.#maybePrompt();
+		const shown = viewing !== null && notice.sessionId === viewing;
+		if (shown && this.attended) {
+			if (sent.inbox) void inbox.markRead({ ids: [notice.id] });
+			return;
 		}
+		if (shown) flagHostTabAttention();
+		if (document.visibilityState === "visible") this.#toast(sent);
+		if (!this.attended) this.#alertSystemLater(sent);
+		this.#maybePrompt();
 	}
 
-	#toast(record: NotificationRecord) {
+	#toast(sent: Sent) {
 		this.toasts = [
-			{ record, remainingMs: TOAST_MS, dismissAt: null, paused: false },
-			...this.toasts.filter((toast) => toast.record.id !== record.id),
+			{ ...sent, remainingMs: TOAST_MS, dismissAt: null, paused: false },
+			...this.toasts.filter(
+				(toast) => toast.notice.groupKey !== sent.notice.groupKey,
+			),
 		].slice(0, MAX_TOASTS);
 		this.#syncCountdowns();
 	}
 
-	#alertSystemLater(record: NotificationRecord) {
+	#alertSystemLater({ notice, inbox: kept }: Sent) {
 		if (devicePush.mode !== "local") return;
 		window.setTimeout(() => {
-			if (inbox.list.find(record.id)?.readAt || isDeviceAttended()) return;
-			const { title, body } = notificationCopy(record, getLocale());
-			const path = notificationHref(record);
-			const tag = notificationTag(record.id);
+			if (isDeviceAttended() || (kept && inbox.list.find(notice.id)?.readAt))
+				return;
+			const copy = notificationCopy(notice, getLocale());
+			if (!copy) return;
+			const { title, body } = copy;
+			const path = notificationHref(notice);
+			const tag = notificationTag(notice);
 			if (supportsHostCapability("notifications")) {
 				void callHost("notifications.show", {
 					id: tag,
@@ -193,13 +207,15 @@ class NotificationAlerts {
 				}).catch(() => undefined);
 				return;
 			}
+			const options: NotificationOptions & { renotify: boolean } = {
+				body,
+				tag,
+				renotify: true,
+				icon: "/pwa/icon-192x192.png",
+				data: { url: path },
+			};
 			try {
-				const notification = new Notification(title, {
-					body,
-					tag,
-					icon: "/pwa/icon-192x192.png",
-					data: { url: path },
-				});
+				const notification = new Notification(title, options);
 				notification.onclick = () => {
 					window.focus();
 					void goto(path);
@@ -207,13 +223,7 @@ class NotificationAlerts {
 				};
 			} catch {
 				void navigator.serviceWorker?.ready
-					.then((registration) =>
-						registration.showNotification(title, {
-							body,
-							tag,
-							data: { url: path },
-						}),
-					)
+					.then((registration) => registration.showNotification(title, options))
 					.catch(() => undefined);
 			}
 		}, SYSTEM_ALERT_DELAY_MS);

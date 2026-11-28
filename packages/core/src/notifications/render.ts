@@ -1,4 +1,4 @@
-import { notificationPath, type NotificationRecord } from "@cohub/protocol";
+import { notificationPath, type Notice } from "@cohub/protocol";
 
 export type NotificationLocale = "en" | "zh-CN";
 
@@ -41,24 +41,24 @@ const clip = (text: string | null | undefined, max: number) => {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 };
 
-export function renderNotification(record: NotificationRecord, locale: NotificationLocale) {
+export function renderNotice(notice: Notice, locale: NotificationLocale) {
   const t = MESSAGES[locale];
-  const where = record.payload.sessionTitle || record.payload.spaceTitle;
-  switch (record.kind) {
-    case "mention.user": {
-      const actor = record.actors[0]?.displayName ?? t.someone;
+  const where = notice.payload.sessionTitle || notice.payload.spaceTitle;
+  switch (notice.kind) {
+    case "mention": {
+      const actor = notice.actors[0]?.displayName ?? t.someone;
       return {
         title: clip(t.mentioned(actor), 120),
-        body: clip(record.payload.preview || (where ? t.mentionedIn(where) : ""), 240),
-        path: notificationPath(record),
+        body: clip(notice.payload.preview || (where ? t.mentionedIn(where) : ""), 240),
+        path: notificationPath(notice),
       };
     }
     case "turn.finished": {
       const subject = clip(where || t.aSession, 80);
       return {
-        title: record.payload.status === "failed" ? t.failed(subject) : t.finished(subject),
-        body: clip(record.payload.preview, 240),
-        path: notificationPath(record),
+        title: notice.payload.status === "failed" ? t.failed(subject) : t.finished(subject),
+        body: clip(notice.payload.preview, 240),
+        path: notificationPath(notice),
       };
     }
   }

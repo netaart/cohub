@@ -1,12 +1,12 @@
-import type {
-	ChannelEnvelope,
-	NotificationCategory,
-	NotificationChangedEvent,
-	NotificationReadTarget,
-	NotificationRecord,
-	NotificationSummary,
+import {
+	type ChannelEnvelope,
+	type InboxChangedEvent,
+	type InboxItem,
+	type InboxReadTarget,
+	type InboxSummary,
+	isNotificationKind,
 } from "@neta-art/cohub";
-import { idbGet, idbPut, type NotificationCacheRecord } from "#lib/cache/db.ts";
+import { type InboxCacheRecord, idbGet, idbPut } from "#lib/cache/db.ts";
 import {
 	canUseUserScopedCache,
 	getCacheUserKeyAsync,
@@ -15,61 +15,32 @@ import { LiveList, type LivePage } from "#lib/lists/live-list.svelte.ts";
 import { sdk } from "#lib/sdk.ts";
 import { syncStatus } from "#lib/sync/sync-status.svelte.ts";
 
-export type InboxFilter = "all" | NotificationCategory;
-export const INBOX_FILTERS: readonly InboxFilter[] = [
-	"all",
-	"mention",
-	"activity",
-];
+export type InboxFilter = "all" | "unread";
+export const INBOX_FILTERS: readonly InboxFilter[] = ["all", "unread"];
 
 const PAGE_SIZE = 30;
-const STORE = "notification_lists";
-const EMPTY_SUMMARY: NotificationSummary = {
-	unread: 0,
-	byCategory: { mention: 0, activity: 0, system: 0 },
-};
+const STORE = "inbox_lists";
+const EMPTY_SUMMARY: InboxSummary = { unread: 0 };
 
-type ChangedPayload = NotificationChangedEvent["payload"];
-type Upserted = (records: NotificationRecord[]) => void;
+type ChangedPayload = InboxChangedEvent["payload"];
 
-const byRecent = (a: NotificationRecord, b: NotificationRecord) =>
+const byRecent = (a: InboxItem, b: InboxItem) =>
 	Date.parse(b.updatedAt) - Date.parse(a.updatedAt) ||
 	(a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 
-const fits = (filter: InboxFilter, record: NotificationRecord) =>
-	filter === "all" || filter === record.category ? "in" : "out";
+const known = (items: readonly InboxItem[]) =>
+	items.filter((item) => isNotificationKind(item.kind));
 
 function matchesRead(
-	record: NotificationRecord,
-	target: NotificationReadTarget & { readAt?: string },
+	item: InboxItem,
+	target: InboxReadTarget & { readAt?: string },
 ) {
-	if (record.readAt) return false;
-	if (target.readAt && Date.parse(record.updatedAt) > Date.parse(target.readAt))
+	if (item.readAt) return false;
+	if (target.readAt && Date.parse(item.updatedAt) > Date.parse(target.readAt))
 		return false;
-	if ("ids" in target) return target.ids.includes(record.id);
-	if ("category" in target) return record.category === target.category;
-	if ("sessionId" in target) return record.sessionId === target.sessionId;
+	if ("ids" in target) return target.ids.includes(item.id);
+	if ("sessionId" in target) return item.sessionId === target.sessionId;
 	return true;
-}
-
-function optimisticSummary(
-	summary: NotificationSummary,
-	target: NotificationReadTarget,
-	cleared: readonly NotificationRecord[],
-): NotificationSummary {
-	if ("all" in target) return EMPTY_SUMMARY;
-	const byCategory = { ...summary.byCategory };
-	if ("category" in target) byCategory[target.category] = 0;
-	else
-		for (const record of cleared)
-			byCategory[record.category] = Math.max(
-				0,
-				byCategory[record.category] - 1,
-			);
-	return {
-		unread: Object.values(byCategory).reduce((sum, count) => sum + count, 0),
-		byCategory,
-	};
 }
 
 async function cacheKey(name: string) {
@@ -83,44 +54,42 @@ function isChanged(
 	event: ChannelEnvelope,
 ): event is ChannelEnvelope & { payload: ChangedPayload } {
 	return (
-		event.type === "notification.changed" &&
+		event.type === "inbox.changed" &&
 		typeof (event.payload as Partial<ChangedPayload>).summary?.unread ===
 			"number"
 	);
 }
 
 class Inbox {
-	readonly list = new LiveList<InboxFilter, NotificationRecord, null>({
-		name: "notifications",
+	readonly list = new LiveList<InboxFilter, InboxItem, null>({
+		name: "inbox",
 		pageSize: PAGE_SIZE,
 		memoLimit: INBOX_FILTERS.length,
 		key: (filter) => filter,
-		id: (record) => record.id,
+		id: (item) => item.id,
 		compare: () => byRecent,
 		emptyExtra: () => null,
 		mergeExtra: () => null,
 		fetch: async (filter, cursor) => {
-			const page = await sdk.notifications.list({
-				category: filter === "all" ? null : filter,
+			const page = await sdk.inbox.list({
+				unread: filter === "unread",
 				cursor,
 				limit: PAGE_SIZE,
 			});
 			return {
-				items: page.items,
+				items: known(page.items),
 				hasMore: page.pageInfo.hasMore,
 				cursor: page.pageInfo.nextCursor,
 				extra: null,
 			};
 		},
-		read: async (
-			filter,
-		): Promise<LivePage<NotificationRecord, null> | null> => {
+		read: async (filter): Promise<LivePage<InboxItem, null> | null> => {
 			const scope = await cacheKey(filter);
 			if (!scope) return null;
-			const record = await idbGet<NotificationCacheRecord>(STORE, scope.key);
+			const record = await idbGet<InboxCacheRecord>(STORE, scope.key);
 			if (record?.userKey !== scope.userKey) return null;
 			return {
-				items: record.items as NotificationRecord[],
+				items: known(record.items as InboxItem[]),
 				hasMore: record.hasMore,
 				cursor: null,
 				extra: null,
@@ -129,7 +98,7 @@ class Inbox {
 		write: async (filter, snapshot) => {
 			const scope = await cacheKey(filter);
 			if (!scope) return;
-			await idbPut<NotificationCacheRecord>(STORE, {
+			await idbPut<InboxCacheRecord>(STORE, {
 				key: scope.key,
 				userKey: scope.userKey,
 				items: snapshot.items,
@@ -139,8 +108,7 @@ class Inbox {
 		},
 	});
 
-	summary = $state<NotificationSummary>(EMPTY_SUMMARY);
-	#listeners = new Set<Upserted>();
+	summary = $state<InboxSummary>(EMPTY_SUMMARY);
 	#summaryGeneration = 0;
 	#stop: (() => void) | null = null;
 
@@ -161,53 +129,52 @@ class Inbox {
 		return this.#stop;
 	}
 
-	onUpserted(listener: Upserted): () => void {
-		this.#listeners.add(listener);
-		return () => this.#listeners.delete(listener);
-	}
-
 	hasUnreadFor(sessionId: string) {
 		return Boolean(
-			this.list.findBy(
-				(record) => !record.readAt && record.sessionId === sessionId,
-			),
+			this.list.findBy((item) => !item.readAt && item.sessionId === sessionId),
 		);
 	}
 
 	get unknownUnread() {
 		const loaded = new Set<string>();
 		for (const filter of INBOX_FILTERS)
-			for (const record of this.list.view(filter).items)
-				if (!record.readAt) loaded.add(record.id);
+			for (const item of this.list.view(filter).items)
+				if (!item.readAt) loaded.add(item.id);
 		return Math.max(0, this.summary.unread - loaded.size);
 	}
 
 	async refreshSummary() {
 		const generation = ++this.#summaryGeneration;
-		const summary = await sdk.notifications.summary().catch(() => null);
+		const summary = await sdk.inbox.summary().catch(() => null);
 		if (summary && generation === this.#summaryGeneration)
 			this.#setSummary(summary);
 	}
 
-	async markRead(target: NotificationReadTarget) {
+	async markRead(target: InboxReadTarget) {
 		const cleared = this.#applyRead(target, new Date().toISOString());
-		const known =
-			"all" in target
-				? this.summary.unread
-				: "category" in target
-					? this.summary.byCategory[target.category]
+		const elsewhere =
+			"ids" in target
+				? target.ids.length
+				: "all" in target
+					? this.summary.unread
 					: this.unknownUnread;
-		if (cleared.length === 0 && known === 0) return;
-		this.#setSummary(optimisticSummary(this.summary, target, cleared), {
-			persist: false,
-		});
+		if (cleared.length === 0 && elsewhere === 0) return;
+		this.#setSummary(
+			{
+				unread:
+					"all" in target
+						? 0
+						: Math.max(0, this.summary.unread - cleared.length),
+			},
+			{ persist: false },
+		);
 		const generation = ++this.#summaryGeneration;
 		try {
-			const result = await sdk.notifications.markRead(target);
+			const result = await sdk.inbox.markRead(target);
 			if (generation === this.#summaryGeneration)
 				this.#setSummary(result.summary);
 		} catch (error) {
-			console.warn("[notifications] mark read failed", error);
+			console.warn("[inbox] mark read failed", error);
 			this.list.invalidate();
 			void this.refreshSummary();
 		}
@@ -215,46 +182,38 @@ class Inbox {
 
 	#apply(payload: ChangedPayload) {
 		++this.#summaryGeneration;
-		for (const record of payload.upserted ?? []) {
+		for (const item of known(payload.upserted ?? [])) {
 			this.list.apply({
-				id: record.id,
-				fit: (filter) => fits(filter, record),
+				id: item.id,
+				fit: () => "in",
 				merge: (current) =>
-					current.revision > record.revision ||
-					(current.revision === record.revision && current.readAt)
+					current.revision > item.revision ||
+					(current.revision === item.revision && current.readAt)
 						? current
-						: record,
-				create: () => record,
+						: item,
+				create: () => item,
 				settled: true,
 			});
 		}
 		if (payload.read) this.#applyRead(payload.read, payload.read.readAt);
 		this.#setSummary(payload.summary);
-		if (payload.upserted?.length)
-			for (const listener of this.#listeners) listener(payload.upserted);
 	}
 
-	#applyRead(
-		target: NotificationReadTarget & { readAt?: string },
-		readAt: string,
-	) {
-		const cleared = new Map<string, NotificationRecord>();
+	#applyRead(target: InboxReadTarget & { readAt?: string }, readAt: string) {
+		const cleared = new Map<string, InboxItem>();
 		for (const filter of INBOX_FILTERS)
-			for (const record of this.list.view(filter).items)
-				if (matchesRead(record, target)) cleared.set(record.id, record);
+			for (const item of this.list.view(filter).items)
+				if (matchesRead(item, target)) cleared.set(item.id, item);
 		for (const id of cleared.keys())
 			this.list.apply({
 				id,
-				fit: () => "keep",
-				merge: (record) => (record.readAt ? record : { ...record, readAt }),
+				fit: (filter) => (filter === "unread" ? "out" : "keep"),
+				merge: (item) => (item.readAt ? item : { ...item, readAt }),
 			});
 		return [...cleared.values()];
 	}
 
-	#setSummary(
-		summary: NotificationSummary,
-		options: { persist?: boolean } = {},
-	) {
+	#setSummary(summary: InboxSummary, options: { persist?: boolean } = {}) {
 		this.summary = summary;
 		if (options.persist !== false) void this.#persistSummary(summary);
 	}
@@ -262,22 +221,22 @@ class Inbox {
 	async #hydrateSummary() {
 		const scope = await cacheKey("summary");
 		if (!scope) return;
-		const record = await idbGet<NotificationCacheRecord>(
-			STORE,
-			scope.key,
-		).catch(() => null);
+		const record = await idbGet<InboxCacheRecord>(STORE, scope.key).catch(
+			() => null,
+		);
 		if (
 			record?.userKey === scope.userKey &&
-			record.summary &&
+			typeof (record.summary as Partial<InboxSummary> | undefined)?.unread ===
+				"number" &&
 			this.summary === EMPTY_SUMMARY
 		)
-			this.summary = record.summary as NotificationSummary;
+			this.summary = { unread: (record.summary as InboxSummary).unread };
 	}
 
-	async #persistSummary(summary: NotificationSummary) {
+	async #persistSummary(summary: InboxSummary) {
 		const scope = await cacheKey("summary");
 		if (!scope) return;
-		await idbPut<NotificationCacheRecord>(STORE, {
+		await idbPut<InboxCacheRecord>(STORE, {
 			key: scope.key,
 			userKey: scope.userKey,
 			items: [],

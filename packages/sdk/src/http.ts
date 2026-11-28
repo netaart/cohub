@@ -8,6 +8,7 @@ import { SkillsApi } from "./apis/skills.js";
 import { PublicAssetsApi } from "./apis/public-assets.js";
 import { SearchApi } from "./apis/search.js";
 import { ReferencesApi } from "./apis/references.js";
+import { InboxApi } from "./apis/inbox.js";
 import { NotificationsApi } from "./apis/notifications.js";
 import { SessionAccessApi } from "./apis/session-access.js";
 import { SpaceClient, SpacesApi } from "./apis/spaces.js";
@@ -40,6 +41,7 @@ export class CohubHttpClient {
   readonly sessionAccess: SessionAccessApi;
   readonly search: SearchApi;
   readonly references: ReferencesApi;
+  readonly inbox: InboxApi;
   readonly notifications: NotificationsApi;
   readonly tasks: TasksApi;
   readonly cronJobs: CronJobsApi;
@@ -93,6 +95,7 @@ export class CohubHttpClient {
     this.sessionAccess = new SessionAccessApi(this.transport);
     this.search = new SearchApi(this.transport);
     this.references = new ReferencesApi(this.transport);
+    this.inbox = new InboxApi(this.transport);
     this.notifications = new NotificationsApi(this.transport);
     this.tasks = new TasksApi(this.transport);
     this.cronJobs = new CronJobsApi(this.transport);

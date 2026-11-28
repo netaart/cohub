@@ -1,4 +1,4 @@
-import type { NotificationRecord } from "@neta-art/cohub";
+import { isNotificationKind, type Notice } from "@neta-art/cohub";
 import type { Locale } from "#lib/i18n/locale.ts";
 import { m } from "#lib/paraglide/messages.js";
 import {
@@ -6,35 +6,38 @@ import {
 	buildSpaceSessionRoute,
 } from "#lib/space-routes.ts";
 
-export function notificationCopy(record: NotificationRecord, locale: Locale) {
+export function notificationCopy(notice: Notice, locale: Locale) {
+	if (!isNotificationKind(notice.kind)) return null;
 	const options = { locale };
-	const where = record.payload.sessionTitle || record.payload.spaceTitle;
-	switch (record.kind) {
-		case "mention.user": {
+	const where = notice.payload.sessionTitle || notice.payload.spaceTitle;
+	switch (notice.kind) {
+		case "mention": {
 			const actor =
-				record.actors[0]?.displayName ?? m.notif_someone({}, options);
+				notice.actors[0]?.displayName ?? m.notif_someone({}, options);
 			return {
 				title: where
 					? m.notif_mentioned_you_in({ actor, where }, options)
 					: m.notif_mentioned_you({ actor }, options),
-				body: record.payload.preview ?? "",
+				body: notice.payload.preview ?? "",
 			};
 		}
 		case "turn.finished": {
 			const subject = where || m.notif_your_task({}, options);
 			return {
 				title:
-					record.payload.status === "failed"
+					notice.payload.status === "failed"
 						? m.notif_turn_failed({ subject }, options)
 						: m.notif_turn_finished({ subject }, options),
-				body: record.payload.preview ?? "",
+				body: notice.payload.preview ?? "",
 			};
 		}
 	}
 }
 
-export function notificationHref(record: NotificationRecord) {
-	if (record.spaceId && record.sessionId)
-		return buildSpaceSessionRoute(record.spaceId, record.sessionId);
-	return record.spaceId ? buildSpaceRootRoute(record.spaceId) : "/spaces/inbox";
+export function notificationHref(
+	notice: Pick<Notice, "spaceId" | "sessionId">,
+) {
+	if (notice.spaceId && notice.sessionId)
+		return buildSpaceSessionRoute(notice.spaceId, notice.sessionId);
+	return notice.spaceId ? buildSpaceRootRoute(notice.spaceId) : "/spaces/inbox";
 }

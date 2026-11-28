@@ -73,7 +73,7 @@ Mentions are for deliberate context references, not every message.
 
 ### Notifications
 
-The inbox, in **Library › Inbox**, collects mentions and the tasks you started that finished or failed; repeated updates in one Chat fold into one entry. Opening a Chat marks its notifications read on every device. Choose push and email per kind in **Settings › Notifications**.
+When a task you started finishes or fails while you are away, Cohub sends you a push; the result itself stays in the Chat. The inbox, in **Library › Inbox**, keeps mentions until you read them; repeated updates in one Chat fold into one entry, and opening a Chat marks its entries read on every device. In **Settings › Notifications**, choose for each kind whether it goes to the inbox, push, or email — for example, keep finished tasks in the inbox too.
 
 ### Replies from other Spaces
 

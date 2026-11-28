@@ -18,6 +18,7 @@ export const COMMANDS: ReadonlyArray<{ names: readonly string[]; load: () => Pro
   { names: ["public"], load: async () => (await import("./commands/public.js")).registerPublic },
   { names: ["skills"], load: async () => (await import("./commands/skills.js")).registerSkills },
   { names: ["search"], load: async () => (await import("./commands/search.js")).registerSearch },
+  { names: ["inbox"], load: async () => (await import("./commands/inbox.js")).registerInbox },
   { names: ["notifications"], load: async () => (await import("./commands/notifications.js")).registerNotifications },
   { names: ["references"], load: async () => (await import("./commands/references.js")).registerReferences },
   { names: ["referrals"], load: async () => (await import("./commands/referrals.js")).registerReferrals },

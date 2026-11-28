@@ -54,30 +54,30 @@ function keydown(event: KeyboardEvent, toast: NotificationToast) {
 
 {#if toasts.length > 0 || notificationAlerts.showPrompt}
 	<div class="notification-region pointer-events-none fixed inset-x-3 top-[calc(0.75rem+env(safe-area-inset-top,0px))] z-[var(--z-workspace-toast)] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:top-auto sm:bottom-4 sm:w-[360px] sm:max-w-[calc(100vw-2rem)]">
-		{#each toasts as toast (toast.record.id)}
-			{@const copy = notificationCopy(toast.record, locale)}
+		{#each toasts as toast (toast.notice.id)}
+			{@const copy = notificationCopy(toast.notice, locale)}
 			<div
 				role="button"
 				tabindex="0"
 				class="notification-toast toast-surface pointer-events-auto flex gap-2.5 text-left"
 				data-drawer-swipe-ignore
-				use:swipeDismiss={{ onDismiss: () => notificationAlerts.dismiss(toast.record.id) }}
+				use:swipeDismiss={{ onDismiss: () => notificationAlerts.dismiss(toast.notice.id) }}
 				onclick={() => notificationAlerts.open(toast)}
 				onkeydown={(event) => keydown(event, toast)}
-				onpointerenter={(event) => pause(event, toast.record.id, true)}
-				onpointerleave={(event) => pause(event, toast.record.id, false)}
-				onfocus={() => notificationAlerts.pause(toast.record.id, true)}
-				onblur={() => notificationAlerts.pause(toast.record.id, false)}
+				onpointerenter={(event) => pause(event, toast.notice.id, true)}
+				onpointerleave={(event) => pause(event, toast.notice.id, false)}
+				onfocus={() => notificationAlerts.pause(toast.notice.id, true)}
+				onblur={() => notificationAlerts.pause(toast.notice.id, false)}
 			>
-				<NotificationAvatar record={toast.record} size="sm" />
+				<NotificationAvatar notice={toast.notice} size="sm" />
 				<div class="min-w-0 flex-1">
-					<div class="truncate text-[12px] font-medium leading-5 text-text-primary">{copy.title}</div>
-					{#if copy.body}<p class="line-clamp-2 text-[12px] leading-[1.45] text-text-secondary">{copy.body}</p>{/if}
+					<div class="truncate text-[12px] font-medium leading-5 text-text-primary">{copy?.title}</div>
+					{#if copy?.body}<p class="line-clamp-2 text-[12px] leading-[1.45] text-text-secondary">{copy.body}</p>{/if}
 				</div>
-				<a class="hidden h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary sm:inline-flex" href={notificationHref(toast.record)} target="_blank" rel="noreferrer" title={m.notif_open_new_tab({}, { locale })} onclick={(event) => openNew(event, toast)}>
+				<a class="hidden h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary sm:inline-flex" href={notificationHref(toast.notice)} target="_blank" rel="noreferrer" title={m.notif_open_new_tab({}, { locale })} onclick={(event) => openNew(event, toast)}>
 					<ExternalLink class="h-3.5 w-3.5" />
 				</a>
-				<button type="button" class="h-6 w-6 shrink-0 rounded-[5px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary" title={m.notif_dismiss({}, { locale })} aria-label={m.notif_dismiss({}, { locale })} onclick={(event) => dismiss(event, toast.record.id)}>
+				<button type="button" class="h-6 w-6 shrink-0 rounded-[5px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary" title={m.notif_dismiss({}, { locale })} aria-label={m.notif_dismiss({}, { locale })} onclick={(event) => dismiss(event, toast.notice.id)}>
 					<X class="mx-auto h-3.5 w-3.5" />
 				</button>
 			</div>

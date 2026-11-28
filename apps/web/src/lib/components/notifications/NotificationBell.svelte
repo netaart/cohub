@@ -11,7 +11,6 @@ const { variant = "header" }: { variant?: "header" | "rail" } = $props();
 
 const locale = $derived(getLocale());
 const unread = $derived(inbox.summary.unread);
-const mentioned = $derived(inbox.summary.byCategory.mention > 0);
 let open = $state(false);
 let button = $state<HTMLButtonElement | null>(null);
 let panel = $state<HTMLDivElement | null>(null);
@@ -64,7 +63,7 @@ $effect(() => {
 	onclick={toggle}
 >
 	<EntityIcon name="inbox" class={variant === "rail" ? "h-4 w-4" : "h-3.5 w-3.5"} />
-	{#if mentioned}
+	{#if unread > 0}
 		<span class="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-brand ring-2 ring-[var(--sidebar-bg)]"></span>
 	{/if}
 </button>

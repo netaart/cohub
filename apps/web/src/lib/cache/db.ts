@@ -21,7 +21,7 @@ import type {
 import type { SessionListPageInfo } from "#lib/cache/types.ts";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 33;
+export const DB_VERSION = 34;
 
 export type DisplayReplayCacheRecord = {
 	key: string;
@@ -306,7 +306,7 @@ export type LibraryListCacheRecord = {
 	updatedAt: number;
 };
 
-export type NotificationCacheRecord = {
+export type InboxCacheRecord = {
 	key: string;
 	userKey: string;
 	items: unknown[];
@@ -372,7 +372,7 @@ export type StoreName =
 	| "app_domains"
 	| "space_resource_lists"
 	| "library_lists"
-	| "notification_lists"
+	| "inbox_lists"
 	| "viewer_likes"
 	| "display_replays";
 
@@ -763,6 +763,7 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				"board_legacy_pending_txs",
 				"board_documents",
 				"space_file_urls",
+				"notification_lists",
 			]) {
 				if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name);
 			}
@@ -899,7 +900,7 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
 			defineStore(db, tx, "library_lists", []);
-			defineStore(db, tx, "notification_lists", []);
+			defineStore(db, tx, "inbox_lists", []);
 			defineStore(db, tx, "viewer_likes", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);

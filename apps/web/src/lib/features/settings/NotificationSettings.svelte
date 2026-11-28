@@ -1,10 +1,10 @@
 <script lang="ts">
 import {
-	NOTIFICATION_CATEGORIES,
 	NOTIFICATION_CHANNELS,
-	type NotificationCategory,
+	NOTIFICATION_KINDS,
 	type NotificationChannel,
 	type NotificationConfig,
+	type NotificationKind,
 	type NotificationPreferences,
 } from "@neta-art/cohub";
 import { Loader2 } from "lucide-svelte";
@@ -24,7 +24,7 @@ const CONFIG_KEY = "cohub:notification-config";
 const locale = $derived(getLocale());
 const cachedPreferences = readCached<NotificationPreferences>(PREFS_KEY);
 let preferences = $state<NotificationPreferences | null>(
-	cachedPreferences?.categories ? cachedPreferences : null,
+	cachedPreferences?.kinds ? cachedPreferences : null,
 );
 let config = $state<NotificationConfig | null>(readCached(CONFIG_KEY));
 let notice = $state<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -91,22 +91,22 @@ onSettingsPageActive(() => {
 });
 
 async function change(
-	category: NotificationCategory,
+	kind: NotificationKind,
 	channel: NotificationChannel,
 	enabled: boolean,
 ) {
 	if (!preferences) return;
 	const previous = preferences;
 	preferences = {
-		categories: {
-			...previous.categories,
-			[category]: { ...previous.categories[category], [channel]: enabled },
+		kinds: {
+			...previous.kinds,
+			[kind]: { ...previous.kinds[kind], [channel]: enabled },
 		},
 	};
 	try {
 		cachePreferences(
 			await sdk.notifications.updatePreferences({
-				categories: { [category]: { [channel]: enabled } },
+				kinds: { [kind]: { [channel]: enabled } },
 			}),
 		);
 		if (channel === "push" && enabled && devicePush.mode === "off")
@@ -129,30 +129,31 @@ async function toggleDevice() {
 	}
 }
 
-function categoryLabel(category: NotificationCategory) {
-	switch (category) {
+function kindLabel(kind: NotificationKind) {
+	switch (kind) {
 		case "mention":
 			return [
-				m.notif_category_mention({}, { locale }),
-				m.notif_category_mention_hint({}, { locale }),
+				m.notif_kind_mention({}, { locale }),
+				m.notif_kind_mention_hint({}, { locale }),
 			];
-		case "activity":
+		case "turn.finished":
 			return [
-				m.notif_category_activity({}, { locale }),
-				m.notif_category_activity_hint({}, { locale }),
-			];
-		case "system":
-			return [
-				m.notif_category_system({}, { locale }),
-				m.notif_category_system_hint({}, { locale }),
+				m.notif_kind_turn_finished({}, { locale }),
+				m.notif_kind_turn_finished_hint({}, { locale }),
 			];
 	}
 }
 
-const channelLabel = (channel: NotificationChannel) =>
-	channel === "push"
-		? m.notif_channel_push({}, { locale })
-		: m.notif_channel_email({}, { locale });
+function channelLabel(channel: NotificationChannel) {
+	switch (channel) {
+		case "inbox":
+			return m.notif_channel_inbox({}, { locale });
+		case "push":
+			return m.notif_channel_push({}, { locale });
+		case "email":
+			return m.notif_channel_email({}, { locale });
+	}
+}
 
 const deviceText = $derived.by(() => {
 	switch (devicePush.mode) {
@@ -201,8 +202,8 @@ const deviceText = $derived.by(() => {
 				{#each channels as channel (channel)}
 					<span class="w-12 text-center text-[11px] text-text-tertiary">{channelLabel(channel)}</span>
 				{/each}
-				{#each NOTIFICATION_CATEGORIES as category (category)}
-					{@const [title, hint] = categoryLabel(category)}
+				{#each NOTIFICATION_KINDS as kind (kind)}
+					{@const [title, hint] = kindLabel(kind)}
 					<span class="min-w-0 py-3">
 						<span class="block text-[13px] text-text-primary">{title}</span>
 						<span class="block text-[12px] leading-5 text-text-tertiary">{hint}</span>
@@ -210,10 +211,10 @@ const deviceText = $derived.by(() => {
 					{#each channels as channel (channel)}
 						<span class="flex w-12 justify-center">
 							<ToggleSwitch
-								checked={Boolean(preferences?.categories[category][channel])}
+								checked={Boolean(preferences?.kinds[kind]?.[channel])}
 								label={`${title} · ${channelLabel(channel)}`}
 								disabled={!preferences}
-								onchange={(enabled) => void change(category, channel, enabled)}
+								onchange={(enabled) => void change(kind, channel, enabled)}
 							/>
 						</span>
 					{/each}

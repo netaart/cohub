@@ -1,6 +1,7 @@
 <script lang="ts">
-import { NOTIFICATION_UNREAD_CAP } from "@neta-art/cohub";
+import { INBOX_UNREAD_CAP } from "@neta-art/cohub";
 import { BellOff, CheckCheck, Loader2, Settings } from "lucide-svelte";
+import { untrack } from "svelte";
 import NotificationRow from "#lib/components/notifications/NotificationRow.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import {
@@ -20,9 +21,7 @@ let filter = $state<InboxFilter>("all");
 let now = $state(Date.now());
 
 const view = $derived(inbox.list.view(filter));
-const unread = $derived(
-	filter === "all" ? inbox.summary.unread : inbox.summary.byCategory[filter],
-);
+const unread = $derived(inbox.summary.unread);
 
 $effect(() => inbox.list.watch(filter));
 
@@ -32,38 +31,32 @@ $effect(() => {
 });
 
 const LOAD_MORE_THRESHOLD_PX = 240;
+let scroller = $state<HTMLElement | null>(null);
 
-function onScroll(event: Event) {
-	const element = event.currentTarget as HTMLElement;
+function loadMoreNearEnd() {
 	if (
-		element.scrollHeight - element.scrollTop - element.clientHeight <
-		LOAD_MORE_THRESHOLD_PX
+		scroller &&
+		scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <
+			LOAD_MORE_THRESHOLD_PX
 	)
 		void inbox.list.loadMore(filter);
 }
 
-function label(value: InboxFilter) {
-	switch (value) {
-		case "all":
-			return m.inbox_tab_all({}, { locale });
-		case "mention":
-			return m.inbox_tab_mention({}, { locale });
-		case "activity":
-			return m.inbox_tab_activity({}, { locale });
-		case "system":
-			return m.inbox_tab_system({}, { locale });
-	}
-}
+const rowCount = $derived(view.items.length);
+$effect(() => {
+	void rowCount;
+	untrack(loadMoreNearEnd);
+});
 
-const count = (value: InboxFilter) =>
-	value === "all" ? inbox.summary.unread : inbox.summary.byCategory[value];
+const label = (value: InboxFilter) =>
+	value === "all"
+		? m.inbox_tab_all({}, { locale })
+		: m.inbox_tab_unread({}, { locale });
 const countLabel = (value: number) =>
-	value > NOTIFICATION_UNREAD_CAP
-		? `${NOTIFICATION_UNREAD_CAP}+`
-		: String(value);
+	value > INBOX_UNREAD_CAP ? `${INBOX_UNREAD_CAP}+` : String(value);
 
 function markAllRead() {
-	void inbox.markRead(filter === "all" ? { all: true } : { category: filter });
+	void inbox.markRead({ all: true });
 }
 </script>
 
@@ -72,7 +65,7 @@ function markAllRead() {
 		<div class="flex min-w-0 flex-1 items-center gap-0.5" role="tablist" aria-label={m.inbox_title({}, { locale })}>
 			{#each INBOX_FILTERS as value (value)}
 				{@const active = value === filter}
-				{@const n = count(value)}
+				{@const n = value === "unread" ? unread : 0}
 				<button type="button" role="tab" aria-selected={active} class="flex h-7 items-center gap-1.5 rounded-[6px] px-2 text-[12px] transition-colors duration-100 {active ? 'bg-bg-active font-medium text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}" onclick={() => (filter = value)}>
 					{label(value)}
 					{#if n > 0}<span class="rounded-full bg-brand/12 px-1.5 text-[10px] leading-4 text-brand tabular-nums">{countLabel(n)}</span>{/if}
@@ -87,7 +80,7 @@ function markAllRead() {
 		</a>
 	</div>
 
-	<div class="scrollbar-quiet min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-1.5" role="tabpanel" onscroll={onScroll}>
+	<div class="scrollbar-quiet min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-1.5" role="tabpanel" bind:this={scroller} onscroll={loadMoreNearEnd}>
 		{#if view.items.length === 0 && view.loading}
 			<div class="space-y-1 p-1" aria-busy="true">
 				{#each [0, 1, 2, 3] as row (row)}
@@ -104,8 +97,8 @@ function markAllRead() {
 				{#if !view.error}<p class="mt-1 text-[12px] text-text-tertiary">{m.inbox_empty_hint({}, { locale })}</p>{/if}
 			</div>
 		{:else}
-			{#each view.items as record (record.id)}
-				<NotificationRow {record} {now} {onnavigate} />
+			{#each view.items as item (item.id)}
+				<NotificationRow {item} {now} {onnavigate} />
 			{/each}
 		{/if}
 		{#if view.loadingMore}
