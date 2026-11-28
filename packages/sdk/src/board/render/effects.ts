@@ -201,7 +201,7 @@ function gaussian(filters: FilterSystem, input: Texture, output: RenderSurface, 
 	const halvings = Math.max(0, Math.min(MAX_HALVINGS, Math.floor(Math.log2((deviation * resolution) / TEXELS_PER_DEVIATION))));
 	const borrowed: Texture[] = [];
 	const borrow = (scale: number) => {
-		const texture = TexturePool.getOptimalTexture(input.frame.width, input.frame.height, resolution * scale, false);
+		const texture = TexturePool.getOptimalTexture({ width: input.frame.width, height: input.frame.height, resolution: resolution * scale });
 		borrowed.push(texture);
 		return texture;
 	};
