@@ -43,7 +43,6 @@ class CohubApplication : Application() {
             config = AuthConfig(
                 endpoint = BuildConfig.LOGTO_ENDPOINT,
                 appId = BuildConfig.LOGTO_APP_ID,
-                redirectUri = BuildConfig.OAUTH_REDIRECT_URI,
                 apiResource = BuildConfig.LOGTO_API_RESOURCE,
             ),
             onAccountChanged = { previous, current ->

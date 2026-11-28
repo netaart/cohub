@@ -31,6 +31,8 @@ app/src/main/kotlin/live/cohub/android/
     CredentialCipher.kt      AES-256-GCM under an AndroidKeyStore key
     TokenEndpoint.kt         OIDC token exchange
     Pkce.kt                  PKCE + authorization URL
+    PendingSignIns.kt        the request in flight, surviving process death
+    SignInBrowser.kt         default browser; its Auth Tab when offered
   runtime/
     DeviceRuntime.kt         folder → Space bindings, like `runtime up` per directory
     RuntimeService.kt        foreground service running every enabled binding
@@ -97,6 +99,11 @@ or failed start is explained there (see the bridge doc's Launch section).
 single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohubGatewayOrigin`,
 `cohubLogtoEndpoint`, `cohubLogtoAppId`, …), as can `cohubVersionName`,
 `cohubVersionCode` and `cohubVersionSuffix`.
+
+Sign-in opens an Auth Tab when the default browser offers one; its result returns to the
+shell directly on `<applicationId>://auth/callback`. Otherwise its Custom Tab
+returns through the `/mobile/auth/callback` App Link. The Logto native
+app lists both redirect URIs for each environment.
 
 ## CI
 

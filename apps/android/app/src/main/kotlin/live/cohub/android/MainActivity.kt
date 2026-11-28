@@ -30,6 +30,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.browser.auth.AuthTabIntent
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.content.edit
 import androidx.core.graphics.drawable.toDrawable
@@ -50,7 +51,9 @@ import kotlinx.coroutines.sync.withLock
 import live.cohub.android.auth.Account
 import live.cohub.android.auth.AuthSession
 import live.cohub.android.auth.AuthorizationRequest
+import live.cohub.android.auth.PendingSignIns
 import live.cohub.android.auth.Pkce
+import live.cohub.android.auth.SignInBrowser
 import live.cohub.android.files.FileChooser
 import live.cohub.android.media.LocationAccess
 import live.cohub.android.media.MediaCapture
@@ -92,6 +95,7 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var mediaCapture: MediaCapture
     private lateinit var locationAccess: LocationAccess
     private lateinit var customTabs: ActivityResultLauncher<Intent>
+    private lateinit var authTab: ActivityResultLauncher<Intent>
     private lateinit var allFilesAccess: ActivityResultLauncher<Intent>
     private lateinit var screenCapture: ActivityResultLauncher<Intent>
     private var pendingCapture: CompletableDeferred<ScreenCaptureGrant?>? = null
@@ -100,6 +104,7 @@ class MainActivity : ComponentActivity(), HostActions {
     private var takenShare: IncomingShare? = null
     private val app get() = application as CohubApplication
     private val hostPrefs by lazy { getSharedPreferences("cohub-host", MODE_PRIVATE) }
+    private val signIns by lazy { PendingSignIns(getSharedPreferences("cohub-sign-in", MODE_PRIVATE)) }
     private var pendingResult: CompletableDeferred<Unit>? = null
     private val preparing = Mutex()
 
@@ -169,19 +174,6 @@ class MainActivity : ComponentActivity(), HostActions {
             download(url, contentDisposition, mimeType)
     }
 
-    /**
-     * One immutable snapshot in a single volatile field, so the redirect handler
-     * can never observe a half-updated sign-in request.
-     */
-    @Volatile
-    private var pendingSignIn: PendingSignIn? = null
-
-    private data class PendingSignIn(
-        val challenge: Pkce.Challenge,
-        val state: String,
-        val redirectPath: String?,
-    )
-
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen().setOnExitAnimationListener { splash ->
             cover.alignTo(splash.iconView)
@@ -210,6 +202,13 @@ class MainActivity : ComponentActivity(), HostActions {
         // The authorization result returns as a redirect intent, not an activity
         // result; this launcher only opens the browser.
         customTabs = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
+        authTab = AuthTabIntent.registerActivityResultLauncher(this) { result ->
+            when (result.resultCode) {
+                AuthTabIntent.RESULT_OK -> result.resultUri?.let(::handleSignInRedirect) ?: toast(R.string.sign_in_failed)
+                AuthTabIntent.RESULT_CANCELED -> signIns.clear()
+                else -> toast(R.string.sign_in_failed)
+            }
+        }
         allFilesAccess = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             pendingResult?.complete(Unit)
         }
@@ -398,21 +397,35 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     override fun startSignIn(redirectPath: String?) {
+        val browser = SignInBrowser.pick(this)
+        val authTabBrowser = browser?.takeIf { it.authTab }
         val challenge = Pkce.create()
-        val state = Pkce.createState()
-        pendingSignIn = PendingSignIn(challenge, state, redirectPath)
+        val request = signIns.begin(
+            verifier = challenge.verifier,
+            redirectUri = if (authTabBrowser != null) AUTH_TAB_REDIRECT_URI else BuildConfig.OAUTH_REDIRECT_URI,
+            redirectPath = redirectPath,
+        )
 
         val url = AuthorizationRequest.build(
             endpoint = BuildConfig.LOGTO_ENDPOINT,
             appId = BuildConfig.LOGTO_APP_ID,
-            redirectUri = BuildConfig.OAUTH_REDIRECT_URI,
+            redirectUri = request.redirectUri,
             resource = BuildConfig.LOGTO_API_RESOURCE,
             challenge = challenge,
-            state = state,
+            state = request.state,
             forceLogin = hostPrefs.getBoolean(KEY_FORCE_LOGIN, false),
         )
         try {
-            customTabs.launch(CustomTabsIntent.Builder().build().intent.apply { data = url })
+            if (authTabBrowser != null) {
+                val tab = AuthTabIntent.Builder().build()
+                tab.intent.setPackage(authTabBrowser.packageName)
+                tab.launch(authTab, url, AUTH_TAB_SCHEME)
+            } else {
+                customTabs.launch(CustomTabsIntent.Builder().build().intent.apply {
+                    data = url
+                    browser?.let { setPackage(it.packageName) }
+                })
+            }
         } catch (_: ActivityNotFoundException) {
             // Falling back to a WebView sign-in would create a session no other
             // surface can share, so failing loudly is the safer behaviour.
@@ -598,29 +611,23 @@ class MainActivity : ComponentActivity(), HostActions {
         result.await()
     }
 
-    private fun isSignInRedirect(data: Uri): Boolean =
-        data.toString().startsWith(BuildConfig.OAUTH_REDIRECT_URI)
+    private fun isSignInRedirect(data: Uri): Boolean = data.withoutQuery() == BuildConfig.OAUTH_REDIRECT_URI
+
+    private fun Uri.withoutQuery(): String = buildUpon().clearQuery().fragment(null).build().toString()
 
     private fun handleSignInRedirect(data: Uri) {
-        // Claim the pending request first so a second redirect cannot reuse it.
-        val pending = pendingSignIn
-        pendingSignIn = null
-
-        // A mismatched state is not the response to our request; refusing it
-        // prevents a code-injection attempt.
-        if (pending == null || data.getQueryParameter("state") != pending.state) {
-            toast(R.string.sign_in_failed)
-            return
-        }
-        val code = data.getQueryParameter("code") ?: run {
-            toast(R.string.sign_in_failed)
+        val pending = signIns.take(data.getQueryParameter("state"))
+            ?.takeIf { data.withoutQuery() == it.redirectUri }
+        val code = data.getQueryParameter("code")
+        if (pending == null || code == null) {
+            if (auth.account !is Account.SignedIn) toast(R.string.sign_in_failed)
             return
         }
 
         val destination = pending.redirectPath ?: "/"
         if (surface != null) WebWarmup.prefetch(destination)
         lifecycleScope.launch {
-            runCatching { auth.completeSignIn(code, pending.challenge.verifier) }
+            runCatching { auth.completeSignIn(code, pending.verifier, pending.redirectUri) }
                 .onSuccess { hostPrefs.edit { remove(KEY_FORCE_LOGIN) } }
                 .onFailure {
                     Log.w(TAG, "Sign-in failed", it)
@@ -650,6 +657,10 @@ class MainActivity : ComponentActivity(), HostActions {
         const val KEY_INSTALL_ID = "install_id"
         const val KEY_FORCE_LOGIN = "force_login"
         const val KEY_RUNTIME_CONSENT = "runtime_consent"
+
+        // An Auth Tab returns only to the app that opened it, so no other app can claim this scheme.
+        const val AUTH_TAB_SCHEME = BuildConfig.APPLICATION_ID
+        const val AUTH_TAB_REDIRECT_URI = "$AUTH_TAB_SCHEME://auth/callback"
         const val REPOSITORY = "https://github.com/netaart/cohub"
 
         const val OP_ACCESS_RESTRICTED_SETTINGS = "android:access_restricted_settings"

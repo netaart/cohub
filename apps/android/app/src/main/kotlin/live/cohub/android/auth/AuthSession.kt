@@ -63,8 +63,8 @@ class AuthSession(
         token.accessToken
     }
 
-    suspend fun completeSignIn(code: String, verifier: String): String = exchange.withLock {
-        val token = endpoint.exchange(codeFields(code, verifier))
+    suspend fun completeSignIn(code: String, verifier: String, redirectUri: String): String = exchange.withLock {
+        val token = endpoint.exchange(codeFields(code, verifier, redirectUri))
         val refreshToken = token.refreshToken
             ?: error("Authorization response carried no refresh token; is offline_access granted?")
         change(
@@ -162,11 +162,11 @@ class AuthSession(
         "client_id" to config.appId,
     )
 
-    private fun codeFields(code: String, verifier: String) = mapOf(
+    private fun codeFields(code: String, verifier: String, redirectUri: String) = mapOf(
         "grant_type" to "authorization_code",
         "code" to code,
         "code_verifier" to verifier,
-        "redirect_uri" to config.redirectUri,
+        "redirect_uri" to redirectUri,
         "client_id" to config.appId,
         "resource" to config.apiResource,
     )
@@ -191,7 +191,6 @@ sealed interface Account {
 data class AuthConfig(
     val endpoint: String,
     val appId: String,
-    val redirectUri: String,
     val apiResource: String,
 )
 

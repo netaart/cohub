@@ -31,7 +31,7 @@ class AuthSessionTest {
         }
     }
 
-    private val config = AuthConfig(endpoint = "https://auth.test/", appId = "app", redirectUri = "r", apiResource = "api")
+    private val config = AuthConfig(endpoint = "https://auth.test/", appId = "app", apiResource = "api")
     private val store = MemoryStore(StoredCredentials("rt-0", idToken = null, subject = "sub", userUuid = null))
     private val endpoint = RotatingEndpoint()
 

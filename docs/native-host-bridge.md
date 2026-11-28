@@ -200,17 +200,27 @@ instead and the page sees zero.
 Runs natively against a Logto **native** application (distinct from the web SPA
 application):
 
-- System browser (Custom Tabs / `ASWebAuthenticationSession`), never a WebView.
-- PKCE with the verifier held in memory on the device.
-- Redirect is an HTTPS App Link / Universal Link (`/mobile/auth/callback`),
-  verified via `assetlinks.json` / `apple-app-site-association` (`webcredentials`,
-  which `ASWebAuthenticationSession`'s HTTPS callback needs). A custom scheme
-  would be claimable by any app. Both files are routes of the web app.
+- System browser, never a WebView: `ASWebAuthenticationSession` on Apple, an
+  Auth Tab on Android when the default browser offers one, its Custom Tab
+  otherwise. Only the default browser is trusted with credentials.
+- PKCE. Apple keeps the verifier in memory, since the session lives in-process;
+  Android persists the request in flight (state, verifier, redirect URI) because
+  the system may kill the app while the browser is in front.
+- `ASWebAuthenticationSession` and the Auth Tab return the redirect to the app
+  that opened them, so neither depends on link routing. Apple uses the HTTPS
+  `/mobile/auth/callback` (`webcredentials` in `apple-app-site-association`); the
+  Auth Tab uses `<applicationId>://auth/callback`, a custom scheme no other app
+  can intercept there and that needs no domain verification.
+- The Custom Tab fallback returns through the `/mobile/auth/callback` App Link,
+  verified via `assetlinks.json`; both files are routes of the web app. A custom
+  scheme there would be claimable by any app.
 - `prompt=consent` with `offline_access`, as the web SDK sends, so Logto issues
   a refresh token.
-- Browsers may not hand a redirect the user did not trigger (a silent Logto
-  session) to the app. The web route then renders a no-JS "Open the app" page
-  whose link retries the same URL as a user navigation.
+- The App Link fails when its verification did (no Google services, unreachable
+  verifier) or when the browser will not hand over a redirect the user did not
+  trigger. The web route then renders a no-JS "Open the app" page; on Android its
+  link is an `intent:` URL naming the app's package, which opens it regardless of
+  verification.
 
 ## Desktop
 
